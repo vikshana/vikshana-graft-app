@@ -53,7 +53,10 @@ test.describe('Prompt Library', () => {
 
         // Delete it - target the delete button (last one)
         await card.locator('button').last().click();
-        await page.getByText('Delete', { exact: true }).click(); // Confirm modal
+        // Wait for confirm modal and click Delete button - scoped to dialog for cross-version compatibility
+        const modal = page.locator('[role="dialog"]');
+        await expect(modal).toBeVisible();
+        await modal.getByRole('button', { name: 'Delete' }).click();
 
         // Verify it's gone
         await expect(page.getByText('E2E Test Prompt')).not.toBeVisible();
