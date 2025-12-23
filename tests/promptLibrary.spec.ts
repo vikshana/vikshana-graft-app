@@ -34,14 +34,16 @@ test.describe('Prompt Library', () => {
     test('should create, pin, and delete a user prompt', async ({ page }) => {
         await page.goto('/a/vikshana-graft-app/prompts');
 
-        // Switch to My Prompts
+        // Switch to My Prompts - wait for tab content to stabilize
         await page.getByText('My Prompts').click();
 
-        // Create new prompt
-        await page.getByText('Create New Prompt').click();
+        // Wait for "Create New Prompt" button and click - use force to bypass overlay issues in older Grafana versions
+        const createButton = page.getByRole('button', { name: 'Create New Prompt' });
+        await expect(createButton).toBeVisible();
+        await createButton.click({ force: true });
         await page.getByPlaceholder('e.g., Debug K8s Pods').fill('E2E Test Prompt');
         await page.getByPlaceholder('Enter your prompt here...').fill('E2E Content');
-        await page.getByText('Save').click();
+        await page.getByRole('button', { name: 'Save' }).click({ force: true });
 
         // Verify it appears
         await expect(page.getByText('E2E Test Prompt')).toBeVisible();
@@ -49,11 +51,14 @@ test.describe('Prompt Library', () => {
         // Pin it - target the pin button inside the user prompt card
         const card = page.getByTestId('user-prompt-card').filter({ hasText: 'E2E Test Prompt' });
         // The first button in card actions is pin
-        await card.locator('button').first().click();
+        await card.locator('button').first().click({ force: true });
 
         // Delete it - target the delete button (last one)
-        await card.locator('button').last().click();
-        await page.getByText('Delete', { exact: true }).click(); // Confirm modal
+        await card.locator('button').last().click({ force: true });
+        // Wait for confirm modal and click Delete button - scoped to dialog for cross-version compatibility
+        const modal = page.locator('[role="dialog"]');
+        await expect(modal).toBeVisible();
+        await modal.getByRole('button', { name: 'Delete' }).click({ force: true });
 
         // Verify it's gone
         await expect(page.getByText('E2E Test Prompt')).not.toBeVisible();
