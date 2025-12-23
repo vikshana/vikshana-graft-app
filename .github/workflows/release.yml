@@ -1,11 +1,10 @@
-# This GitHub Action automates the process of building Grafana plugins.
-# (For more information, see https://github.com/grafana/plugin-actions/blob/main/build-plugin/README.md)
+# Custom release workflow with Go 1.24 support
 name: Release
 
 on:
   push:
     tags:
-      - 'v*' # Run workflow on version tags, e.g. v1.0.0.
+      - 'v*'
 
 permissions: read-all
 
@@ -16,10 +15,49 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
 
-      - uses: grafana/plugin-actions/build-plugin@build-plugin/v1.0.2
-        # Uncomment to enable plugin signing after Grafana approval
-        # with:
-        #   policy_token: ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Install Mage
+        run: go install github.com/magefile/mage@latest
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Build backend
+        run: mage -v
+
+      # Uncomment to enable plugin signing after Grafana approval
+      # - name: Sign plugin
+      #   run: npx @grafana/sign-plugin@latest
+      #   env:
+      #     GRAFANA_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
+
+      - name: Get plugin metadata
+        id: metadata
+        run: |
+          echo "plugin-id=$(cat dist/plugin.json | jq -r '.id')" >> $GITHUB_OUTPUT
+          echo "archive=$(cat dist/plugin.json | jq -r '.id')-${{ github.ref_name }}.zip" >> $GITHUB_OUTPUT
+
+      - name: Package plugin
+        run: |
+          mv dist ${{ steps.metadata.outputs.plugin-id }}
+          zip -r ${{ steps.metadata.outputs.archive }} ${{ steps.metadata.outputs.plugin-id }}
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.metadata.outputs.archive }}
+          generate_release_notes: true
