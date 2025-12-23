@@ -42,6 +42,8 @@ ci/
 
 # Editor
 .idea
+.vscode
+.claude
 
 .eslintcache
 
@@ -50,3 +52,6 @@ ci/
 
 # Tests
 **/test_output*.txt
+
+# Temporary files
+.temp/
