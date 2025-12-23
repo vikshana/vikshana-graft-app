@@ -20,6 +20,20 @@
       "name": "Vikshana",
       "url": "https://github.com/vikshana"
     },
+    "links": [
+      {
+        "name": "repository",
+        "url": "https://github.com/vikshana/vikshana-graft-app"
+      },
+      {
+        "name": "license",
+        "url": "https://github.com/vikshana/vikshana-graft-app/blob/main/LICENSE"
+      },
+      {
+        "name": "raise issue",
+        "url": "https://github.com/vikshana/vikshana-graft-app/issues/new/choose"
+      }
+    ],
     "logos": {
       "small": "img/logo.svg",
       "large": "img/logo.svg"
