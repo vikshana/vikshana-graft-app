@@ -1,0 +1,36 @@
+// Grafana Alloy configuration for collecting Docker logs and sending via OTLP
+
+// Discover all Docker containers
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+  refresh_interval = "5s"
+}
+
+// Collect logs from discovered containers  
+loki.source.docker "docker_logs" {
+  host = "unix:///var/run/docker.sock"
+  targets = discovery.docker.containers.targets
+  forward_to = [loki.process.add_labels.receiver]
+}
+
+// Process and add labels to logs
+loki.process "add_labels" {
+  forward_to = [loki.write.loki_endpoint.receiver]
+
+  stage.docker {}
+  
+  stage.labels {
+    values = {
+      container = "",
+      image = "",
+      stream = "",
+    }
+  }
+}
+
+// Write logs to Loki in otel-lgtm container
+loki.write "loki_endpoint" {
+  endpoint {
+    url = "http://otel-lgtm:3100/loki/api/v1/push"
+  }
+}

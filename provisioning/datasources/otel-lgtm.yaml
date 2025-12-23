@@ -1,0 +1,61 @@
+apiVersion: 1
+
+datasources:
+  # Prometheus data source - metrics from otel-lgtm
+  - name: Prometheus (OTEL-LGTM)
+    type: prometheus
+    access: proxy
+    url: http://otel-lgtm:9090
+    uid: prometheus-otel-lgtm
+    isDefault: false
+    editable: true
+    jsonData:
+      httpMethod: POST
+      timeInterval: 15s
+
+  # Loki data source - logs from otel-lgtm
+  - name: Loki (OTEL-LGTM)
+    type: loki
+    access: proxy
+    url: http://otel-lgtm:3100
+    uid: loki-otel-lgtm
+    isDefault: false
+    editable: true
+    jsonData:
+      maxLines: 1000
+
+  # Tempo data source - traces from otel-lgtm
+  - name: Tempo (OTEL-LGTM)
+    type: tempo
+    access: proxy
+    url: http://otel-lgtm:3200
+    uid: tempo-otel-lgtm
+    isDefault: false
+    editable: true
+    jsonData:
+      httpMethod: GET
+      tracesToLogsV2:
+        # Enable trace to logs correlation
+        datasourceUid: loki-otel-lgtm
+        tags: ['job', 'instance', 'pod', 'namespace']
+        mappedTags: [{ key: 'service.name', value: 'service' }]
+        mapTagNamesEnabled: false
+        spanStartTimeShift: '-1h'
+        spanEndTimeShift: '1h'
+        filterByTraceID: true
+        filterBySpanID: false
+      tracesToMetrics:
+        # Enable trace to metrics correlation
+        datasourceUid: prometheus-otel-lgtm
+        tags: [{ key: 'service.name', value: 'service' }, { key: 'job' }]
+        queries:
+          - name: 'Sample query'
+            query: 'sum(rate(tempo_spanmetrics_latency_bucket{$__tags}[5m]))'
+      serviceMap:
+        datasourceUid: prometheus-otel-lgtm
+      search:
+        hide: false
+      nodeGraph:
+        enabled: true
+      lokiSearch:
+        datasourceUid: loki-otel-lgtm

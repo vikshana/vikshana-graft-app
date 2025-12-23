@@ -1,0 +1,101 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "app",
+  "name": "Graft AI Assistant",
+  "id": "vikshana-graft-app",
+  "backend": true,
+  "executable": "gpx_graft",
+  "info": {
+    "keywords": [
+      "app",
+      "AI",
+      "assistant",
+      "LLM",
+      "chat",
+      "observability",
+      "MCP"
+    ],
+    "description": "An AI-powered assistant that helps you query and understand your Grafana dashboards using natural language. Connects to LLM providers like OpenAI and Ollama with MCP tool integration for enhanced observability workflows.",
+    "author": {
+      "name": "Vikshana",
+      "url": "https://github.com/vikshana"
+    },
+    "logos": {
+      "small": "img/logo.svg",
+      "large": "img/logo.svg"
+    },
+    "screenshots": [
+      {
+        "name": "Landing Page",
+        "path": "img/landing_page.png"
+      },
+      {
+        "name": "Landing with Text & Image Attachments",
+        "path": "img/landing_page_attachments.png"
+      },
+      {
+        "name": "Prompt Library",
+        "path": "img/prompt_library.png"
+      },
+      {
+        "name": "Create User Prompt",
+        "path": "img/prompt_library_create_user_prompt.png"
+      },
+      {
+        "name": "User Prompts",
+        "path": "img/prompt_library_user_prompts.png"
+      },
+      {
+        "name": "Previous Conversations",
+        "path": "img/previous_conversations.png"
+      },
+      {
+        "name": "Chat Tool Call",
+        "path": "img/chat_tool_call.png"
+      },
+      {
+        "name": "Chat Mermaid Charts Rendering",
+        "path": "img/chat_mermaid_charts_rendering.png"
+      },
+      {
+        "name": "Chat Syntax Hightligting",
+        "path": "img/chat_syntax_hightligting.png"
+      },
+      {
+        "name": "Chat with Image Attachment",
+        "path": "img/chat_image_attachment.png"
+      },
+      {
+        "name": "Chat with Text File Attachment",
+        "path": "img/chat_txt_file_attachment.png"
+      },
+      {
+        "name": "Chat Text File Attachment Preview",
+        "path": "img/chat_txt_file_attachment_preview.png"
+      }
+    ],
+    "version": "%VERSION%",
+    "updated": "%TODAY%"
+  },
+  "includes": [
+    {
+      "type": "page",
+      "name": "Graft AI Assistant",
+      "path": "/a/vikshana-graft-app",
+      "role": "Admin",
+      "addToNav": true,
+      "defaultNav": true
+    }
+  ],
+  "dependencies": {
+    "grafanaDependency": ">=10.4.0",
+    "plugins": [
+      {
+        "type": "app",
+        "id": "grafana-llm-app",
+        "name": "Grafana LLM",
+        "version": "1.0.0"
+      }
+    ]
+  }
+}
