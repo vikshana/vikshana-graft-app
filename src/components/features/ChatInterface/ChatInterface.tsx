@@ -58,25 +58,70 @@ const normalizeMarkdown = (content: string): string => {
 };
 
 const formatContext = (dashboard: DashboardContext, user: UserContext, dataSources: DataSourceContext[]): string => {
-  let contextStr = '';
+  const lines: string[] = [];
 
-  if (user && user.login) {
-    contextStr += `User: \n-Name: ${user.name || 'Unknown'} \n-Email: ${user.email || 'Unknown'} \n-Role: ${user.orgRole || 'Unknown'} \n\n`;
+  // Role + scope (critical instructions near top)
+  lines.push(
+    `You are Graft, an AI assistant embedded in Grafana. ` +
+    `You help users query metrics and logs, build and edit dashboards, and understand their observability data. ` +
+    `If a request is unrelated to Grafana, metrics, logs, or dashboards, politely decline.`
+  );
+  lines.push('');
+
+  // Behavioural instructions (positive framing, near top for primacy)
+  lines.push(
+    `When using tools: call the next tool immediately when you have enough information — ` +
+    `do not narrate your next step in text. Only respond with text when the task is fully ` +
+    `complete or you need clarification from the user. ` +
+    `If a tool returns an error or empty result, explain what failed and why before stopping.`
+  );
+  lines.push('');
+
+  // Output format
+  lines.push(
+    `Output format: use markdown. Wrap PromQL in \`\`\`promql blocks, LogQL in \`\`\`logql blocks, ` +
+    `and dashboard JSON in \`\`\`json blocks. Keep explanations concise.`
+  );
+  lines.push('');
+
+  // Dynamic runtime context
+  lines.push(`Current time: ${new Date().toISOString()}`);
+
+  if (user?.login) {
+    lines.push(`User: ${user.name || user.login} | Role: ${user.orgRole}`);
   }
 
   if (dashboard.uid) {
-    contextStr += `Current Dashboard: \n-Title: ${dashboard.title} \n-UID: ${dashboard.uid} \n\n`;
+    lines.push(`Active dashboard: "${dashboard.title}" (uid: ${dashboard.uid})`);
   }
 
-  if (dataSources && dataSources.length > 0) {
-    contextStr += `Available Data Sources: \n`;
+  // Datasource-to-tool mapping
+  if (dataSources?.length > 0) {
+    lines.push('');
+    lines.push('Available datasources:');
     dataSources.forEach(ds => {
-      contextStr += `-${ds.name} (Type: ${ds.type}, UID: ${ds.uid}) \n`;
+      let toolHint = '';
+      if (ds.type === 'prometheus') { toolHint = ' → query_prometheus, list_prometheus_*'; }
+      else if (ds.type === 'loki')  { toolHint = ' → query_loki_logs, list_loki_*'; }
+      lines.push(`- ${ds.name} (${ds.type}, uid: ${ds.uid})${toolHint}`);
     });
-    contextStr += '\n';
   }
 
-  return contextStr;
+  // Query guidance
+  lines.push('');
+  lines.push('Query guidance:');
+  lines.push('- Prometheus: PromQL. Call list_prometheus_metric_names before querying unknown metrics.');
+  lines.push('- Loki: LogQL. Call list_loki_label_names/values to discover labels before querying.');
+  lines.push('- Time ranges: use Grafana relative format ("now-1h" / "now"). Default to last 1 hour unless the user specifies otherwise.');
+
+  // Dashboard editing safety
+  lines.push('');
+  lines.push(
+    `Dashboard editing: always call get_dashboard_by_uid first to fetch the current JSON before modifying it. ` +
+    `If the user did not explicitly provide a dashboard UID, confirm which dashboard to edit before calling update_dashboard.`
+  );
+
+  return lines.join('\n');
 };
 
 
