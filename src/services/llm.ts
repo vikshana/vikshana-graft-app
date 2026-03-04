@@ -101,7 +101,7 @@ export const llmService = {
                 }
 
                 // Agent loop for tool calls with max iterations to prevent infinite loops
-                const MAX_ITERATIONS = 5;
+                const MAX_ITERATIONS = 10;
                 let iteration = 0;
 
                 while (toolCalls && toolCalls.length > 0 && iteration < MAX_ITERATIONS) {
