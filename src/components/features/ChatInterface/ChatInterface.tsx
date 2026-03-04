@@ -20,6 +20,8 @@ import { llmService } from '../../../services/llm';
 import type { Message, ToolExecution } from '../../../types/llm.types';
 import { contextService, UserContext, DataSourceContext, DashboardContext } from '../../../services/context';
 import { chatHistoryService } from '../../../services/chatHistory';
+import { truncateMessages } from '../../../services/truncation';
+import { filterTools } from '../../../services/toolFilter';
 
 // Local hooks
 import { useRollingPlaceholder, usePluginSettings, useAutoScroll } from './hooks';
@@ -164,7 +166,7 @@ export const ChatInterface = () => {
   useEffect(() => {
     if (mcpEnabled && mcpClient) {
       mcpClient.listTools().then((response) => {
-        const tools = mcp.convertToolsToOpenAI(response.tools);
+        const tools = filterTools(mcp.convertToolsToOpenAI(response.tools));
         setMcpTools(tools);
       }).catch(() => {
         // MCP tools loading failed - continue without tools
@@ -410,7 +412,9 @@ export const ChatInterface = () => {
       let finalContent = '';
       let finalToolExecutions: ToolExecution[] = [];
 
-      await llmService.chat(newMessages, context, (fullContent, toolExecutions) => {
+      const truncatedMessages = truncateMessages(newMessages, 10);
+
+      await llmService.chat(truncatedMessages, context, (fullContent, toolExecutions) => {
         // Capture the latest values for saving after completion
         finalContent = fullContent;
         finalToolExecutions = toolExecutions || [];
