@@ -114,11 +114,21 @@ const formatContext = (dashboard: DashboardContext, user: UserContext, dataSourc
   lines.push('- Loki: LogQL. Call list_loki_label_names/values to discover labels before querying.');
   lines.push('- Time ranges: use Grafana relative format ("now-1h" / "now"). Default to last 1 hour unless the user specifies otherwise.');
 
-  // Dashboard editing safety
+  // Dashboard editing
   lines.push('');
+  lines.push('Dashboard editing:');
   lines.push(
-    `Dashboard editing: always call get_dashboard_by_uid first to fetch the current JSON before modifying it. ` +
-    `If the user did not explicitly provide a dashboard UID, confirm which dashboard to edit before calling update_dashboard.`
+    `- To modify an existing dashboard: call get_dashboard_by_uid first, then call update_dashboard with the modified JSON.`
+  );
+  lines.push(
+    `- To create a new dashboard: build it incrementally. ` +
+    `First, call update_dashboard with a minimal dashboard JSON (title, uid: "", id: null, empty panels array). ` +
+    `Then, call get_dashboard_by_uid to get the created dashboard with its assigned UID. ` +
+    `Then add panels one at a time — each time, fetch the latest JSON, append one panel, and call update_dashboard. ` +
+    `This keeps each call small and reliable.`
+  );
+  lines.push(
+    `- Only confirm the dashboard UID with the user if they reference an existing dashboard by name and you cannot determine its UID from context.`
   );
 
   return lines.join('\n');

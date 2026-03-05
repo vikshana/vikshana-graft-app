@@ -6,6 +6,20 @@ import type { Message, ToolExecution } from '../types/llm.types';
 // Re-export types for backward compatibility
 export type { ToolExecution };
 
+// Cap tool result size to prevent context overflow.
+// ~4000 chars ≈ 1000 tokens — enough for the model to reason about results
+// while leaving room for dashboard JSON generation.
+const MAX_TOOL_RESULT_CHARS = 4000;
+
+function truncateToolResult(content: string): string {
+    if (content.length <= MAX_TOOL_RESULT_CHARS) {
+        return content;
+    }
+    const truncated = content.slice(0, MAX_TOOL_RESULT_CHARS);
+    const omittedChars = content.length - MAX_TOOL_RESULT_CHARS;
+    return `${truncated}\n...[truncated — ${omittedChars} characters omitted. Ask the user to narrow the query if more detail is needed.]`;
+}
+
 export const llmService = {
     async chat(
         messages: Message[],
@@ -16,8 +30,13 @@ export const llmService = {
         mcpClient?: any,
         tools?: any[]
     ): Promise<string> {
+        // Filter out assistant messages with no content and no tool_calls (e.g. placeholder messages)
+        const validMessages = messages.filter(m =>
+            !(m.role === 'assistant' && !m.content && !m.tool_calls?.length)
+        );
+
         // Map internal messages to llm.Message
-        const llmMessages: llm.Message[] = messages.map(m => {
+        const llmMessages: llm.Message[] = validMessages.map(m => {
             const msg: any = {
                 role: m.role,
             };
@@ -119,64 +138,64 @@ export const llmService = {
                         tool_calls: toolCalls,
                     });
 
-                    // Execute tools
-                    for (const toolCall of toolCalls) {
-                        // Check abort signal before each tool
-                        if (signal?.aborted) {
-                            throw new Error('Aborted');
-                        }
-
-                        // Add pending tool execution
-                        toolExecutions.push({
-                            name: toolCall.function.name,
-                            status: 'pending'
-                        });
-                        onUpdate(fullContent, toolExecutions);
-
-                        try {
-                            if (!mcpClient) {
-                                throw new Error('MCP Client not available');
+                        // Execute tools
+                        for (const toolCall of toolCalls) {
+                            // Check abort signal before each tool
+                            if (signal?.aborted) {
+                                throw new Error('Aborted');
                             }
 
-                            const args = JSON.parse(toolCall.function.arguments);
-                            const result = await mcpClient.callTool({
+                            // Add pending tool execution
+                            toolExecutions.push({
                                 name: toolCall.function.name,
-                                arguments: args,
+                                status: 'pending'
                             });
-
-                            llmMessages.push({
-                                role: 'tool',
-                                content: JSON.stringify(result.content),
-                                tool_call_id: toolCall.id,
-                            });
-
-                            // Update tool execution to success
-                            const toolExecIndex = toolExecutions.findIndex(
-                                t => t.name === toolCall.function.name && t.status === 'pending'
-                            );
-                            if (toolExecIndex !== -1) {
-                                toolExecutions[toolExecIndex].status = 'success';
-                            }
                             onUpdate(fullContent, toolExecutions);
-                        } catch (error: any) {
-                            console.error(`[Graft] Tool execution failed: ${error.message}`);
-                            llmMessages.push({
-                                role: 'tool',
-                                content: `Error executing ${toolCall.function.name}: ${error.message}`,
-                                tool_call_id: toolCall.id,
-                            });
 
-                            // Update tool execution to error
-                            const toolExecIndex = toolExecutions.findIndex(
-                                t => t.name === toolCall.function.name && t.status === 'pending'
-                            );
-                            if (toolExecIndex !== -1) {
-                                toolExecutions[toolExecIndex].status = 'error';
-                                toolExecutions[toolExecIndex].error = error.message;
+                            try {
+                                if (!mcpClient) {
+                                    throw new Error('MCP Client not available');
+                                }
+
+                                const args = JSON.parse(toolCall.function.arguments);
+                                const result = await mcpClient.callTool({
+                                    name: toolCall.function.name,
+                                    arguments: args,
+                                });
+
+                                llmMessages.push({
+                                    role: 'tool',
+                                    content: truncateToolResult(JSON.stringify(result.content)),
+                                    tool_call_id: toolCall.id,
+                                });
+
+                                // Update tool execution to success
+                                const toolExecIndex = toolExecutions.findIndex(
+                                    t => t.name === toolCall.function.name && t.status === 'pending'
+                                );
+                                if (toolExecIndex !== -1) {
+                                    toolExecutions[toolExecIndex].status = 'success';
+                                }
+                                onUpdate(fullContent, toolExecutions);
+                            } catch (error: any) {
+                                console.error(`[Graft] Tool execution failed: ${error.message}`);
+                                llmMessages.push({
+                                    role: 'tool',
+                                    content: `Error executing ${toolCall.function.name}: ${error.message}`,
+                                    tool_call_id: toolCall.id,
+                                });
+
+                                // Update tool execution to error
+                                const toolExecIndex = toolExecutions.findIndex(
+                                    t => t.name === toolCall.function.name && t.status === 'pending'
+                                );
+                                if (toolExecIndex !== -1) {
+                                    toolExecutions[toolExecIndex].status = 'error';
+                                    toolExecutions[toolExecIndex].error = error.message;
+                                }
+                                onUpdate(fullContent, toolExecutions);
                             }
-                            onUpdate(fullContent, toolExecutions);
                         }
-                    }
 
                     // Check abort signal before next LLM call
                     if (signal?.aborted) {
