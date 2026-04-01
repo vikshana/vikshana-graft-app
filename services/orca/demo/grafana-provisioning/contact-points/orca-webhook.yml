@@ -1,0 +1,25 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: orca-webhook
+    receivers:
+      - uid: orca-webhook-receiver
+        type: webhook
+        settings:
+          url: http://orca-backend:8000/webhook/grafana
+          httpMethod: POST
+          title: |
+            {{ template "default.title" . }}
+          message: |
+            {{ template "default.message" . }}
+        disableResolveMessage: false
+
+policies:
+  - orgId: 1
+    receiver: orca-webhook
+    group_by: ["alertname", "service_name"]
+    group_wait: 10s
+    group_interval: 30s
+    repeat_interval: 5m   # re-notify every 5 minutes for ongoing alerts
+

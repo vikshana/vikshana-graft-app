@@ -99,6 +99,22 @@
       "role": "Admin",
       "addToNav": true,
       "defaultNav": true
+    },
+    {
+      "type": "page",
+      "name": "Root Cause Analysis",
+      "path": "/a/vikshana-graft-app/rca",
+      "role": "Admin",
+      "addToNav": true,
+      "icon": "heart-break"
+    },
+    {
+      "type": "page",
+      "name": "RCA History",
+      "path": "/a/vikshana-graft-app/rca/runs",
+      "role": "Admin",
+      "addToNav": true,
+      "icon": "list-ul"
     }
   ],
   "dependencies": {

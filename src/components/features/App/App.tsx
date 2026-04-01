@@ -19,6 +19,9 @@ import { ErrorBoundary } from '../../ErrorBoundary';
 const ChatInterface = lazy(() => import('../ChatInterface/ChatInterface').then(m => ({ default: m.ChatInterface })));
 const ChatHistory = lazy(() => import('../../../pages/ChatHistory').then(m => ({ default: m.ChatHistory })));
 const PromptLibrary = lazy(() => import('../../../pages/PromptLibrary').then(m => ({ default: m.PromptLibrary })));
+const RCADashboard = lazy(() => import('../../../pages/RCADashboard').then(m => ({ default: m.RCADashboard })));
+const RCAList = lazy(() => import('../../../pages/RCAList').then(m => ({ default: m.RCAList })));
+const RCAInvestigate = lazy(() => import('../../../pages/RCAInvestigate').then(m => ({ default: m.RCAInvestigate })));
 
 
 export default function App(props: AppRootProps) {
@@ -48,6 +51,11 @@ export default function App(props: AppRootProps) {
 
             {/* Prompt Library Page */}
             <Route path="/prompts" element={<PromptLibrary />} />
+
+            {/* RCA Pages */}
+            <Route path="/rca" element={<RCADashboard />} />
+            <Route path="/rca/runs" element={<RCAList />} />
+            <Route path="/rca/investigate/:threadId" element={<RCAInvestigate />} />
 
             {/* Fallback */}
             <Route path="*" element={<ChatInterface />} />

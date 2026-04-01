@@ -1,0 +1,76 @@
+# Orca Stack — core services for development and production.
+#
+# Usage (standalone):
+#   docker compose up -d
+#
+# Usage (with OTel demo):
+#   make up          # uses Makefile at repo root
+#
+# All service names are prefixed with "orca-" to avoid conflicts
+# when composed alongside third-party demo services.
+
+services:
+  orca-postgres:
+    image: postgres:16-alpine
+    container_name: orca-postgres
+    environment:
+      POSTGRES_USER: orca
+      POSTGRES_PASSWORD: orca
+      POSTGRES_DB: orca
+    ports:
+      - "5432:5432"
+    volumes:
+      - orca_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orca -d orca"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  orca-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: orca-backend
+    depends_on:
+      orca-postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://orca:orca@orca-postgres:5432/orca
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      GRAFANA_URL: ${GRAFANA_URL:-http://localhost:3001}
+      GRAFANA_API_KEY: ${GRAFANA_API_KEY:-}
+      LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
+      LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
+      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-orca-dev}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      ORCA_MAX_INVESTIGATION_STEPS: ${ORCA_MAX_INVESTIGATION_STEPS:-15}
+      ORCA_MAX_INVESTIGATION_TOKENS: ${ORCA_MAX_INVESTIGATION_TOKENS:-100000}
+      ORCA_AGENT_TIMEOUT_SECONDS: ${ORCA_AGENT_TIMEOUT_SECONDS:-300}
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  orca-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: orca-frontend
+    depends_on:
+      orca-backend:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      BACKEND_URL: http://orca-backend:8000
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+volumes:
+  orca_postgres_data:
