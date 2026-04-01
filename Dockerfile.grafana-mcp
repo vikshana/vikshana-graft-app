@@ -1,0 +1,55 @@
+# Dockerfile for the Grafana MCP sidecar.
+#
+# Downloads the official mcp-grafana binary from GitHub releases and runs it
+# as a persistent SSE HTTP server.  This avoids the need for npx or Go tooling
+# in the main orca-backend container.
+#
+# Transport: SSE — exposes /sse on port 8000 inside the container.
+#
+# Tool scope is restricted at the server level via -enabled-tools so that the
+# agent can only call the read-only datasource/metrics/logs/alerting tools it
+# actually needs.  No write, admin, rendering, or oncall tools are available.
+#
+# Usage (via docker-compose):
+#   docker compose build grafana-mcp
+#   docker compose up grafana-mcp
+
+FROM debian:bookworm-slim
+
+ARG TARGETARCH=amd64
+ARG MCP_GRAFANA_VERSION=0.11.3
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Map Docker TARGETARCH values to the naming used in GitHub release tarballs
+RUN set -ex; \
+    case "${TARGETARCH}" in \
+        amd64) ARCH=x86_64 ;; \
+        arm64) ARCH=arm64  ;; \
+        *)     echo "Unsupported TARGETARCH: ${TARGETARCH}" && exit 1 ;; \
+    esac; \
+    curl -fsSL \
+        "https://github.com/grafana/mcp-grafana/releases/download/v${MCP_GRAFANA_VERSION}/mcp-grafana_Linux_${ARCH}.tar.gz" \
+        | tar xz -C /usr/local/bin mcp-grafana; \
+    chmod +x /usr/local/bin/mcp-grafana
+
+COPY ./grafana-mcp-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Document the exposed port
+EXPOSE 8000
+
+ENTRYPOINT ["/entrypoint.sh"]
+
+# Default flags — overridable in docker-compose command:
+#   -transport sse          SSE HTTP transport
+#   -address 0.0.0.0:8000   Listen on all interfaces (required inside Docker)
+#   -enabled-tools ...      Allowlist — only the tools Orca actually uses
+CMD [ \
+    "-transport", "sse", \
+    "-address", "0.0.0.0:8000", \
+    "-enabled-tools", "search,datasource,prometheus,loki,alerting,dashboard" \
+]
+

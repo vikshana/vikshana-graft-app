@@ -55,3 +55,8 @@ ci/
 
 # Temporary files
 .temp/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
