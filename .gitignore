@@ -61,3 +61,8 @@ services/
 /output/*.jpeg
 /output/*.png
 /output/*.webp
+
+# Environment variables
+.env
+.env.local
+.env.*.local

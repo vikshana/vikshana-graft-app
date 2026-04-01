@@ -36,7 +36,10 @@ services:
   # Uses a single admin token; per-request org isolation is enforced by ORCA
   # injecting X-Grafana-Org-Id on every tool call.
   mcp-grafana:
-    image: ghcr.io/grafana/mcp-server-grafana:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.grafana-mcp
+    container_name: mcp-grafana
     restart: unless-stopped
     command: ["--transport", "sse", "--port", "3001"]
     environment:

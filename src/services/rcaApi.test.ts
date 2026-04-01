@@ -82,6 +82,7 @@ describe('listRCAs', () => {
     const result = await listRCAs();
     // @ts-ignore — we returned a mock object
     expect(result._url).toContain('/rca?');
+    // @ts-ignore — we returned a mock object
     expect(result._method).toBe('GET');
   });
 
