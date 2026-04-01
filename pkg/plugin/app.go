@@ -7,6 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -15,6 +19,11 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 )
+
+// orgIDKey is the context key used to pass the Grafana org ID through the
+// request lifecycle.  Using an unexported type avoids collisions with other
+// context values.
+type orgIDKey struct{}
 
 // Make sure App implements required interfaces.
 var (
@@ -25,16 +34,18 @@ var (
 
 // App is the Graft plugin instance.
 // Model configuration has been moved to Grafana LLM plugin.
-// This plugin only handles prompt library configuration.
+// This plugin only handles prompt library configuration and RCA proxying.
 type App struct {
 	backend.CallResourceHandler
 	tracer trace.Tracer
-	// Metrics
+	// Chat metrics
 	chatRequestsTotal    metric.Int64Counter
 	chatRequestErrors    metric.Int64Counter
 	chatDuration         metric.Float64Histogram
 	llmTokensGenerated   metric.Int64Histogram
 	llmFirstTokenLatency metric.Float64Histogram
+	// RCA proxy metrics
+	rcaRequestErrors metric.Int64Counter
 }
 
 // NewApp creates a new *App instance.
@@ -100,7 +111,24 @@ func NewApp(_ context.Context, settings backend.AppInstanceSettings) (instancemg
 		return nil, err
 	}
 
+	app.rcaRequestErrors, err = meter.Int64Counter(
+		"graft.rca.requests.errors",
+		metric.WithDescription("Total number of failed RCA proxy requests"),
+		metric.WithUnit("{error}"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	return &app, nil
+}
+
+// getEnv returns the value of an environment variable or a default.
+func getEnv(key, defaultVal string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return defaultVal
 }
 
 func (a *App) registerRoutes(mux *http.ServeMux) {
@@ -110,6 +138,36 @@ func (a *App) registerRoutes(mux *http.ServeMux) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"message": "ok"}`))
 	})
+
+	// RCA reverse proxy — forwards /rca/* to the ORCA FastAPI backend.
+	// FlushInterval: -1 is required for Server-Sent Events passthrough;
+	// it disables response buffering so SSE chunks reach the client immediately.
+	rcaBackendURL := getEnv("RCA_BACKEND_URL", "http://orca-backend:8000")
+	rcaTarget, err := url.Parse(rcaBackendURL)
+	if err != nil {
+		backend.Logger.Error("Failed to parse RCA_BACKEND_URL", "url", rcaBackendURL, "err", err)
+		return
+	}
+
+	rcaProxy := &httputil.ReverseProxy{
+		FlushInterval: -1, // required for SSE passthrough
+		Director: func(req *http.Request) {
+			req.URL.Scheme = rcaTarget.Scheme
+			req.URL.Host = rcaTarget.Host
+			// Inject the Grafana org ID that was threaded through context by the SDK.
+			// This comes from PluginContext.OrgID, which the client cannot spoof.
+			if orgID, ok := req.Context().Value(orgIDKey{}).(int64); ok {
+				req.Header.Set("X-Grafana-Org-Id", strconv.FormatInt(orgID, 10))
+			}
+		},
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			backend.Logger.Error("RCA proxy error", "err", err)
+			a.rcaRequestErrors.Add(r.Context(), 1)
+			http.Error(w, "RCA backend unavailable", http.StatusBadGateway)
+		},
+	}
+
+	mux.Handle("/rca/", http.StripPrefix("/rca", rcaProxy))
 }
 
 func (a *App) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -233,6 +291,15 @@ func (a *App) handleTools(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(out)
+}
+
+// CallResource intercepts SDK call-resource requests to thread the Grafana org ID
+// into the http.Request context before the mux routes it.  This ensures the RCA
+// proxy Director can read the org ID (from PluginContext, not from the URL/body,
+// so it cannot be spoofed by the browser client).
+func (a *App) CallResource(ctx context.Context, req *backend.CallResourceRequest, sender backend.CallResourceResponseSender) error {
+	ctx = context.WithValue(ctx, orgIDKey{}, req.PluginContext.OrgID)
+	return a.CallResourceHandler.CallResource(ctx, req, sender)
 }
 
 // CheckHealth handles health checks sent from Grafana to the plugin.

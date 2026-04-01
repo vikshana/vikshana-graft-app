@@ -7,4 +7,8 @@ export enum ROUTES {
   Two = 'two',
   Three = 'three',
   Four = 'four',
+  // RCA routes
+  Rca = 'rca',
+  RcaRuns = 'rca/runs',
+  RcaInvestigate = 'rca/investigate',
 }

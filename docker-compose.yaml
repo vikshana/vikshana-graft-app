@@ -3,12 +3,89 @@ services:
     extends:
       file: .config/docker-compose-base.yaml
       service: grafana
+
   otel-lgtm:
     extends:
       file: .config/docker-compose-base.yaml
       service: otel-lgtm
+
   alloy:
     extends:
       file: .config/docker-compose-base.yaml
       service: alloy
 
+  # ---------------------------------------------------------------------------
+  # ORCA — Root Cause Analysis backend
+  # ---------------------------------------------------------------------------
+  orca-postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: orca
+      POSTGRES_USER: orca
+      POSTGRES_PASSWORD: ${ORCA_DB_PASSWORD:-orca}
+    volumes:
+      - orca-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orca -d orca"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # mcp-grafana: Grafana MCP server in HTTP/SSE mode.
+  # Uses a single admin token; per-request org isolation is enforced by ORCA
+  # injecting X-Grafana-Org-Id on every tool call.
+  mcp-grafana:
+    image: ghcr.io/grafana/mcp-server-grafana:latest
+    restart: unless-stopped
+    command: ["--transport", "sse", "--port", "3001"]
+    environment:
+      GRAFANA_URL: http://grafana:3000
+      GRAFANA_SERVICE_ACCOUNT_TOKEN: ${GRAFANA_ADMIN_TOKEN}
+    depends_on:
+      grafana:
+        condition: service_started
+
+  # mcp-postgres: Postgres MCP server wrapped as HTTP/SSE via supergateway.
+  # Gives the LangGraph agent read access to ORCA's own DB for historical context.
+  # Long-term this will be replaced by direct pgvector queries in Phase 2.
+  mcp-postgres:
+    image: node:20-alpine
+    restart: unless-stopped
+    command: >
+      sh -c "npx -y supergateway
+        --stdio 'npx -y @modelcontextprotocol/server-postgres@latest $$ORCA_DB_URL'
+        --port 3002"
+    environment:
+      ORCA_DB_URL: postgresql://orca:${ORCA_DB_PASSWORD:-orca}@orca-postgres:5432/orca
+    depends_on:
+      orca-postgres:
+        condition: service_healthy
+
+  orca-backend:
+    build:
+      context: ./services/orca/backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://orca:${ORCA_DB_PASSWORD:-orca}@orca-postgres:5432/orca
+      GRAFANA_URL: http://grafana:3000
+      GRAFANA_MCP_URL: http://mcp-grafana:3001/sse
+      POSTGRES_MCP_URL: http://mcp-postgres:3002/sse
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      GRAFANA_ADMIN_TOKEN: ${GRAFANA_ADMIN_TOKEN}
+      ORCA_AGENT_TIMEOUT_SECONDS: ${ORCA_AGENT_TIMEOUT_SECONDS:-300}
+      ORCA_MAX_ROUNDS: ${ORCA_MAX_ROUNDS:-5}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
+    depends_on:
+      orca-postgres:
+        condition: service_healthy
+      mcp-grafana:
+        condition: service_started
+      mcp-postgres:
+        condition: service_started
+    ports:
+      - "8001:8000"
+
+volumes:
+  orca-postgres-data:

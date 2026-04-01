@@ -1,0 +1,180 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* ── Light: warm blueprint parchment ───────────────────────────────── */
+  :root {
+    --background: #F0EDE6;
+    --foreground: #18140E;
+    --muted: #E5E0D5;
+    --muted-foreground: #7A705E;
+    --card: #FDFCF9;
+    --card-foreground: #18140E;
+    --border: #D4CAB8;
+    --input: #E5E0D5;
+    --ring: #0080A0;
+    --primary: #0080A0;
+    --primary-foreground: #FFFFFF;
+    --secondary: #E5E0D5;
+    --secondary-foreground: #48403A;
+    --accent: #005F78;
+    --accent-foreground: #FFFFFF;
+    --destructive: #B83030;
+    --destructive-foreground: #FFFFFF;
+    --success: #0A7A55;
+    --success-foreground: #FFFFFF;
+    --warning: #9A6000;
+    --warning-foreground: #FFFFFF;
+    --sidebar-bg: #E8E3D8;
+    --sidebar-foreground: #665E50;
+    --sidebar-border: #D4CAB8;
+    --sidebar-active: #0080A0;
+    --sidebar-active-bg: rgba(0, 128, 160, 0.1);
+    --sidebar-muted: #9A907E;
+    --glow-color: rgba(0, 128, 160, 0.35);
+    --glow-success: rgba(10, 122, 85, 0.35);
+    --glow-destructive: rgba(184, 48, 48, 0.35);
+    --glow-warning: rgba(154, 96, 0, 0.35);
+  }
+
+  /* ── Dark: deep sea bioluminescence ────────────────────────────────── */
+  .dark {
+    --background: #040C18;
+    --foreground: #AAC8E0;
+    --muted: #081525;
+    --muted-foreground: #2E5070;
+    --card: #060E1C;
+    --card-foreground: #AAC8E0;
+    --border: #0E2038;
+    --input: #081525;
+    --ring: #00BAD4;
+    --primary: #00BAD4;
+    --primary-foreground: #040C18;
+    --secondary: #081525;
+    --secondary-foreground: #5A8AAA;
+    --accent: #00A8C0;
+    --accent-foreground: #040C18;
+    --destructive: #F87070;
+    --destructive-foreground: #040C18;
+    --success: #18C8A0;
+    --success-foreground: #040C18;
+    --warning: #F0B420;
+    --warning-foreground: #040C18;
+    --sidebar-bg: #020A14;
+    --sidebar-foreground: #284A64;
+    --sidebar-border: #0A1C30;
+    --sidebar-active: #00BAD4;
+    --sidebar-active-bg: rgba(0, 186, 212, 0.07);
+    --sidebar-muted: #142A40;
+    --glow-color: rgba(0, 186, 212, 0.4);
+    --glow-success: rgba(24, 200, 160, 0.4);
+    --glow-destructive: rgba(248, 112, 112, 0.4);
+    --glow-warning: rgba(240, 180, 32, 0.4);
+  }
+
+  * { @apply border-border; }
+  body { @apply bg-background text-foreground; }
+}
+
+/* ── Keyframe animations ─────────────────────────────────────────────── */
+@keyframes sonar-ping {
+  0%   { transform: scale(1); opacity: 0.55; }
+  70%  { opacity: 0.1; }
+  100% { transform: scale(2.8); opacity: 0; }
+}
+
+@keyframes glow-breathe {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* ── Custom scrollbar ────────────────────────────────────────────────── */
+::-webkit-scrollbar          { width: 5px; height: 5px; }
+::-webkit-scrollbar-track    { background: transparent; }
+::-webkit-scrollbar-thumb    { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }
+
+/* ── Navigation active glow line ─────────────────────────────────────── */
+.nav-item-active {
+  position: relative;
+}
+.nav-item-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 18%;
+  bottom: 18%;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--sidebar-active);
+  box-shadow: 0 0 8px var(--glow-color), 0 0 14px var(--glow-color);
+}
+
+/* ── Card hover glow (dark mode only) ───────────────────────────────── */
+.dark .card-interactive {
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.dark .card-interactive:hover {
+  box-shadow: 0 0 0 1px rgba(0, 186, 212, 0.18), 0 0 24px rgba(0, 186, 212, 0.06);
+  border-color: rgba(0, 186, 212, 0.2);
+}
+
+/* ── Scan line (investigating state) ─────────────────────────────────── */
+.scan-line-container {
+  position: relative;
+  overflow: hidden;
+}
+.scan-line-container::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  height: 40%;
+  background: linear-gradient(to bottom, transparent, rgba(0, 186, 212, 0.06), transparent);
+  animation: scan-down 3s linear infinite;
+  pointer-events: none;
+}
+@keyframes scan-down {
+  from { top: -40%; }
+  to   { top: 140%; }
+}
+
+/* ── Page content entrance animation ────────────────────────────────── */
+.page-enter {
+  animation: fade-in-up 0.4s ease-out forwards;
+}
+
+/* ── Utility: display font ───────────────────────────────────────────── */
+.font-display {
+  font-family: var(--font-display, system-ui), system-ui, sans-serif;
+}
+
+/* ── Prose (markdown RCA reports) ───────────────────────────────────── */
+.prose h1 { @apply text-2xl font-bold mt-6 mb-3 text-foreground; font-family: var(--font-display, system-ui); }
+.prose h2 { @apply text-xl font-semibold mt-5 mb-3 text-foreground border-b border-border pb-1; }
+.prose h3 { @apply text-base font-semibold mt-4 mb-2 text-foreground; }
+.prose p  { @apply mb-3 leading-relaxed text-secondary-foreground; }
+.prose ul { @apply list-disc list-inside mb-3 space-y-1 text-secondary-foreground; }
+.prose ol { @apply list-decimal list-inside mb-3 space-y-1 text-secondary-foreground; }
+.prose li { @apply text-secondary-foreground; }
+.prose code     { @apply bg-muted text-foreground px-1.5 py-0.5 rounded text-sm; font-family: var(--font-mono, monospace); }
+.prose pre      { @apply bg-muted text-foreground p-4 rounded-lg overflow-x-auto mb-3; }
+.prose pre code { @apply bg-transparent p-0; }
+.prose blockquote { @apply border-l-4 border-primary pl-4 italic text-muted-foreground mb-3; }
+.prose table { @apply w-full border-collapse mb-3; }
+.prose th    { @apply bg-muted border border-border px-3 py-2 text-left text-xs font-semibold text-foreground uppercase tracking-wider; }
+.prose td    { @apply border border-border px-3 py-2 text-sm text-secondary-foreground; }
+.prose tr:nth-child(even) { background: var(--muted); }
+.prose strong { @apply font-semibold text-foreground; }
+.prose a  { @apply text-accent hover:underline; }
+.prose hr { @apply border-border my-5; }

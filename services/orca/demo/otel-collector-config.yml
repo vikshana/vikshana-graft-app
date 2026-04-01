@@ -1,0 +1,79 @@
+# Simplified OTel Collector config for the Orca demo.
+#
+# Receives OTLP telemetry from demo services, exports:
+#   - Metrics → Prometheus (via OTLP HTTP)
+#   - Logs   → Loki (via OTLP HTTP)
+#   - Traces → spanmetrics connector only (no trace backend)
+#
+# Stripped down from the full OTel demo config: removed Jaeger, OpenSearch,
+# PostgreSQL/Redis/Nginx receivers, and host-level collectors.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: ${env:OTEL_COLLECTOR_HOST}:${env:OTEL_COLLECTOR_PORT_GRPC}
+      http:
+        endpoint: ${env:OTEL_COLLECTOR_HOST}:${env:OTEL_COLLECTOR_PORT_HTTP}
+        cors:
+          allowed_origins:
+            - "http://*"
+            - "https://*"
+
+exporters:
+  debug:
+    verbosity: basic
+  otlp_http/prometheus:
+    endpoint: "http://prometheus:9090/api/v1/otlp"
+    tls:
+      insecure: true
+    sending_queue:
+      batch:
+  otlphttp/loki:
+    endpoint: "http://loki:3100/otlp"
+    tls:
+      insecure: true
+
+processors:
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+  resourcedetection:
+    detectors: [env, system]
+
+connectors:
+  spanmetrics:
+    # Promote gRPC and HTTP response codes as extra label dimensions so alert
+    # rules can differentiate successful from failed calls.
+    # The OTel span Status field (STATUS_CODE_UNSET/OK/ERROR) is NOT reliably
+    # set by all demo services — the gRPC status code attribute is the only
+    # consistent error signal available.
+    #
+    # rpc.grpc.status_code → rpc_grpc_status_code (integer string: "0"=OK,
+    #   "14"=UNAVAILABLE, "9"=FAILED_PRECONDITION, "13"=INTERNAL, …)
+    # http.response.status_code → http_response_status_code ("200", "500", …)
+    #
+    # default: "" means non-gRPC / non-HTTP spans get an empty label value,
+    # which lets queries filter to only the relevant span types.
+    dimensions:
+      - name: rpc.grpc.status_code
+        default: ""
+      - name: http.response.status_code
+        default: ""
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [resourcedetection, memory_limiter]
+      exporters: [debug, spanmetrics]
+    metrics:
+      receivers: [otlp, spanmetrics]
+      processors: [resourcedetection, memory_limiter]
+      exporters: [otlp_http/prometheus, debug]
+    logs:
+      receivers: [otlp]
+      processors: [resourcedetection, memory_limiter]
+      exporters: [otlphttp/loki, debug]
+
