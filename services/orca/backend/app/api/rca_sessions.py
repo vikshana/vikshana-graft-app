@@ -34,6 +34,7 @@ from app.agent.rca_state import AlertContext, RCAState
 from app.agent.streaming import stream_rca_refine, stream_rca_start
 from app.config import settings
 from app.db import AsyncSessionLocal
+from app.models.rca import RCA
 from app.schemas.rca_session import (
     AlertContextInput,
     HypothesisOut,
@@ -323,50 +324,95 @@ async def get_rca_history(
         state = await graph.aget_state(config)
     except Exception as exc:
         log.warning("rca_history_read_failed", error=str(exc))
+        state = None
+
+    if state is not None and state.values:
+        values = state.values
+        raw_hypotheses = values.get("hypotheses", [])
+        confidence_scores = values.get("confidence_scores", [])
+        messages = values.get("messages", [])
+
+        hypotheses_out = [
+            HypothesisOut(
+                text=h["text"],
+                high_confidence_areas=h.get("high_confidence_areas", []),
+                uncertain_areas=h.get("uncertain_areas", []),
+                suggested_questions=h.get("suggested_questions", []),
+            )
+            for h in raw_hypotheses
+        ]
+
+        qa_transcript = [
+            QATurn(
+                role="developer" if isinstance(m, HumanMessage) else "agent",
+                content=m.content if isinstance(m.content, str) else str(m.content),
+            )
+            for m in messages
+        ]
+
+        return RCAHistoryResponse(
+            thread_id=thread_id,
+            round=values.get("round", 0),
+            hypotheses=hypotheses_out,
+            confidence_scores=confidence_scores,
+            qa_transcript=qa_transcript,
+            final_report=values.get("final_report"),
+            rca_session_id=values.get("rca_session_id"),
+            developer_accepted=values.get("developer_accepted", False),
+            force_finalized=values.get("force_finalized", False),
+        )
+
+    # No LangGraph checkpoint — fall back to the rcas table (automated / seed RCAs).
+    try:
+        rca_uuid = uuid.UUID(thread_id)
+    except ValueError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Thread {thread_id} not found",
-        ) from exc
+        )
 
-    if state is None or not state.values:
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(RCA).where(RCA.id == rca_uuid))
+        rca = result.scalar_one_or_none()
+
+    if rca is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Thread {thread_id} not found",
         )
 
-    values = state.values
-    raw_hypotheses = values.get("hypotheses", [])
-    confidence_scores = values.get("confidence_scores", [])
-    messages = values.get("messages", [])
+    hypotheses_out = []
+    if rca.root_cause:
+        hypotheses_out = [
+            HypothesisOut(
+                text=rca.root_cause,
+                high_confidence_areas=[],
+                uncertain_areas=[],
+                suggested_questions=[],
+            )
+        ]
 
-    hypotheses_out = [
-        HypothesisOut(
-            text=h["text"],
-            high_confidence_areas=h.get("high_confidence_areas", []),
-            uncertain_areas=h.get("uncertain_areas", []),
-            suggested_questions=h.get("suggested_questions", []),
-        )
-        for h in raw_hypotheses
-    ]
+    confidence_map = {"high": 0.9, "medium": 0.6, "low": 0.3}
+    confidence_score = confidence_map.get(rca.confidence_level or "", 0.0)
 
-    qa_transcript = [
-        QATurn(
-            role="developer" if isinstance(m, HumanMessage) else "agent",
-            content=m.content if isinstance(m.content, str) else str(m.content),
-        )
-        for m in messages
-    ]
+    final_report: dict[str, Any] | None = None
+    if rca.report_markdown or rca.root_cause:
+        final_report = {
+            "report_markdown": rca.report_markdown or "",
+            "root_cause": rca.root_cause or "",
+            "confidence_level": rca.confidence_level or "",
+            "confidence_reasoning": rca.confidence_reasoning or "",
+        }
 
+    log.info("rca_history_from_rcas_table", rca_id=str(rca_uuid), status=rca.status)
     return RCAHistoryResponse(
         thread_id=thread_id,
-        round=values.get("round", 0),
+        round=0,
         hypotheses=hypotheses_out,
-        confidence_scores=confidence_scores,
-        qa_transcript=qa_transcript,
-        final_report=values.get("final_report"),
-        rca_session_id=values.get("rca_session_id"),
-        developer_accepted=values.get("developer_accepted", False),
-        force_finalized=values.get("force_finalized", False),
+        confidence_scores=[confidence_score] if hypotheses_out else [],
+        qa_transcript=[],
+        final_report=final_report,
+        developer_accepted=rca.status == "complete",
     )
 
 
