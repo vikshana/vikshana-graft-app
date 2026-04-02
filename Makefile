@@ -1,6 +1,6 @@
 ARCH := $(shell uname -m)
 
-.PHONY: up down restart build build-frontend build-backend logs logs-grafana clean help
+.PHONY: up down restart build build-frontend build-backend logs logs-grafana clean seed help
 
 ## Default target — full build + start
 up: build
@@ -36,6 +36,10 @@ logs:
 ## Follow logs for the Grafana plugin container only
 logs-grafana:
 	docker compose logs -f grafana
+
+## Insert 5 dummy RCA records into the running orca-backend database
+seed:
+	docker compose exec -T orca-backend python < services/orca/backend/scripts/seed_dummy.py
 
 ## Remove built Go binaries from dist/ (forces a fresh backend build)
 clean:
