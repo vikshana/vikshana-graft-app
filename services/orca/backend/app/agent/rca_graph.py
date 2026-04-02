@@ -44,6 +44,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import interrupt
+from psycopg_pool import AsyncConnectionPool
 
 from app.agent.mcp.grafana_client import get_grafana_tools
 from app.agent.mcp.postgres_client import get_postgres_tools
@@ -56,6 +57,7 @@ logger = structlog.get_logger()
 # Module-level compiled graph (initialized once on first call)
 _compiled_graph: Any | None = None
 _checkpointer: AsyncPostgresSaver | None = None
+_connection_pool: AsyncConnectionPool | None = None
 
 
 def _pg_conn_string(database_url: str) -> str:
@@ -83,13 +85,20 @@ async def init_rca_graph() -> Any:
     Returns:
         Compiled LangGraph StateGraph ready for invocation and streaming.
     """
-    global _compiled_graph, _checkpointer  # noqa: PLW0603
+    global _compiled_graph, _checkpointer, _connection_pool  # noqa: PLW0603
 
     if _compiled_graph is not None:
         return _compiled_graph
 
     conn_string = _pg_conn_string(settings.DATABASE_URL)
-    _checkpointer = AsyncPostgresSaver.from_conn_string(conn_string)
+    _connection_pool = AsyncConnectionPool(
+        conninfo=conn_string,
+        max_size=5,
+        kwargs={"autocommit": True, "prepare_threshold": 0},
+        open=False,
+    )
+    await _connection_pool.open()
+    _checkpointer = AsyncPostgresSaver(_connection_pool)
     await _checkpointer.setup()
 
     _compiled_graph = build_rca_graph(_checkpointer)
