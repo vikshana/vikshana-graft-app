@@ -44,3 +44,4 @@ ruler_storage:
 
 limits:
   native_histograms_ingestion_enabled: true
+  promote_otel_resource_attributes: "service.name,service.namespace,deployment.environment"

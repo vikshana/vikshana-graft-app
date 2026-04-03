@@ -138,6 +138,10 @@ services:
       ORCA_AGENT_TIMEOUT_SECONDS: ${ORCA_AGENT_TIMEOUT_SECONDS:-300}
       ORCA_MAX_ROUNDS: ${ORCA_MAX_ROUNDS:-5}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_SERVICE_NAME: orca-backend
+      OTEL_RESOURCE_ATTRIBUTES: service.name=orca-backend,deployment.environment=development
+      OTEL_LOGS_EXPORTER: otlp
     depends_on:
       orca-postgres:
         condition: service_healthy
@@ -162,6 +166,7 @@ services:
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_SERVICE_NAME: test-app
       OTEL_RESOURCE_ATTRIBUTES: service.name=test-app,deployment.environment=development
+      OTEL_LOGS_EXPORTER: otlp
     ports:
       - "8080:8080"
     depends_on:
@@ -173,3 +178,7 @@ volumes:
   tempo-data:
   mimir-data:
   orca-postgres-data:
+
+networks:
+  default:
+    name: graft

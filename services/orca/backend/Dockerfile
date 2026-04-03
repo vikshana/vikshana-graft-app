@@ -12,6 +12,8 @@ WORKDIR /app
 # Copy and install Python dependencies
 COPY pyproject.toml .
 RUN pip install --no-cache-dir -e "."
+# Bootstrap OTel auto-instrumentation packages for detected libraries
+RUN opentelemetry-bootstrap -a install
 
 # Copy application code
 COPY app/ ./app/
@@ -22,5 +24,5 @@ USER orca
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["opentelemetry-instrument", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
