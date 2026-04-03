@@ -595,24 +595,12 @@ graph TB
 
 ### Demo (with OpenTelemetry Demo)
 
-`demo/docker-compose.yml` uses Docker Compose's `include` directive to import the OTel demo's compose file, then only starts the services listed below. This avoids running all ~25 OTel demo services while still providing realistic traffic and failure scenarios.
-
-```yaml
-# demo/docker-compose.yml (structure)
-include:
-  - path: ./opentelemetry-demo/docker-compose.yml
-
-services:
-  # Orca additions layered on top of the OTel demo services
-  orca-postgres: { ... }
-  orca-backend:  { ... }
-  orca-frontend: { ... }
-```
+`demo/docker-compose.yml` (at repo root) is a standalone compose file that directly defines a minimal subset of OTel demo services alongside Orca overrides. It does not use `include` — only the services needed for fault injection and alerting are declared, avoiding the full ~25-service OTel demo stack.
 
 ```mermaid
 graph TB
     subgraph "demo/docker-compose.yml"
-        subgraph "OTel Demo subset (via include)"
+        subgraph "OTel Demo subset (standalone)"
             FRONTEND[frontend<br/><i>:8080</i>]
             CART[cartservice]
             CHECKOUT[checkoutservice]
@@ -673,8 +661,8 @@ graph TB
 
 ### Demo Walkthrough
 
-1. Ensure submodule is initialised: `git submodule update --init --recursive`
-2. Start the demo stack: `cd demo && docker-compose up -d`
+1. Clone the OTel demo: `cd services/orca && make init`
+2. Start the demo stack: `cd services/orca && make up`
 3. Locust begins generating continuous traffic to the OTel demo frontend automatically
 4. Open Grafana at `http://localhost:3001` — pre-provisioned alert rules are already active
 5. To trigger an incident: open the Feature Flag UI at `http://localhost:8080` and enable `adServiceFailure` or `cartServiceFailure`

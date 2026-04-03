@@ -60,3 +60,6 @@ ci/
 .env
 .env.local
 .env.*.local
+
+# OTel demo submodule — populated by make init (see services/orca/Makefile)
+demo/opentelemetry-demo/

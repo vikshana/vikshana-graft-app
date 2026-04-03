@@ -37,12 +37,10 @@ Orca Stack:
 
 ## Setup
 
-### Step 1: Initialise the submodule
+### Step 1: Clone the OTel demo
 
 ```bash
-# From the repo root
-git submodule update --init --recursive
-# Or use the Makefile shortcut:
+# From services/orca/ — clones opentelemetry-demo v2.2.0 into demo/opentelemetry-demo/
 make init
 ```
 
@@ -56,14 +54,14 @@ cp .env.example .env
 ### Step 3: Start the demo stack
 
 ```bash
-# From the repo root
+# From services/orca/
 make up
 ```
 
 > **Why `make up`?**
 >
-> The Makefile combines two compose files — the root `docker-compose.yml` (Orca services)
-> and `demo/docker-compose.yml` (OTel demo subset) — and loads both `.env` files.
+> The Makefile at `services/orca/` combines two compose files — `docker-compose.yml` (Orca services)
+> and `../../demo/docker-compose.yml` (OTel demo subset) — and loads both `.env` files.
 > Running `docker compose up -d` alone only starts Orca services.
 
 ---
@@ -131,7 +129,7 @@ All alerts are routed to Orca via the pre-provisioned `orca-webhook` contact poi
 
 ## Makefile Targets
 
-Run all targets from the **repo root**:
+Run all targets from **`services/orca/`**:
 
 | Target | Description |
 |---|---|
@@ -145,13 +143,15 @@ Run all targets from the **repo root**:
 | `make logs-all` | Tail all service logs |
 | `make ps` | Show running containers |
 | `make clean` | Stop all and remove volumes (destroys data) |
-| `make init` | Initialise the OTel demo git submodule |
+| `make init` | Clone the OTel demo v2.2.0 into `demo/opentelemetry-demo/` |
 
 ---
 
 ## Resetting the Demo
 
 ```bash
+# From services/orca/
+
 # Stop all services
 make down
 
@@ -166,15 +166,18 @@ make up
 
 ## Updating the OTel demo version
 
-The submodule is pinned to a specific commit. To update:
+The demo is pinned to v2.2.0 (set in the `init:` target of `services/orca/Makefile`). To update:
 
 ```bash
-cd demo/opentelemetry-demo
-git fetch origin
-git checkout <new-tag-or-commit>  # e.g. v1.12.0
-cd ../..
-git add demo/opentelemetry-demo
-git commit -m "chore(demo): bump opentelemetry-demo to v1.12.0"
+# 1. Remove the existing checkout
+rm -rf demo/opentelemetry-demo
+
+# 2. Update the version in services/orca/Makefile (change v2.2.0 to the new version)
+
+# 3. Update .gitmodules branch at the repo root (change v2.2.0 to the new version)
+
+# 4. Re-clone
+cd services/orca && make init
 ```
 
 Test locally before committing — service names and ports occasionally change between releases.
@@ -194,7 +197,7 @@ Test locally before committing — service names and ports occasionally change b
 - Check the RCA record status in the Orca frontend — `failed` status includes an error message
 
 **OTel demo services not starting?**
-- Ensure submodule is initialised: `make init`
+- Run `make init` from `services/orca/` to clone the OTel demo
 - Check Docker has sufficient memory allocated (8GB+)
 
 **Some storefront features are broken?**

@@ -8,14 +8,14 @@
 # The root .env provides Orca-specific secrets (ANTHROPIC_API_KEY, etc.).
 #
 # Path resolution: when using multiple -f flags, Docker Compose resolves all
-# relative paths in every file relative to the FIRST file's directory (repo root).
-# This is why demo/docker-compose.yml uses paths like ./demo/opentelemetry-demo/...
+# relative paths in every file relative to the FIRST file's directory (services/orca/).
+# This is why demo/docker-compose.yml uses paths like ../../demo/opentelemetry-demo/...
 # ---------------------------------------------------------------------------
 COMPOSE := docker compose \
-	--env-file demo/opentelemetry-demo/.env \
+	--env-file ../../demo/opentelemetry-demo/.env \
 	--env-file .env \
 	-f docker-compose.yml \
-	-f demo/docker-compose.yml
+	-f ../../demo/docker-compose.yml
 
 # Compose command for Orca-only (no demo services)
 COMPOSE_ORCA := docker compose \
@@ -81,10 +81,16 @@ help: ## Show this help message
 	@echo "  Orca services:  $(ORCA_SERVICES)"
 	@echo ""
 
-init: ## Initialise the OTel demo submodule (first time only)
-	@echo "→ Initialising OTel demo submodule..."
-	git submodule update --init --recursive
-	@echo "✓ Submodule ready"
+init: ## Clone the OTel demo v2.2.0 into demo/opentelemetry-demo (first time only)
+	@if [ -d ../../demo/opentelemetry-demo/src ]; then \
+		echo "✓ OTel demo already present at demo/opentelemetry-demo — skipping"; \
+	else \
+		echo "→ Cloning opentelemetry-demo v2.2.0 (shallow)..."; \
+		git clone --depth=1 --branch v2.2.0 \
+			https://github.com/open-telemetry/opentelemetry-demo \
+			../../demo/opentelemetry-demo; \
+		echo "✓ OTel demo ready at demo/opentelemetry-demo/"; \
+	fi
 
 up: ## Start the full stack (Orca + OTel demo subset)
 	@echo "→ Starting all services: $(ALL_SERVICES)"

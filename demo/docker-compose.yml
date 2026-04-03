@@ -4,7 +4,7 @@
 # showcase Orca. It is fully standalone — it does NOT layer on top of the
 # submodule's docker-compose.yml.
 #
-# Usage (from repo root, via the Makefile):
+# Usage (from services/orca/, via the Makefile):
 #   make up          # starts Orca stack + this demo subset
 #   make demo-only   # starts only this demo subset (no Orca)
 #
@@ -99,7 +99,7 @@ services:
       - "${FLAGD_PORT:-8013}"
       - "${FLAGD_OFREP_PORT:-8016}"
     volumes:
-      - ./demo/opentelemetry-demo/src/flagd:/etc/flagd
+      - ../../demo/opentelemetry-demo/src/flagd:/etc/flagd
     logging: *logging
 
   flagd-ui:
@@ -126,7 +126,7 @@ services:
       flagd:
         condition: service_started
     volumes:
-      - ./demo/opentelemetry-demo/src/flagd:/app/data
+      - ../../demo/opentelemetry-demo/src/flagd:/app/data
 
   # ===========================================================================
   # Fault-injection target services (3 demo microservices)
@@ -220,7 +220,7 @@ services:
       postgresql:
         condition: service_started
     volumes:
-      - ./demo/opentelemetry-demo/otel-config.yml:/otel-config.yml
+      - ../../demo/opentelemetry-demo/otel-config.yml:/otel-config.yml
     logging: *logging
 
   # ===========================================================================
@@ -252,7 +252,7 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-otel}
       - POSTGRES_DB=${POSTGRES_DB:-otel}
     volumes:
-      - ./demo/opentelemetry-demo/src/postgresql/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ../../demo/opentelemetry-demo/src/postgresql/init.sql:/docker-entrypoint-initdb.d/init.sql
     logging: *logging
 
   # ===========================================================================
@@ -417,7 +417,7 @@ services:
     restart: unless-stopped
     command: ["--config=/etc/otelcol-config.yml"]
     volumes:
-      - ./demo/otel-collector-config.yml:/etc/otelcol-config.yml
+      - ../../demo/otel-collector-config.yml:/etc/otelcol-config.yml
     ports:
       - "${OTEL_COLLECTOR_PORT_GRPC:-4317}"
       - "${OTEL_COLLECTOR_PORT_HTTP:-4318}"
@@ -442,7 +442,7 @@ services:
       - --web.enable-otlp-receiver
       - --enable-feature=exemplar-storage
     volumes:
-      - ./demo/opentelemetry-demo/src/prometheus/prometheus-config.yaml:/etc/prometheus/prometheus-config.yaml
+      - ../../demo/opentelemetry-demo/src/prometheus/prometheus-config.yaml:/etc/prometheus/prometheus-config.yaml
     deploy:
       resources:
         limits:
@@ -502,10 +502,10 @@ services:
     volumes:
       # Persist Grafana's SQLite database so service account tokens survive restarts
       - grafana-data:/var/lib/grafana
-      - ./demo/grafana-provisioning/alerting/alert-rules.yml:/etc/grafana/provisioning/alerting/alert-rules.yml
-      - ./demo/grafana-provisioning/contact-points/orca-webhook.yml:/etc/grafana/provisioning/alerting/orca-webhook.yml
-      - ./demo/grafana-provisioning/datasources:/etc/grafana/provisioning/datasources
-      - ./demo/opentelemetry-demo/src/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ../../demo/grafana-provisioning/alerting/alert-rules.yml:/etc/grafana/provisioning/alerting/alert-rules.yml
+      - ../../demo/grafana-provisioning/contact-points/orca-webhook.yml:/etc/grafana/provisioning/alerting/orca-webhook.yml
+      - ../../demo/grafana-provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ../../demo/opentelemetry-demo/src/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
     ports:
       - "3001:3000"
     logging: *logging
@@ -527,7 +527,7 @@ services:
       - GRAFANA_URL=http://grafana:3000
       - GRAFANA_API_KEY_FILE=/run/orca/GRAFANA_API_KEY
     volumes:
-      - ./demo/grafana-provisioning/scripts/provision.py:/scripts/provision.py:ro
+      - ../../demo/grafana-provisioning/scripts/provision.py:/scripts/provision.py:ro
       - grafana-api-key:/run/orca
     command: python3 /scripts/provision.py
     depends_on:
@@ -553,7 +553,7 @@ services:
   grafana-mcp:
     build:
       context: .
-      dockerfile: demo/Dockerfile.grafana-mcp
+      dockerfile: ../../demo/Dockerfile.grafana-mcp
     container_name: grafana-mcp
     restart: unless-stopped
     deploy:
