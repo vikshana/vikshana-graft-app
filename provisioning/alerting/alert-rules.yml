@@ -61,12 +61,12 @@ groups:
                   sum(rate(http_server_request_duration_seconds_count{
                     service_name="test-app",
                     http_response_status_code=~"5.."
-                  }[5m])) or vector(0)
+                  }[2m])) or vector(0)
                 )
                 /
                 sum(rate(http_server_request_duration_seconds_count{
                   service_name="test-app"
-                }[5m]))
+                }[2m]))
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -147,7 +147,7 @@ groups:
                   sum(rate(traces_span_metrics_duration_milliseconds_bucket{
                     service_name="test-app",
                     span_kind="SPAN_KIND_SERVER"
-                  }[5m]))
+                  }[2m]))
                   by (service_name, le)
                 ))
               instant: true
