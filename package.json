@@ -10,7 +10,7 @@
     "lint": "eslint --cache .",
     "lint:fix": "npm run lint -- --fix && prettier --write --list-different .",
     "e2e": "playwright test",
-    "server": "docker network create graft-orca 2>/dev/null; docker compose up --build",
+    "server": "docker compose up --build",
     "sign": "npx --yes @grafana/sign-plugin@latest"
   },
   "author": "Vikshana",

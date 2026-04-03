@@ -1,13 +1,7 @@
-# Orca Stack — core services for development and production.
+# Orca Stack — standalone Postgres + backend for isolated development.
 #
-# Usage (standalone):
-#   docker compose up -d
-#
-# Usage (with OTel demo):
-#   make up          # uses Makefile at repo root
-#
-# All service names are prefixed with "orca-" to avoid conflicts
-# when composed alongside third-party demo services.
+# For the full development stack (Grafana plugin + observability + test app),
+# use the root docker-compose.yaml via `npm run server` from the repo root.
 
 services:
   orca-postgres:
@@ -39,12 +33,11 @@ services:
       DATABASE_URL: postgresql+asyncpg://orca:orca@orca-postgres:5432/orca
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
-      GRAFANA_URL: ${GRAFANA_URL:-http://localhost:3002}
+      GRAFANA_URL: ${GRAFANA_URL:-http://localhost:3000}
       GRAFANA_API_KEY: ${GRAFANA_API_KEY:-}
       LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
       LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
       LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-orca-dev}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       ORCA_MAX_INVESTIGATION_STEPS: ${ORCA_MAX_INVESTIGATION_STEPS:-15}
       ORCA_MAX_INVESTIGATION_TOKENS: ${ORCA_MAX_INVESTIGATION_TOKENS:-100000}
       ORCA_AGENT_TIMEOUT_SECONDS: ${ORCA_AGENT_TIMEOUT_SECONDS:-300}
@@ -56,31 +49,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    # Shared network with the Graft dev stack so vikshana-graft-app can reach
-    # this container at http://orca-backend:8000.
-    # Created automatically by `make up` / `make orca-up` and `npm run server`.
-    networks:
-      - default
-      - graft-orca
-
-  orca-frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: orca-frontend
-    depends_on:
-      orca-backend:
-        condition: service_healthy
-    environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-      BACKEND_URL: http://orca-backend:8000
-    ports:
-      - "3000:3000"
-    restart: unless-stopped
 
 volumes:
   orca_postgres_data:
 
-networks:
-  graft-orca:
-    external: true

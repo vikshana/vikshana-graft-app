@@ -1,0 +1,70 @@
+# OTel Collector config for the Graft dev stack.
+#
+# Receives OTLP telemetry from all services, routes to:
+#   Traces  → Tempo  (via OTLP HTTP)
+#   Metrics → Mimir  (via OTLP HTTP)
+#   Logs    → Loki   (via OTLP HTTP)
+#
+# Also runs the spanmetrics connector to generate RED metrics from traces.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+        cors:
+          allowed_origins:
+            - "http://*"
+            - "https://*"
+
+exporters:
+  debug:
+    verbosity: basic
+  otlphttp/tempo:
+    endpoint: "http://tempo:4318"
+    tls:
+      insecure: true
+  otlphttp/mimir:
+    endpoint: "http://mimir:9009/otlp"
+    tls:
+      insecure: true
+  otlphttp/loki:
+    endpoint: "http://loki:3100/otlp"
+    tls:
+      insecure: true
+
+processors:
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+  resourcedetection:
+    detectors: [env, system]
+  batch:
+
+connectors:
+  spanmetrics:
+    dimensions:
+      - name: http.response.status_code
+        default: ""
+      - name: http.request.method
+        default: ""
+      - name: rpc.grpc.status_code
+        default: ""
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [resourcedetection, memory_limiter, batch]
+      exporters: [otlphttp/tempo, spanmetrics, debug]
+    metrics:
+      receivers: [otlp, spanmetrics]
+      processors: [resourcedetection, memory_limiter, batch]
+      exporters: [otlphttp/mimir, debug]
+    logs:
+      receivers: [otlp]
+      processors: [resourcedetection, memory_limiter, batch]
+      exporters: [otlphttp/loki, debug]
