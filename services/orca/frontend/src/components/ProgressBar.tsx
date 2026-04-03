@@ -1,5 +1,3 @@
-import clsx from 'clsx';
-
 interface ProgressBarProps {
   label: string;
   percentage: number;

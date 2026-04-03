@@ -41,7 +41,7 @@ def build_payload(service: str, alert: str) -> dict:
                 "fingerprint": fingerprint,
                 "startsAt": fired_at,
                 "endsAt": "0001-01-01T00:00:00Z",
-                "generatorURL": "http://localhost:3001",
+                "generatorURL": "http://localhost:3002",
                 "labels": {
                     "alertname": alert,
                     "severity": "critical",

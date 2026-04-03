@@ -24,11 +24,13 @@ COMPOSE_ORCA := docker compose \
 
 # ---------------------------------------------------------------------------
 # Orca services (from docker-compose.yml)
+# orca-frontend is excluded from the default targets — it is being
+# decommissioned in favour of the Graft plugin UI.  Use 'make frontend-up'
+# to start it explicitly if needed.
 # ---------------------------------------------------------------------------
 ORCA_SERVICES := \
 	orca-postgres \
-	orca-backend \
-	orca-frontend
+	orca-backend
 
 # ---------------------------------------------------------------------------
 # OTel Demo services — minimal subset for Orca demo
@@ -68,7 +70,7 @@ ALL_SERVICES := $(ORCA_SERVICES) $(DEMO_SERVICES)
 BUILD ?= 0
 _BUILD_FLAG := $(if $(filter 1,$(BUILD)),--build,)
 
-.PHONY: help init up down restart logs logs-demo logs-all ps clean orca-up orca-down flags-reload
+.PHONY: help init network up down restart logs logs-demo logs-all ps clean orca-up orca-down frontend-up flags-reload
 
 help: ## Show this help message
 	@echo ""
@@ -92,17 +94,22 @@ init: ## Clone the OTel demo v2.2.0 into demo/opentelemetry-demo (first time onl
 		echo "✓ OTel demo ready at demo/opentelemetry-demo/"; \
 	fi
 
+network: ## Create the shared graft-orca Docker network (run once, idempotent)
+	@docker network create graft-orca 2>/dev/null && \
+		echo "✓ Created Docker network: graft-orca" || \
+		echo "✓ Docker network already exists: graft-orca"
+
 up: ## Start the full stack (Orca + OTel demo subset)
+	@$(MAKE) network
 	@echo "→ Starting all services: $(ALL_SERVICES)"
 	$(COMPOSE) up -d --force-recreate --remove-orphans --build $(ALL_SERVICES)
 	@echo ""
 	@echo "✓ Stack is up. Endpoints:"
 	@echo "   OTel Demo Storefront : http://localhost:8080"
 	@echo "   Feature Flag UI      : http://localhost:8080/feature"
-	@echo "   Grafana              : http://localhost:3001"
-	@echo "   Prometheus           : http://localhost:9090"
+	@echo "   Grafana              : http://localhost:3002"
+	@echo "   Prometheus           : http://localhost:9091"
 	@echo "   Locust (load gen)    : http://localhost:8080/loadgen"
-	@echo "   Orca Frontend        : http://localhost:3000"
 	@echo "   Orca Backend API     : http://localhost:8000/docs"
 
 down: ## Stop and remove all containers (Orca + demo)
@@ -110,16 +117,24 @@ down: ## Stop and remove all containers (Orca + demo)
 
 restart: down up ## Restart the full stack
 
-orca-up: ## Start only the Orca stack (no demo services)
-	@echo "→ Starting Orca services only..."
+orca-up: ## Start only the Orca stack (postgres + backend, no frontend, no demo)
+	@$(MAKE) network
+	@echo "→ Starting Orca services..."
 	$(COMPOSE_ORCA) up -d --remove-orphans $(_BUILD_FLAG) $(ORCA_SERVICES)
 	@echo ""
 	@echo "✓ Orca stack is up."
-	@echo "   Orca Frontend  : http://localhost:3000"
 	@echo "   Orca Backend   : http://localhost:8000/docs"
 
 orca-down: ## Stop only the Orca stack
 	$(COMPOSE_ORCA) down
+
+frontend-up: ## Start orca-frontend explicitly (deprecated — use Graft plugin UI instead)
+	@echo "→ Starting orca-frontend (standalone legacy UI)..."
+	$(COMPOSE_ORCA) up -d --remove-orphans $(_BUILD_FLAG) orca-frontend
+	@echo ""
+	@echo "✓ Orca frontend is up."
+	@echo "   Orca Frontend  : http://localhost:3000"
+	@echo "   NOTE: orca-frontend is being decommissioned. Use Graft plugin UI instead."
 
 logs: ## Tail Orca service logs
 	$(COMPOSE) logs -f $(ORCA_SERVICES)
@@ -174,5 +189,5 @@ flags-reload: ## Apply flag changes — restart flagd then fault-injection servi
 	@echo ""
 	@echo "✓ Done. Services are now evaluating the current flag values."
 	@echo "  Manage flags : http://localhost:8080/feature"
-	@echo "  Grafana alerts: http://localhost:3001/alerting/list"
+	@echo "  Grafana alerts: http://localhost:3002/alerting/list"
 
