@@ -71,7 +71,7 @@ func SetupOTelSDKWithoutGlobal(ctx context.Context) (func(context.Context) error
 	// Get endpoint from environment variable or use default
 	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 	if endpoint == "" {
-		endpoint = "otel-lgtm:4317"
+		endpoint = "otel-collector:4317"
 	}
 
 	log.DefaultLogger.Info("Initializing OTel exporter", "endpoint", endpoint)

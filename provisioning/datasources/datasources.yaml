@@ -1,0 +1,59 @@
+apiVersion: 1
+
+datasources:
+  # Mimir — metrics (Prometheus-compatible)
+  - name: Mimir
+    type: prometheus
+    access: proxy
+    url: http://mimir:9009/prometheus
+    uid: mimir
+    isDefault: true
+    editable: true
+    jsonData:
+      httpMethod: POST
+      timeInterval: 15s
+
+  # Loki — logs
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    uid: loki
+    isDefault: false
+    editable: true
+    jsonData:
+      maxLines: 1000
+
+  # Tempo — traces
+  - name: Tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    uid: tempo
+    isDefault: false
+    editable: true
+    jsonData:
+      httpMethod: GET
+      tracesToLogsV2:
+        datasourceUid: loki
+        tags: ['service.name']
+        mappedTags: [{ key: 'service.name', value: 'service' }]
+        mapTagNamesEnabled: false
+        spanStartTimeShift: '-1h'
+        spanEndTimeShift: '1h'
+        filterByTraceID: true
+        filterBySpanID: false
+      tracesToMetrics:
+        datasourceUid: mimir
+        tags: [{ key: 'service.name', value: 'service' }]
+        queries:
+          - name: 'Request rate'
+            query: 'sum(rate(traces_spanmetrics_calls_total{$__tags}[5m]))'
+      serviceMap:
+        datasourceUid: mimir
+      search:
+        hide: false
+      nodeGraph:
+        enabled: true
+      lokiSearch:
+        datasourceUid: loki

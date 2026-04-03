@@ -1,0 +1,46 @@
+# Mimir single-binary config for development.
+# Run with: mimir -config.file=/etc/mimir/config.yaml
+multitenancy_enabled: false
+
+server:
+  http_listen_port: 9009
+  grpc_listen_port: 9095
+  log_level: warn
+
+common:
+  storage:
+    backend: filesystem
+    filesystem:
+      dir: /data/mimir
+
+blocks_storage:
+  storage_prefix: blocks
+  tsdb:
+    dir: /data/mimir/tsdb
+
+ingester:
+  ring:
+    instance_addr: 127.0.0.1
+    kvstore:
+      store: memberlist
+    replication_factor: 1
+
+memberlist:
+  join_members: []
+
+compactor:
+  sharding_ring:
+    kvstore:
+      store: memberlist
+
+store_gateway:
+  sharding_ring:
+    replication_factor: 1
+
+ruler_storage:
+  backend: filesystem
+  filesystem:
+    dir: /data/mimir/rules
+
+limits:
+  native_histograms_ingestion_enabled: true

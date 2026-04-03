@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "test-app"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "opentelemetry-distro>=0.50b0",
+    "opentelemetry-exporter-otlp>=1.30",
+    "opentelemetry-instrumentation-fastapi>=0.50b0",
+    "opentelemetry-instrumentation-logging>=0.50b0",
+    "structlog>=25.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]

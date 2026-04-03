@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     SLACK_WEBHOOK_URL: str = ""
 
     # Grafana
-    GRAFANA_URL: str = "http://localhost:3002"
+    GRAFANA_URL: str = "http://localhost:3000"
     GRAFANA_API_KEY: str = ""  # local dev fallback; production uses GRAFANA_ADMIN_TOKEN
     GRAFANA_ADMIN_TOKEN: str = ""  # used by mcp-grafana sidecar
 

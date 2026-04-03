@@ -3,19 +3,78 @@ services:
     extends:
       file: .config/docker-compose-base.yaml
       service: grafana
-
-  otel-lgtm:
-    extends:
-      file: .config/docker-compose-base.yaml
-      service: otel-lgtm
-
-  alloy:
-    extends:
-      file: .config/docker-compose-base.yaml
-      service: alloy
+    depends_on:
+      otel-collector:
+        condition: service_started
 
   # ---------------------------------------------------------------------------
-  # ORCA — Root Cause Analysis backend
+  # Observability backends
+  # ---------------------------------------------------------------------------
+  loki:
+    image: grafana/loki:3.4.3
+    container_name: loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/config.yaml
+    volumes:
+      - ./config/loki.yaml:/etc/loki/config.yaml:ro
+      - loki-data:/loki
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3100/ready | grep -q ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  tempo:
+    image: grafana/tempo:2.7.1
+    container_name: tempo
+    restart: unless-stopped
+    command: -config.file=/etc/tempo/config.yaml
+    volumes:
+      - ./config/tempo.yaml:/etc/tempo/config.yaml:ro
+      - tempo-data:/var/tempo
+    depends_on:
+      mimir:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3200/ready | grep -q ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  mimir:
+    image: grafana/mimir:latest
+    container_name: mimir
+    restart: unless-stopped
+    command: -config.file=/etc/mimir/config.yaml
+    volumes:
+      - ./config/mimir.yaml:/etc/mimir/config.yaml:ro
+      - mimir-data:/data/mimir
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9009/ready | grep -q ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.146.1
+    container_name: otel-collector
+    restart: unless-stopped
+    command: --config=/etc/otelcol/config.yaml
+    volumes:
+      - ./config/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+    depends_on:
+      loki:
+        condition: service_started
+      tempo:
+        condition: service_started
+      mimir:
+        condition: service_started
+
+  # ---------------------------------------------------------------------------
+  # Orca — Root Cause Analysis backend
   # ---------------------------------------------------------------------------
   orca-postgres:
     image: pgvector/pgvector:pg16
@@ -33,7 +92,7 @@ services:
       retries: 10
 
   # mcp-grafana: Grafana MCP server in HTTP/SSE mode.
-  # Uses a single admin token; per-request org isolation is enforced by ORCA
+  # Uses a single admin token; per-request org isolation is enforced by Orca
   # injecting X-Grafana-Org-Id on every tool call.
   mcp-grafana:
     build:
@@ -41,7 +100,7 @@ services:
       dockerfile: Dockerfile.grafana-mcp
     container_name: mcp-grafana
     restart: unless-stopped
-    command: ["--transport", "sse", "--port", "3001"]
+    command: ["-transport", "sse", "-address", "0.0.0.0:3001"]
     environment:
       GRAFANA_URL: http://grafana:3000
       GRAFANA_SERVICE_ACCOUNT_TOKEN: ${GRAFANA_ADMIN_TOKEN}
@@ -50,15 +109,14 @@ services:
         condition: service_started
 
   # mcp-postgres: Postgres MCP server wrapped as HTTP/SSE via supergateway.
-  # Gives the LangGraph agent read access to ORCA's own DB for historical context.
-  # Long-term this will be replaced by direct pgvector queries in Phase 2.
+  # Gives the LangGraph agent read access to Orca's own DB for historical context.
   mcp-postgres:
     image: node:20-alpine
     restart: unless-stopped
-    command: >
-      sh -c "npx -y supergateway
-        --stdio 'npx -y @modelcontextprotocol/server-postgres@latest $$ORCA_DB_URL'
-        --port 3002"
+    command:
+      - sh
+      - -c
+      - "npx -y supergateway --stdio 'npx -y @modelcontextprotocol/server-postgres@latest $$ORCA_DB_URL' --port 3002"
     environment:
       ORCA_DB_URL: postgresql://orca:${ORCA_DB_PASSWORD:-orca}@orca-postgres:5432/orca
     depends_on:
@@ -79,7 +137,7 @@ services:
       GRAFANA_ADMIN_TOKEN: ${GRAFANA_ADMIN_TOKEN}
       ORCA_AGENT_TIMEOUT_SECONDS: ${ORCA_AGENT_TIMEOUT_SECONDS:-300}
       ORCA_MAX_ROUNDS: ${ORCA_MAX_ROUNDS:-5}
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-lgtm:4317
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     depends_on:
       orca-postgres:
         condition: service_healthy
@@ -90,9 +148,28 @@ services:
     ports:
       - "8001:8000"
 
-volumes:
-  orca-postgres-data:
+  # ---------------------------------------------------------------------------
+  # Test app — generates telemetry and supports chaos injection for RCA testing
+  # ---------------------------------------------------------------------------
+  test-app:
+    build:
+      context: ./services/test-app
+      dockerfile: Dockerfile
+    container_name: test-app
+    restart: unless-stopped
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_SERVICE_NAME: test-app
+      OTEL_RESOURCE_ATTRIBUTES: service.name=test-app,deployment.environment=development
+    ports:
+      - "8080:8080"
+    depends_on:
+      otel-collector:
+        condition: service_started
 
-networks:
-  graft-orca:
-    external: true
+volumes:
+  loki-data:
+  tempo-data:
+  mimir-data:
+  orca-postgres-data:

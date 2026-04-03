@@ -1,14 +1,12 @@
-# Architecture — Container & Service Map
+# Architecture
 
-## Stack Overview
+## Overview
 
-The full system spans three Docker Compose stacks connected via a shared `graft-orca` Docker network.
+The Graft development environment is a **single Docker Compose stack**. All services share the default Docker network and communicate by container name. One Grafana instance hosts the plugin; separate containers handle each observability concern.
 
-| Stack | Started by | Purpose |
-|-------|-----------|---------|
-| **① Graft Dev** | `npm run server` | Grafana with the Graft plugin loaded for UI development |
-| **② Orca** | `cd services/orca && make orca-up` | RCA backend + database |
-| **③ Demo** | `cd services/orca && make up` | OTel demo services that generate real alerts to drive Orca |
+```
+npm run server   →   docker compose up --build
+```
 
 ---
 
@@ -16,153 +14,153 @@ The full system spans three Docker Compose stacks connected via a shared `graft-
 
 ```mermaid
 flowchart LR
-    classDef graftNode fill:#1a2f5e,stroke:#4a7fd4,color:#fff
-    classDef orcaNode fill:#4a2000,stroke:#d4770a,color:#fff
-    classDef demoNode fill:#1a3d1a,stroke:#4aaa4a,color:#fff
-    classDef conflictNode fill:#5c0a0a,stroke:#ff5555,color:#fff,stroke-width:2px
-    classDef storeNode fill:#2a2a2a,stroke:#777,color:#ccc
+    classDef grafanaNode fill:#1a2f5e,stroke:#4a7fd4,color:#fff
+    classDef observNode  fill:#1a3d1a,stroke:#4aaa4a,color:#fff
+    classDef orcaNode    fill:#4a2000,stroke:#d4770a,color:#fff
+    classDef testNode    fill:#2a1a4a,stroke:#9a66ff,color:#fff
+    classDef storeNode   fill:#2a2a2a,stroke:#777,color:#ccc
 
-    subgraph GRAFT["① Graft Dev Stack — npm run server"]
-        GRAFANA_GRAFT["vikshana-graft-app\nGrafana + Graft plugin\n:3000"]
-        OTEL_LGTM["otel-lgtm\nGrafana :3001\nLoki :3100\nPrometheus :9090\nOTLP :4317 / :4318\nTempo :3200"]
-        ALLOY["alloy\n:12345"]
+    subgraph PLUGIN["Grafana Plugin"]
+        GRAFANA["vikshana-graft-app\nGrafana :3000\n+ Graft plugin"]
     end
 
-    subgraph ORCA["② Orca Stack — make orca-up"]
-        ORCA_FE["orca-frontend\n⚠️ :3000\n(decommissioning — make frontend-up only)"]
-        ORCA_BE["orca-backend\n:8000\n[graft-orca network]"]
+    subgraph OBS["Observability Backends"]
+        LOKI["loki\n:3100 (internal)"]
+        TEMPO["tempo\n:3200 (internal)"]
+        MIMIR["mimir\n:9009 (internal)"]
+        COLLECTOR["otel-collector\n:4317 gRPC\n:4318 HTTP"]
+    end
+
+    subgraph ORCA["Orca RCA"]
+        ORCA_BE["orca-backend\n:8001"]
         ORCA_PG[("orca-postgres\n:5432")]
+        MCP_G["mcp-grafana\n(internal)"]
+        MCP_P["mcp-postgres\n(internal)"]
     end
 
-    subgraph DEMO["③ Demo Stack — make up (adds to Orca stack)"]
-
-        subgraph FAULT["Fault Injection Targets"]
-            AD["ad — Java\nadFailure · adHighCpu · adManualGc"]
-            CART["cart — .NET\ncartFailure"]
-            PC["product-catalog — Go\nproductCatalogFailure"]
-        end
-
-        subgraph FLAGS["Feature Flags"]
-            FLAGD["flagd\n:8013"]
-            FLAGD_UI["flagd-ui\n:4000"]
-        end
-
-        subgraph TRAFFIC["Traffic Generation"]
-            LOCUST["load-generator\nLocust · :8089"]
-            FP["frontend-proxy\nEnvoy · :8080"]
-            DEMO_FE["demo-frontend"]
-        end
-
-        subgraph TELEM["Telemetry Pipeline"]
-            COLLECTOR["otel-collector\n(internal only)"]
-            PROM["prometheus\n:9091"]
-            LOKI["loki\n(internal only)"]
-        end
-
-        subgraph INTEGRATION["Grafana · Alerting · MCP"]
-            DEMO_GRAFANA["grafana — demo\n:3002"]
-            GRA_PROV["grafana-provisioner\none-shot · creates API key"]
-            GRA_MCP["grafana-mcp\nSSE server · internal :8000"]
-        end
-
-        subgraph STORES["Backing Stores"]
-            VALKEY[("valkey-cart")]
-            DEMO_PG[("demo-postgresql")]
-        end
-
+    subgraph TEST["Test App"]
+        APP["test-app\n:8080\nFastAPI + React\n+ chaos controls"]
     end
 
-    %% ── Graft dev internal ──────────────────────────────────────────────────
-    ALLOY         -->|"container logs"| OTEL_LGTM
-    GRAFANA_GRAFT -->|"OTLP :4317"| OTEL_LGTM
+    %% Telemetry flows
+    APP      -->|"OTLP :4317"| COLLECTOR
+    GRAFANA  -->|"OTLP :4317"| COLLECTOR
+    ORCA_BE  -->|"OTLP :4317"| COLLECTOR
 
-    %% ── Traffic flow ────────────────────────────────────────────────────────
-    LOCUST  -->|"HTTP"| FP
-    FP      -->|"proxy"| DEMO_FE
-    DEMO_FE -->|"gRPC"| AD
-    DEMO_FE -->|"gRPC"| CART
-    DEMO_FE -->|"gRPC"| PC
+    COLLECTOR -->|"traces"| TEMPO
+    COLLECTOR -->|"metrics (spanmetrics)"| MIMIR
+    COLLECTOR -->|"logs"| LOKI
 
-    %% ── Feature flag evaluation ─────────────────────────────────────────────
-    AD   -. "OpenFeature SDK" .-> FLAGD
-    CART -. "OpenFeature SDK" .-> FLAGD
-    PC   -. "OpenFeature SDK" .-> FLAGD
+    %% Grafana datasources
+    GRAFANA -.->|"Mimir datasource"| MIMIR
+    GRAFANA -.->|"Loki datasource"| LOKI
+    GRAFANA -.->|"Tempo datasource"| TEMPO
 
-    %% ── Telemetry ───────────────────────────────────────────────────────────
-    AD      -->|"OTLP traces + metrics + logs"| COLLECTOR
-    CART    -->|"OTLP traces + metrics + logs"| COLLECTOR
-    PC      -->|"OTLP traces + metrics + logs"| COLLECTOR
-    DEMO_FE -->|"OTLP"| COLLECTOR
-    COLLECTOR -->|"spanmetrics → OTLP push"| PROM
-    COLLECTOR -->|"OTLP logs"| LOKI
+    %% Alerting → Orca
+    GRAFANA -->|"POST /webhook/grafana\nalert fires"| ORCA_BE
 
-    %% ── Backing stores ──────────────────────────────────────────────────────
-    CART -->|"cache"| VALKEY
-    PC   -->|"reads"| DEMO_PG
+    %% Orca internal
+    ORCA_BE -->|"R/W"| ORCA_PG
+    ORCA_BE -->|"MCP SSE"| MCP_G
+    ORCA_BE -->|"MCP SSE"| MCP_P
+    MCP_G   -->|"Grafana HTTP API"| GRAFANA
+    MCP_P   -->|"Postgres read"| ORCA_PG
 
-    %% ── Alerting → Orca ─────────────────────────────────────────────────────
-    PROM         -->|"PromQL queries"| DEMO_GRAFANA
-    LOKI         -->|"LogQL queries"| DEMO_GRAFANA
-    GRA_PROV     -->|"POST service account + API key"| DEMO_GRAFANA
-    DEMO_GRAFANA -->|"POST /webhook/grafana\n(alert fires)"| ORCA_BE
+    %% Plugin → Orca proxy
+    GRAFANA -->|"RCA proxy → http://orca-backend:8000"| ORCA_BE
 
-    %% ── Orca internal ───────────────────────────────────────────────────────
-    ORCA_BE -->|"R/W alerts · rcas · steps"| ORCA_PG
-    ORCA_BE -->|"MCP SSE — read tools"| GRA_MCP
-    GRA_MCP -->|"Grafana HTTP API"| DEMO_GRAFANA
-    ORCA_FE -->|"REST /api/rca"| ORCA_BE
-
-    %% ── Cross-stack (graft-orca shared network) ────────────────────────────
-    GRAFANA_GRAFT -->|"RCA proxy → http://orca-backend:8000\n(graft-orca network)"| ORCA_BE
-
-    %% ── Styling ─────────────────────────────────────────────────────────────
-    class GRAFANA_GRAFT graftNode
-    class ALLOY graftNode
-    class OTEL_LGTM graftNode
-    class ORCA_FE conflictNode
-    class ORCA_BE orcaNode
-    class ORCA_PG storeNode
-    class AD,CART,PC,FLAGD,FLAGD_UI,LOCUST,FP,DEMO_FE,COLLECTOR,PROM,LOKI,DEMO_GRAFANA,GRA_PROV,GRA_MCP demoNode
-    class VALKEY,DEMO_PG storeNode
+    class GRAFANA grafanaNode
+    class LOKI,TEMPO,MIMIR,COLLECTOR observNode
+    class ORCA_BE,ORCA_PG,MCP_G,MCP_P orcaNode
+    class APP testNode
 ```
 
 ---
 
 ## Port Allocation
 
-All previous host-port conflicts between the Graft dev stack and the Orca+Demo stack have been resolved.
+| Port | Container | Purpose |
+|------|-----------|---------|
+| **3000** | `grafana` (`vikshana-graft-app`) | Grafana + Graft plugin |
+| **4317** | `otel-collector` | OTLP gRPC receiver |
+| **4318** | `otel-collector` | OTLP HTTP receiver |
+| **5432** | `orca-postgres` | PostgreSQL |
+| **8001** | `orca-backend` | Orca RCA API |
+| **8080** | `test-app` | Test app (API + chaos UI) |
 
-| Port | Container | Stack |
-|------|-----------|-------|
-| **3000** | `vikshana-graft-app` (Grafana + Graft plugin) | ① Graft dev |
-| **3001** | `otel-lgtm` (Grafana) | ① Graft dev |
-| **3002** | `grafana` (demo alerts + dashboards) | ③ Demo |
-| **3100** | `otel-lgtm` (Loki) | ① Graft dev |
-| **3200** | `otel-lgtm` (Tempo) | ① Graft dev |
-| **4317/4318** | `otel-lgtm` (OTLP) | ① Graft dev |
-| **5432** | `orca-postgres` | ② Orca |
-| **8000** | `orca-backend` | ② Orca |
-| **8080** | `frontend-proxy` (Envoy) | ③ Demo |
-| **9090** | `otel-lgtm` (Prometheus) | ① Graft dev |
-| **9091** | `prometheus` | ③ Demo |
-| **12345** | `alloy` | ① Graft dev |
-
-> `loki` and `otel-collector` in the demo stack have no host port binding — they are accessed only via Docker networking by other demo containers.
+Internal-only (no host port): `loki:3100`, `tempo:3200`, `mimir:9009`, `mcp-grafana`, `mcp-postgres`
 
 ---
 
-## Use Case Quick Reference
+## RCA Pipeline
 
-| Goal | Command | Notes |
-|------|---------|-------|
-| Graft UI development only | `npm run server` | Stack ① only |
-| Graft + pre-seeded RCA data | `cd services/orca && make orca-up` then `npm run server` | Stacks ① + ② |
-| Orca RCA pipeline (alert → investigation → report) | `cd services/orca && make up` | Stacks ② + ③ — `make init` required first time |
-| **Full E2E: Graft displaying live Orca RCAs** | `cd services/orca && make up` then `npm run server` | All stacks — `graft-orca` network created automatically by both commands |
-| Legacy Orca frontend | `cd services/orca && make frontend-up` | Deprecated — use Graft plugin UI instead |
+```
+test-app UI  →  toggle chaos (error/latency/exception)
+                     ↓
+             HTTP 5xx responses  →  Mimir metrics via OTel
+                     ↓
+       Grafana alert rule fires after 2m pending
+       (provisioning/alerting/alert-rules.yml)
+                     ↓
+  POST http://orca-backend:8000/webhook/grafana
+                     ↓
+  Orca spawns LangGraph agent (Haiku triage, Sonnet investigate)
+  Agent queries Grafana (mcp-grafana) + Postgres (mcp-postgres)
+                     ↓
+  RCA report saved to orca-postgres
+  Accessible: Grafana → Apps → Graft → RCA
+```
 
 ---
 
-## Known Gaps
+## Plugin Loading
 
-1. **`orca-frontend` port collision** — Orca's Next.js dashboard (`make frontend-up`) still uses `:3000`, which clashes with Graft's Grafana if both are started simultaneously. `orca-frontend` is being decommissioned in favour of the Graft plugin UI and is excluded from `make up` / `make orca-up`.
+| Volume Mount | Purpose |
+|---|---|
+| `./dist` → `/var/lib/grafana/plugins/vikshana-graft-app` | Compiled plugin files |
+| `./provisioning` → `/etc/grafana/provisioning` | Datasources, alerting, plugin config |
+
+```bash
+npm run build          # Build frontend (webpack)
+mage -v                # Build Go backend binary
+npm run server         # Start full stack
+```
+
+---
+
+## Test App
+
+`services/test-app/` — single container, FastAPI backend + React frontend:
+
+- Business endpoints: `/api/orders`, `/api/products`, `/api/users`
+- Chaos endpoints: `POST /api/chaos/enable?type=error|latency|exception`, `POST /api/chaos/disable`
+- OTel auto-instrumentation sends traces, metrics, and logs to the collector
+- Frontend at `http://localhost:8080` — API status panel + chaos controls
+
+---
+
+## Configuration Files
+
+| File | Purpose |
+|------|---------|
+| `config/loki.yaml` | Loki single-process config |
+| `config/tempo.yaml` | Tempo with metrics generator |
+| `config/mimir.yaml` | Mimir single-binary config |
+| `config/otel-collector.yaml` | Collector pipelines (traces/metrics/logs) |
+| `provisioning/datasources/datasources.yaml` | Mimir, Loki, Tempo datasources |
+| `provisioning/alerting/alert-rules.yml` | Test-app alert rules |
+| `provisioning/alerting/contact-points.yml` | Orca webhook contact point |
+| `provisioning/plugins/apps.yaml` | Graft plugin pre-enablement |
+
+---
+
+## Orca Standalone
+
+For backend-only development (no Grafana, no test app):
+
+```bash
+cd services/orca
+make up      # starts orca-postgres + orca-backend
+make down    # stops them
+make trigger-rca SERVICE=test-app ALERT=TestAppHighErrorRate
+```

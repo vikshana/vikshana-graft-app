@@ -19,7 +19,6 @@ Orca (Omniscient Root Cause Analyser) is an agentic RCA system that:
 ## Tech Stack
 
 - **Backend**: Python 3.12+ / FastAPI / LangGraph / LangChain / SQLAlchemy (async) / structlog
-- **Frontend**: TypeScript / Next.js 14+ / React
 - **Database**: PostgreSQL
 - **LLM**: Anthropic Claude (Haiku for triage, Sonnet for investigation/analysis/reporting)
 - **MCP Servers**: `grafana/mcp-grafana` (read-only tools), `modelcontextprotocol/server-postgres`
@@ -71,31 +70,9 @@ backend/
 │   └── integration/
 └── pyproject.toml
 
-frontend/
-└── src/
-    ├── app/                  # Next.js App Router pages
-    │   ├── page.tsx          # Dashboard
-    │   └── rca/[id]/page.tsx # RCA detail
-    ├── components/           # React components
-    ├── lib/                  # API client + utilities
-    └── types/                # TypeScript type definitions
-
-docker-compose.yml                  # Orca stack (orca-postgres, orca-backend, orca-frontend)
-Makefile                            # Orchestrates Orca + demo (make up / make down)
+docker-compose.yml                  # Orca standalone stack (orca-postgres, orca-backend)
+Makefile                            # Helpers: make up/down/logs/trigger-rca
 .env.example
-
-../../demo/                         # OTel demo stack (at repo root)
-├── docker-compose.yml              # Standalone OTel demo subset (minimal)
-├── otel-collector-config.yml       # Simplified collector config (Prometheus + Loki)
-├── opentelemetry-demo/             # Cloned by make init (v2.2.0)
-├── README.md                       # Demo walkthrough
-└── grafana-provisioning/
-    ├── alerting/
-    │   └── alert-rules.yml
-    ├── contact-points/
-    │   └── orca-webhook.yml
-    └── datasources/
-        └── datasources.yml
 ```
 
 ---
@@ -128,36 +105,24 @@ mypy app/
 
 # Database tables are auto-created on startup via SQLAlchemy create_all() in main.py lifespan
 
-# --- Frontend ---
+# --- Docker (from services/orca/) ---
 
-# Install dependencies (from frontend/)
-npm install
-
-# Start dev server
-npm run dev
-
-# Type checking
-npx tsc --noEmit
-
-# --- Docker (from repo root) ---
-
-# Start Orca stack only (Postgres + backend + frontend)
-docker compose up -d
-
-# Start full demo stack (Orca + OTel demo subset)
+# Start Orca standalone (Postgres + backend only)
 make up
 
-# Stop full demo stack
+# Stop Orca
 make down
 
-# Start only Orca services (when demo is also configured)
-make orca-up
+# Tail backend logs
+make logs
 
-# View all available Makefile targets
-make help
+# Fire a manual test alert (triggers RCA)
+make trigger-rca SERVICE=test-app ALERT=TestAppHighErrorRate
 
-# Clone the OTel demo into demo/opentelemetry-demo/ (first time only)
-make init
+# --- Full stack (from repo root) ---
+
+# Start everything: Grafana + observability + Orca + test-app
+npm run server
 ```
 
 ---
@@ -217,12 +182,6 @@ make init
 
 9. **Import ordering** — stdlib → third-party → local, separated by blank lines. Use absolute imports from `app.`.
 
-### TypeScript (Frontend)
-
-1. **Strict TypeScript** — `strict: true` in tsconfig. No `any` types.
-2. **Types mirror backend schemas** — `types/rca.ts` should match `schemas/rca.py` shapes.
-3. **Server components by default** — Use client components (`"use client"`) only when needed (interactivity, hooks).
-
 ---
 
 ## Environment Variables
@@ -245,16 +204,13 @@ LANGCHAIN_PROJECT=orca-dev
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 
 # Grafana MCP
-GRAFANA_URL=http://localhost:3002
+GRAFANA_URL=http://localhost:3000
 GRAFANA_API_KEY=glsa_...
 
 # Agent tuning
 ORCA_MAX_INVESTIGATION_STEPS=15
 ORCA_MAX_INVESTIGATION_TOKENS=100000
 ORCA_AGENT_TIMEOUT_SECONDS=300
-
-# Frontend
-NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
 ---
