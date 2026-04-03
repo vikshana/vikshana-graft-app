@@ -245,7 +245,7 @@ LANGCHAIN_PROJECT=orca-dev
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 
 # Grafana MCP
-GRAFANA_URL=http://localhost:3001
+GRAFANA_URL=http://localhost:3002
 GRAFANA_API_KEY=glsa_...
 
 # Agent tuning

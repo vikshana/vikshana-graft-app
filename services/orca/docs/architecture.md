@@ -664,7 +664,7 @@ graph TB
 1. Clone the OTel demo: `cd services/orca && make init`
 2. Start the demo stack: `cd services/orca && make up`
 3. Locust begins generating continuous traffic to the OTel demo frontend automatically
-4. Open Grafana at `http://localhost:3001` — pre-provisioned alert rules are already active
+4. Open Grafana at `http://localhost:3002` — pre-provisioned alert rules are already active
 5. To trigger an incident: open the Feature Flag UI at `http://localhost:8080` and enable `adServiceFailure` or `cartServiceFailure`
 6. The degraded service causes metric anomalies → Grafana alert fires → webhook POSTs to `http://orca-backend:8000/webhook/grafana`
 7. Orca agent investigates → RCA generated → Slack notification sent

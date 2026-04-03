@@ -46,6 +46,12 @@ services:
     labels:
       service: "vikshana-graft-app"
       environment: "development"
+    # Shared network with the Orca stack so the plugin backend can reach
+    # orca-backend by container name (http://orca-backend:8000).
+    # Created automatically by `npm run server` and `make up` / `make orca-up`.
+    networks:
+      - default
+      - graft-orca
 
   otel-lgtm:
     image: grafana/otel-lgtm:latest
@@ -78,3 +84,6 @@ services:
     depends_on:
       - otel-lgtm
 
+networks:
+  graft-orca:
+    external: true

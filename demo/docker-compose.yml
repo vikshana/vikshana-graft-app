@@ -448,8 +448,9 @@ services:
         limits:
           memory: 200M
     restart: unless-stopped
+    # Host port 9091 avoids conflict with otel-lgtm's Prometheus on 9090.
     ports:
-      - "${PROMETHEUS_PORT:-9090}:${PROMETHEUS_PORT:-9090}"
+      - "9091:9090"
     logging: *logging
 
   loki:
@@ -461,8 +462,8 @@ services:
           memory: 200M
     restart: unless-stopped
     command: -config.file=/etc/loki/local-config.yaml
-    ports:
-      - "3100:3100"
+    # No host port — accessed internally by otel-collector and grafana via container name.
+    # Avoids conflict with otel-lgtm's Loki on host port 3100.
     logging: *logging
 
   grafana:
@@ -473,6 +474,7 @@ services:
         limits:
           memory: 175M
     restart: unless-stopped
+    # Host port 3002 avoids conflict with otel-lgtm which uses 3001 in the Graft dev stack.
     environment:
       - GF_FEATURE_TOGGLES_ENABLE=ngalert
       - GF_UNIFIED_ALERTING_ENABLED=true
@@ -507,7 +509,7 @@ services:
       - ../../demo/grafana-provisioning/datasources:/etc/grafana/provisioning/datasources
       - ../../demo/opentelemetry-demo/src/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
     ports:
-      - "3001:3000"
+      - "3002:3000"
     logging: *logging
 
   # ---------------------------------------------------------------------------
@@ -552,8 +554,8 @@ services:
   # ---------------------------------------------------------------------------
   grafana-mcp:
     build:
-      context: .
-      dockerfile: ../../demo/Dockerfile.grafana-mcp
+      context: ../..
+      dockerfile: demo/Dockerfile.grafana-mcp
     container_name: grafana-mcp
     restart: unless-stopped
     deploy:

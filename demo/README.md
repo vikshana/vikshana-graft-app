@@ -72,10 +72,10 @@ make up
 |---|---|---|
 | OTel Demo Storefront | http://localhost:8080 | Web storefront + Feature Flag UI |
 | Feature Flag UI | http://localhost:8080/feature | Toggle fault injection scenarios |
-| Grafana | http://localhost:3001 | Dashboards + pre-provisioned alert rules |
-| Prometheus | http://localhost:9090 | Metrics |
+| Grafana | http://localhost:3002 | Dashboards + pre-provisioned alert rules |
+| Prometheus | http://localhost:9091 | Metrics |
 | Locust | http://localhost:8080/loadgen | Load generator UI |
-| **Orca Frontend** | **http://localhost:3000** | **RCA Dashboard** |
+| Orca Frontend (legacy) | http://localhost:3000 | RCA Dashboard — `make frontend-up` only |
 | Orca Backend | http://localhost:8000/docs | FastAPI + API docs |
 
 ---
@@ -103,7 +103,7 @@ make up
 
 ## Viewing the RCA
 
-1. Open http://localhost:3000 — the Orca dashboard
+1. Open http://localhost:3000 — the Orca legacy dashboard (requires `make frontend-up`)
 2. An RCA should appear within seconds of the Grafana alert firing
 3. Watch the status progress: `triggered` → `investigating` → `complete`
 4. Click the alert name to view the full RCA detail:
