@@ -80,10 +80,14 @@ frontend/
     ├── lib/                  # API client + utilities
     └── types/                # TypeScript type definitions
 
-demo/
+docker-compose.yml                  # Orca stack (orca-postgres, orca-backend, orca-frontend)
+Makefile                            # Orchestrates Orca + demo (make up / make down)
+.env.example
+
+../../demo/                         # OTel demo stack (at repo root)
 ├── docker-compose.yml              # Standalone OTel demo subset (minimal)
 ├── otel-collector-config.yml       # Simplified collector config (Prometheus + Loki)
-├── opentelemetry-demo/             # Git submodule (pre-built images + configs)
+├── opentelemetry-demo/             # Cloned by make init (v2.2.0)
 ├── README.md                       # Demo walkthrough
 └── grafana-provisioning/
     ├── alerting/
@@ -92,10 +96,6 @@ demo/
     │   └── orca-webhook.yml
     └── datasources/
         └── datasources.yml
-
-docker-compose.yml                  # Orca stack (orca-postgres, orca-backend, orca-frontend)
-Makefile                            # Orchestrates Orca + demo (make up / make down)
-.env.example
 ```
 
 ---
@@ -156,7 +156,7 @@ make orca-up
 # View all available Makefile targets
 make help
 
-# Initialise OTel demo submodule (first time only)
+# Clone the OTel demo into demo/opentelemetry-demo/ (first time only)
 make init
 ```
 
