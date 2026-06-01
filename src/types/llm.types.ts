@@ -7,6 +7,10 @@ export interface ToolExecution {
     name: string;
     status: 'pending' | 'success' | 'error';
     error?: string;
+    /** Matches OpenAI tool_call id for reliable status updates */
+    toolCallId?: string;
+    /** Short human-readable outcome (e.g. saved dashboard version) */
+    summary?: string;
 }
 
 /**

@@ -6,6 +6,7 @@ import type { ChatSession } from '../types/chat.types';
 export type { ChatSession };
 
 const STORAGE_KEY = 'graft_chat_history';
+const LAST_ACTIVE_SESSION_KEY = 'graft_last_active_session';
 const DEFAULT_MAX_HISTORY = 50;
 const DEFAULT_RETENTION_DAYS = 30;
 const MAX_PINNED_SESSIONS = 20;
@@ -58,6 +59,31 @@ class ChatHistoryService {
 
     getSession(id: string): ChatSession | undefined {
         return this.getStoredSessions().find(s => s.id === id);
+    }
+
+    getLastActiveSessionId(): string | null {
+        try {
+            return localStorage.getItem(LAST_ACTIVE_SESSION_KEY);
+        } catch (e) {
+            console.error('[Graft] Error loading last active session:', e);
+            return null;
+        }
+    }
+
+    setLastActiveSessionId(id: string): void {
+        try {
+            localStorage.setItem(LAST_ACTIVE_SESSION_KEY, id);
+        } catch (e) {
+            console.error('[Graft] Error saving last active session:', e);
+        }
+    }
+
+    clearLastActiveSessionId(): void {
+        try {
+            localStorage.removeItem(LAST_ACTIVE_SESSION_KEY);
+        } catch (e) {
+            console.error('[Graft] Error clearing last active session:', e);
+        }
     }
 
     togglePinSession(id: string): boolean {
@@ -118,12 +144,16 @@ class ChatHistoryService {
         }
 
         this.saveSessions(sessions);
+        this.setLastActiveSessionId(session.id);
         return session;
     }
 
     deleteSession(id: string): void {
         const sessions = this.getStoredSessions().filter(s => s.id !== id);
         this.saveSessions(sessions);
+        if (this.getLastActiveSessionId() === id) {
+            this.clearLastActiveSessionId();
+        }
     }
 
     cleanupOldSessions(maxHistory: number = DEFAULT_MAX_HISTORY, retentionDays: number = DEFAULT_RETENTION_DAYS): void {
@@ -153,6 +183,7 @@ class ChatHistoryService {
 
     clearAll(): void {
         localStorage.removeItem(STORAGE_KEY);
+        this.clearLastActiveSessionId();
     }
 }
 

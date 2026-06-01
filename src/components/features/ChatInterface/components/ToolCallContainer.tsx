@@ -79,8 +79,8 @@ export const ToolCallContainer: React.FC<ToolCallContainerProps> = ({ toolExecut
                     <div key={index} className={styles.toolCallContainer}>
                         <div
                             className={styles.toolCallHeader}
-                            onClick={() => hasError && toggleExpand(index)}
-                            style={{ cursor: hasError ? 'pointer' : 'default' }}
+                            onClick={() => (hasError || exec.summary) && toggleExpand(index)}
+                            style={{ cursor: hasError || exec.summary ? 'pointer' : 'default' }}
                         >
                             <div className={styles.toolCallStatus}>
                                 {exec.status === 'pending' && (
@@ -93,14 +93,24 @@ export const ToolCallContainer: React.FC<ToolCallContainerProps> = ({ toolExecut
                                     <span className={styles.toolCallError}>✗</span>
                                 )}
                             </div>
-                            <span className={styles.toolCallName}>{exec.name}</span>
-                            {hasError && (
+                            <span className={styles.toolCallName}>
+                                {exec.name}
+                                {exec.summary && exec.status === 'success' && (
+                                    <span className={styles.toolCallSummary}> — {exec.summary}</span>
+                                )}
+                            </span>
+                            {(hasError || exec.summary) && (
                                 <Icon name={isExpanded ? 'angle-down' : 'angle-right'} size="sm" />
                             )}
                         </div>
                         {hasError && isExpanded && exec.error && (
                             <div className={styles.toolCallErrorDetails}>
                                 {exec.error}
+                            </div>
+                        )}
+                        {!hasError && exec.summary && isExpanded && (
+                            <div className={styles.toolCallSuccessDetails}>
+                                {exec.summary}
                             </div>
                         )}
                     </div>
@@ -176,5 +186,17 @@ const getStyles = (theme: GrafanaTheme2) => ({
     font-family: ${theme.typography.fontFamilyMonospace};
     white-space: pre-wrap;
     word-break: break-word;
+  `,
+    toolCallSummary: css`
+    color: ${theme.colors.text.secondary};
+    font-weight: normal;
+  `,
+    toolCallSuccessDetails: css`
+    padding: 8px 12px;
+    border-top: 1px solid ${theme.colors.border.weak};
+    background: ${theme.colors.background.secondary};
+    color: ${theme.colors.success.text};
+    font-size: 12px;
+    font-family: ${theme.typography.fontFamilyMonospace};
   `,
 });

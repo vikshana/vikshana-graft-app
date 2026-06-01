@@ -83,19 +83,11 @@ const config = async (env: Env): Promise<Configuration> => {
           exclude: /(node_modules)/,
           test: /\.[tj]sx?$/,
           use: {
-            loader: 'swc-loader',
+            // esbuild avoids @swc/core native crashes on some Mac/Docker setups
+            loader: 'esbuild-loader',
             options: {
-              jsc: {
-                baseUrl: path.resolve(process.cwd(), SOURCE_DIR),
-                target: 'es2015',
-                loose: false,
-                parser: {
-                  syntax: 'typescript',
-                  tsx: true,
-                  decorators: false,
-                  dynamicImport: true,
-                },
-              },
+              loader: 'tsx',
+              target: 'es2015',
             },
           },
         },
@@ -156,6 +148,9 @@ const config = async (env: Env): Promise<Configuration> => {
     },
 
     plugins: [
+      new webpack.DefinePlugin({
+        __GRAFT_BUILD_DATE__: JSON.stringify(new Date().toISOString().substring(0, 10)),
+      }),
       new BuildModeWebpackPlugin(),
       virtualPublicPath,
       // Insert create plugin version information into the bundle

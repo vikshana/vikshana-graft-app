@@ -88,6 +88,8 @@ describe('ChatInterface', () => {
         (contextService.getUserContext as jest.Mock).mockReturnValue({ login: 'testuser', name: 'Test User' });
         (contextService.getDataSources as jest.Mock).mockReturnValue([]);
         (chatHistoryService.getSession as jest.Mock).mockReturnValue(null);
+        (chatHistoryService.getLastActiveSessionId as jest.Mock).mockReturnValue(null);
+        (chatHistoryService.clearLastActiveSessionId as jest.Mock).mockImplementation(() => undefined);
         (chatHistoryService.saveSession as jest.Mock).mockReturnValue({ id: 'test-session-id', messages: [] });
 
         // Mock scrollTo and scrollIntoView which are not available in test environment

@@ -96,7 +96,7 @@
       "type": "page",
       "name": "Graft AI Assistant",
       "path": "/a/vikshana-graft-app",
-      "role": "Admin",
+      "role": "Viewer",
       "addToNav": true,
       "defaultNav": true
     }

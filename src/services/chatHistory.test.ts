@@ -109,6 +109,33 @@ describe('ChatHistoryService', () => {
         });
     });
 
+    describe('Last active session', () => {
+        it('should track the last saved session', () => {
+            const messages = [{ role: 'user' as const, content: 'Hello' }];
+            const saved = chatHistoryService.saveSession(messages);
+
+            expect(chatHistoryService.getLastActiveSessionId()).toBe(saved.id);
+        });
+
+        it('should clear last active when session is deleted', () => {
+            const messages = [{ role: 'user' as const, content: 'Hello' }];
+            const saved = chatHistoryService.saveSession(messages);
+
+            chatHistoryService.deleteSession(saved.id);
+
+            expect(chatHistoryService.getLastActiveSessionId()).toBeNull();
+        });
+
+        it('should clear last active via clearLastActiveSessionId', () => {
+            const messages = [{ role: 'user' as const, content: 'Hello' }];
+            chatHistoryService.saveSession(messages);
+
+            chatHistoryService.clearLastActiveSessionId();
+
+            expect(chatHistoryService.getLastActiveSessionId()).toBeNull();
+        });
+    });
+
     describe('Cleanup', () => {
         it('should preserve pinned sessions during cleanup', () => {
             const oldDate = Date.now() - (31 * 24 * 60 * 60 * 1000); // 31 days ago

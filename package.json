@@ -1,6 +1,6 @@
 {
   "name": "graft",
-  "version": "0.1.0",
+  "version": "0.1.1-electramet",
   "scripts": {
     "build": "webpack -c ./.config/webpack/webpack.config.ts --env production",
     "dev": "webpack -w -c ./.config/webpack/webpack.config.ts --env development",
@@ -39,6 +39,8 @@
     "eslint-plugin-jsdoc": "^51.2.3",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.0",
+    "esbuild": "^0.25.0",
+    "esbuild-loader": "^4.2.2",
     "eslint-webpack-plugin": "^5.0.0",
     "fork-ts-checker-webpack-plugin": "^8.0.0",
     "glob": "^10.2.7",

@@ -569,15 +569,26 @@ align-items: center;
 gap: ${theme.spacing(1)};
 z-index: 1;
 `,
+  chatTitleBlock: css`
+position: absolute;
+left: 50%;
+transform: translateX(-50%);
+display: flex;
+flex-direction: column;
+align-items: center;
+gap: ${theme.spacing(0.5)};
+max-width: calc(100% - 280px);
+`,
   chatTitle: css`
 font-size: ${theme.typography.h4.fontSize};
 font-weight: ${theme.typography.fontWeightMedium};
 color: ${theme.colors.text.primary};
 cursor: pointer;
-position: absolute;
-left: 50%;
-transform: translateX(-50%);
 white-space: nowrap;
+`,
+  buildBadgeLanding: css`
+margin-top: ${theme.spacing(1)};
+margin-bottom: ${theme.spacing(1)};
 `,
   loadingContainer: css`
 display: flex;

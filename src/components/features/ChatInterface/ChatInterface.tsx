@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { BuildBadge } from './components/BuildBadge';
 import { CodeBlock } from './components/CodeBlock';
 import { MermaidBlock } from './components/MermaidBlock';
 import { ThinkingBlock } from './components/ThinkingBlock';
@@ -20,6 +21,8 @@ import { llmService } from '../../../services/llm';
 import type { Message, ToolExecution } from '../../../types/llm.types';
 import { contextService, UserContext, DataSourceContext, DashboardContext } from '../../../services/context';
 import { chatHistoryService } from '../../../services/chatHistory';
+import { truncateMessages } from '../../../services/truncation';
+import { filterTools } from '../../../services/toolFilter';
 
 // Local hooks
 import { useRollingPlaceholder, usePluginSettings, useAutoScroll } from './hooks';
@@ -56,25 +59,109 @@ const normalizeMarkdown = (content: string): string => {
 };
 
 const formatContext = (dashboard: DashboardContext, user: UserContext, dataSources: DataSourceContext[]): string => {
-  let contextStr = '';
+  const lines: string[] = [];
 
-  if (user && user.login) {
-    contextStr += `User: \n-Name: ${user.name || 'Unknown'} \n-Email: ${user.email || 'Unknown'} \n-Role: ${user.orgRole || 'Unknown'} \n\n`;
+  // Role + scope (critical instructions near top)
+  lines.push(
+    `You are Graft, an AI assistant embedded in Grafana. ` +
+    `You help users query metrics and logs, build and edit dashboards, and understand their observability data. ` +
+    `If a request is unrelated to Grafana, metrics, logs, or dashboards, politely decline.`
+  );
+  lines.push('');
+
+  // Behavioural instructions (positive framing, near top for primacy)
+  lines.push(
+    `When using tools: call the next tool immediately when you have enough information — ` +
+    `do not narrate your next step in text. Only respond with text when the task is fully ` +
+    `complete or you need clarification from the user. ` +
+    `If a tool returns an error or empty result, explain what failed and why before stopping.`
+  );
+  lines.push('');
+
+  // Output format
+  lines.push(
+    `Output format: use markdown. Wrap PromQL in \`\`\`promql blocks, LogQL in \`\`\`logql blocks, ` +
+    `and dashboard JSON in \`\`\`json blocks. Keep explanations concise.`
+  );
+  lines.push('');
+
+  // Dynamic runtime context
+  lines.push(`Current time: ${new Date().toISOString()}`);
+
+  if (user?.login) {
+    lines.push(`User: ${user.name || user.login} | Role: ${user.orgRole}`);
   }
 
   if (dashboard.uid) {
-    contextStr += `Current Dashboard: \n-Title: ${dashboard.title} \n-UID: ${dashboard.uid} \n\n`;
+    const version = dashboard.json?.version;
+    lines.push(
+      `Active dashboard: "${dashboard.title}" (uid: ${dashboard.uid}` +
+        `${version != null ? `, version: ${version}` : ''})`
+    );
+    lines.push(
+      `When calling update_dashboard for this dashboard, you MUST include the current uid "${dashboard.uid}"` +
+        `${version != null ? ` and version ${version} (Grafana increments on save)` : ''}. ` +
+        `Always call get_dashboard_by_uid immediately before update_dashboard to get the latest version.`
+    );
+  } else {
+    lines.push(
+      'No dashboard is active in context. Before editing, call search_dashboards or ask which dashboard to change.'
+    );
   }
 
-  if (dataSources && dataSources.length > 0) {
-    contextStr += `Available Data Sources: \n`;
+  // Datasource-to-tool mapping
+  if (dataSources?.length > 0) {
+    lines.push('');
+    lines.push('Available datasources:');
     dataSources.forEach(ds => {
-      contextStr += `-${ds.name} (Type: ${ds.type}, UID: ${ds.uid}) \n`;
+      let toolHint = '';
+      if (ds.type === 'prometheus') { toolHint = ' → query_prometheus, list_prometheus_*'; }
+      else if (ds.type === 'loki')  { toolHint = ' → query_loki_logs, list_loki_*'; }
+      lines.push(`- ${ds.name} (${ds.type}, uid: ${ds.uid})${toolHint}`);
     });
-    contextStr += '\n';
   }
 
-  return contextStr;
+  // Query guidance
+  lines.push('');
+  lines.push('Query guidance:');
+  lines.push('- Prometheus: PromQL. Call list_prometheus_metric_names before querying unknown metrics.');
+  lines.push('- Loki: LogQL. Call list_loki_label_names/values to discover labels before querying.');
+  lines.push('- Time ranges: use Grafana relative format ("now-1h" / "now"). Default to last 1 hour unless the user specifies otherwise.');
+
+  // Dashboard editing
+  lines.push('');
+  lines.push('Dashboard editing:');
+  lines.push(
+    `- NEVER tell the user a dashboard was saved unless update_dashboard returned uid and version in the same turn.`
+  );
+  lines.push(
+    `- After update_dashboard succeeds, tell the user to refresh the dashboard page (or hard-refresh) to see changes.`
+  );
+  lines.push(
+    `- To modify an existing dashboard: call get_dashboard_by_uid first (use uid from context), then update_dashboard with the FULL dashboard JSON including version.`
+  );
+  lines.push(
+    `- To create a new dashboard: build incrementally — minimal update_dashboard, get_dashboard_by_uid for new uid, then add panels one at a time (fetch, append, update).`
+  );
+  lines.push(
+    `- When the user asks you to create or change something, use update_dashboard via tools. Do not paste JSON for manual copy unless tools fail.`
+  );
+
+  // PromQL anomaly detection (grafana/promql-anomaly-detection)
+  lines.push('');
+  lines.push('PromQL anomaly detection panels:');
+  lines.push('- Metrics must be tagged with anomaly_name (required) and optionally anomaly_strategy (adaptive or robust).');
+  lines.push('- Recording rules in Prometheus produce anomaly:lower_band, anomaly:upper_band, and anomaly:level series.');
+  lines.push('- An anomaly panel is a time series with multiple targets on the same chart:');
+  lines.push('  1) Raw metric: {job="$job", anomaly_name="$anomaly_name", anomaly_strategy="$anomaly_strategy", anomaly_select=""}');
+  lines.push('  2) Lower band: last_over_time(anomaly:lower_band{job="$job", anomaly_name="$anomaly_name", anomaly_strategy="$anomaly_strategy"}[2m])');
+  lines.push('  3) Upper band: last_over_time(anomaly:upper_band{job="$job", anomaly_name="$anomaly_name", anomaly_strategy="$anomaly_strategy"}[2m])');
+  lines.push('- Use field overrides so upper/lower bands are semi-transparent fills; name them anomaly_upper_band and anomaly_lower_band.');
+  lines.push('- Use robust strategy for spiky/non-normal signals; adaptive for normally distributed metrics.');
+  lines.push('- Bands need ~24h of data before they are reliable. Mention this if bands look too wide or narrow.');
+  lines.push('- To add an anomaly panel: get_dashboard_by_uid, append one timeseries panel with the queries above, update_dashboard. Do not stop after describing the steps.');
+
+  return lines.join('\n');
 };
 
 
@@ -140,6 +227,8 @@ export const ChatInterface = () => {
   const abortControllerRef = useRef<AbortController | null>(null);
   const processedPromptRef = useRef<string | null>(null);
   const thinkingStartTimeRef = useRef<number | null>(null);
+  const messagesRef = useRef<Message[]>([]);
+  const currentSessionIdRef = useRef<string | undefined>(undefined);
   const [selectedFiles, setSelectedFiles] = useState<Array<{ name: string; content: string; type: 'image' | 'text'; mimeType?: string }>>([]);
   const [modelType, setModelType] = useState<'standard' | 'thinking'>('standard');
   const [previewAttachment, setPreviewAttachment] = useState<{ name: string; content: string; type: 'image' | 'text'; mimeType?: string } | null>(null);
@@ -164,7 +253,7 @@ export const ChatInterface = () => {
   useEffect(() => {
     if (mcpEnabled && mcpClient) {
       mcpClient.listTools().then((response) => {
-        const tools = mcp.convertToolsToOpenAI(response.tools);
+        const tools = filterTools(mcp.convertToolsToOpenAI(response.tools));
         setMcpTools(tools);
       }).catch(() => {
         // MCP tools loading failed - continue without tools
@@ -244,7 +333,22 @@ export const ChatInterface = () => {
     }
   };
 
-  // Sync state with URL and load session if specified
+  // Keep refs current for persist-on-unmount (e.g. user navigates to a dashboard)
+  messagesRef.current = messages;
+  currentSessionIdRef.current = currentSessionId;
+
+  // Persist conversation when leaving the app (Grafana unmounts the plugin)
+  useEffect(() => {
+    return () => {
+      const msgs = messagesRef.current;
+      if (msgs.length === 0) {
+        return;
+      }
+      chatHistoryService.saveSession(msgs, currentSessionIdRef.current);
+    };
+  }, []);
+
+  // Load session from URL, or restore last active conversation when returning via Grafana menu
   useEffect(() => {
     const sessionId = searchParams.get('session');
     const isChatActive = searchParams.get('chat');
@@ -255,20 +359,28 @@ export const ChatInterface = () => {
         setMessages(session.messages);
         setCurrentSessionId(session.id);
       }
-    } else if (!isChatActive && !isLoading) {
-      // If we are navigating to landing page, abort any ongoing request
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
-        setIsLoading(false);
+      if (session && !isChatActive) {
+        setSearchParams({ chat: 'true', session: sessionId }, { replace: true });
       }
-      // Only reset if we have messages to clear
-      if (messages.length > 0 || currentSessionId !== undefined) {
-        setMessages([]);
-        setCurrentSessionId(undefined);
-      }
+      return;
     }
-  }, [searchParams, currentSessionId, messages.length, isLoading]);
+
+    if (isChatActive) {
+      return;
+    }
+
+    const lastId = chatHistoryService.getLastActiveSessionId();
+    if (!lastId) {
+      return;
+    }
+
+    const session = chatHistoryService.getSession(lastId);
+    if (session && session.messages.length > 0) {
+      setMessages(session.messages);
+      setCurrentSessionId(session.id);
+      setSearchParams({ chat: 'true', session: lastId }, { replace: true });
+    }
+  }, [searchParams, currentSessionId, setSearchParams]);
 
   // Handle pre-filled prompt from navigation state (separate effect to avoid loop)
   useEffect(() => {
@@ -410,7 +522,9 @@ export const ChatInterface = () => {
       let finalContent = '';
       let finalToolExecutions: ToolExecution[] = [];
 
-      await llmService.chat(newMessages, context, (fullContent, toolExecutions) => {
+      const truncatedMessages = truncateMessages(newMessages, 10);
+
+      await llmService.chat(truncatedMessages, context, (fullContent, toolExecutions) => {
         // Capture the latest values for saving after completion
         finalContent = fullContent;
         finalToolExecutions = toolExecutions || [];
@@ -511,6 +625,7 @@ export const ChatInterface = () => {
       return;
     }
 
+    chatHistoryService.clearLastActiveSessionId();
     setMessages([]);
     setSearchParams({});
     setInput('');
@@ -670,7 +785,7 @@ ${input} `
             <h1 className={styles.title} data-testid="landing-title">{greetingMessage}</h1>
 
             <h2 className={styles.subtitle}>How can I help you today?</h2>
-
+            <BuildBadge className={styles.buildBadgeLanding} />
 
             <div className={styles.landingInputWrapper}>
 
@@ -826,8 +941,11 @@ ${input} `
                 Back
               </Button>
             </div>
-            <div className={styles.chatTitle} onClick={handleReset} data-testid="chat-title">
-              Graft AI Assistant
+            <div className={styles.chatTitleBlock}>
+              <div className={styles.chatTitle} onClick={handleReset} data-testid="chat-title">
+                Graft AI Assistant
+              </div>
+              <BuildBadge />
             </div>
             <div className={styles.headerRight}>
               <Button variant="secondary" fill="outline" onClick={() => navigate('history')} data-testid="history-button">
@@ -984,7 +1102,7 @@ ${input} `
               <button
                 className={styles.scrollButton}
                 onClick={scrollDownPage}
-                title="Scroll down"
+                title="Scroll to bottom"
               >
                 <Icon name="arrow-down" size="lg" />
               </button>

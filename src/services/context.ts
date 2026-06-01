@@ -6,12 +6,27 @@ import type { DashboardContext, UserContext, DataSourceContext } from '../types/
 // Re-export for backward compatibility
 export type { DashboardContext, UserContext, DataSourceContext };
 
+const LAST_DASHBOARD_UID_KEY = 'graft_last_dashboard_uid';
+
 export const contextService = {
     getDashboardUid(): string | null {
         const path = window.location.pathname;
         // URL format: /d/<uid>/<slug>
         const match = path.match(/\/d\/([^/]+)/);
-        return match ? match[1] : null;
+        if (match) {
+            try {
+                sessionStorage.setItem(LAST_DASHBOARD_UID_KEY, match[1]);
+            } catch {
+                // ignore storage errors
+            }
+            return match[1];
+        }
+
+        try {
+            return sessionStorage.getItem(LAST_DASHBOARD_UID_KEY);
+        } catch {
+            return null;
+        }
     },
 
     getUserContext(): UserContext {

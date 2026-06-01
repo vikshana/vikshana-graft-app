@@ -9,6 +9,7 @@ interface UseAutoScrollReturn {
     messageListRef: RefObject<HTMLDivElement>;
     scrollToBottom: (behavior?: ScrollBehavior) => void;
     handleScroll: () => void;
+    /** Scrolls the message list all the way to the latest content */
     scrollDownPage: () => void;
     showScrollButton: boolean;
     shouldAutoScroll: boolean;
@@ -57,11 +58,10 @@ export const useAutoScroll = (props: UseAutoScrollProps): UseAutoScrollReturn =>
     }, [setShowScrollButton, setShouldAutoScroll]);
 
     const scrollDownPage = useCallback(() => {
-        if (messageListRef.current && typeof messageListRef.current.scrollTo === 'function') {
-            const { scrollTop, clientHeight } = messageListRef.current;
-            messageListRef.current.scrollTo({ top: scrollTop + clientHeight, behavior: 'smooth' });
-        }
-    }, []);
+        setShouldAutoScroll(true);
+        setShowScrollButton(false);
+        scrollToBottom('smooth');
+    }, [scrollToBottom, setShouldAutoScroll, setShowScrollButton]);
 
     return {
         messagesEndRef,
