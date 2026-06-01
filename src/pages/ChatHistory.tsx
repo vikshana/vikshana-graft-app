@@ -1,5 +1,5 @@
 // External libraries
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 // Grafana packages
@@ -14,8 +14,28 @@ import { getStyles } from './ChatHistory.styles';
 export const ChatHistory = () => {
   const styles = useStyles2(getStyles);
   const navigate = useNavigate();
-  const [sessions, setSessions] = useState<ChatSession[]>(() => chatHistoryService.getAllSessions());
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Reload when opening this page (sessions may have been saved while on chat or another Grafana page)
+  useEffect(() => {
+    const refresh = async () => {
+      await chatHistoryService.refreshSessions();
+      setSessions(chatHistoryService.getAllSessions());
+    };
+    void refresh();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        refresh();
+      }
+    };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
   const [pinLimitModalOpen, setPinLimitModalOpen] = useState(false);

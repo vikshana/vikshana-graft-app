@@ -37,6 +37,11 @@ jest.mock('@grafana/llm', () => ({
 
 jest.mock('@grafana/runtime', () => ({
     ...jest.requireActual('@grafana/runtime'),
+    locationService: {
+        getHistory: () => ({
+            listen: jest.fn(() => jest.fn()),
+        }),
+    },
     getBackendSrv: () => ({
         post: jest.fn(),
         get: jest.fn().mockResolvedValue({}),
@@ -308,9 +313,9 @@ describe('ChatInterface', () => {
         });
     });
 
-    it('scrolls to bottom on new message', async () => {
-        const scrollIntoViewMock = jest.fn();
-        Element.prototype.scrollIntoView = scrollIntoViewMock;
+    it('scrolls message list to bottom on new message', async () => {
+        const scrollToMock = jest.fn();
+        HTMLElement.prototype.scrollTo = scrollToMock;
 
         (llmService.chat as jest.Mock).mockImplementation(async (messages, context, onUpdate) => {
             onUpdate('Response');
@@ -332,7 +337,9 @@ describe('ChatInterface', () => {
         fireEvent.click(screen.getByLabelText('Send message'));
 
         await waitFor(() => {
-            expect(scrollIntoViewMock).toHaveBeenCalled();
+            expect(scrollToMock).toHaveBeenCalled();
+            const lastCall = scrollToMock.mock.calls[scrollToMock.mock.calls.length - 1][0];
+            expect(lastCall).toEqual(expect.objectContaining({ top: expect.any(Number) }));
         });
     });
 
@@ -747,6 +754,58 @@ describe('ChatInterface', () => {
 
             await waitFor(() => {
                 expect(screen.getByText(/LLM Plugin Unavailable/i)).toBeInTheDocument();
+            });
+        });
+    });
+
+    describe('session restore', () => {
+        it('restores last active session from storage on mount', async () => {
+            const mockSession = {
+                id: 'stored-session',
+                title: 'Stored',
+                messages: [{ role: 'user', content: 'From storage' }],
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+            };
+
+            (chatHistoryService.loadLastActiveSession as jest.Mock).mockReturnValue({
+                sessionId: mockSession.id,
+                messages: mockSession.messages,
+            });
+
+            render(
+                <MemoryRouter>
+                    <ChatInterface />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                expect(screen.getByText('From storage')).toBeInTheDocument();
+            });
+        });
+
+        it('restores last active session when URL has chat=true but no session id', async () => {
+            const mockSession = {
+                id: 'last-session',
+                title: 'Prior chat',
+                messages: [{ role: 'user', content: 'Remember me' }],
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+            };
+
+            (chatHistoryService.getLastActiveSessionId as jest.Mock).mockReturnValue('last-session');
+            (chatHistoryService.getSession as jest.Mock).mockImplementation((id: string) =>
+                id === 'last-session' ? mockSession : null
+            );
+
+            render(
+                <MemoryRouter initialEntries={['/?chat=true']}>
+                    <ChatInterface />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                expect(screen.getByText('Remember me')).toBeInTheDocument();
             });
         });
     });

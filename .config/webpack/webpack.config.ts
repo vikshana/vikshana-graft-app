@@ -8,6 +8,7 @@
 import CopyWebpackPlugin from 'copy-webpack-plugin';
 import ESLintPlugin from 'eslint-webpack-plugin';
 import ForkTsCheckerWebpackPlugin from 'fork-ts-checker-webpack-plugin';
+import fs from 'fs';
 import path from 'path';
 import ReplaceInFileWebpackPlugin from 'replace-in-file-webpack-plugin';
 import TerserPlugin from 'terser-webpack-plugin';
@@ -24,6 +25,11 @@ import { externals } from '../bundler/externals.ts';
 const pluginJson = getPluginJson();
 const cpVersion = getCPConfigVersion();
 const pluginVersion = getPackageJson().version;
+
+const electrametBuildPath = path.resolve(process.cwd(), 'electramet-build.json');
+const electrametBuild = fs.existsSync(electrametBuildPath)
+  ? (JSON.parse(fs.readFileSync(electrametBuildPath, 'utf8')) as { version: string; build: number })
+  : { version: pluginVersion, build: 0 };
 
 const virtualPublicPath = new VirtualModulesPlugin({
   'node_modules/grafana-public-path.js': `
@@ -150,6 +156,8 @@ const config = async (env: Env): Promise<Configuration> => {
     plugins: [
       new webpack.DefinePlugin({
         __GRAFT_BUILD_DATE__: JSON.stringify(new Date().toISOString().substring(0, 10)),
+        __GRAFT_BUILD_VERSION__: JSON.stringify(electrametBuild.version),
+        __GRAFT_BUILD_NUMBER__: JSON.stringify(String(electrametBuild.build)),
       }),
       new BuildModeWebpackPlugin(),
       virtualPublicPath,
@@ -166,6 +174,7 @@ const config = async (env: Env): Promise<Configuration> => {
           // To `compiler.options.output`
           { from: hasReadme() ? 'README.md' : '../README.md', to: '.', force: true },
           { from: 'plugin.json', to: '.' },
+          { from: electrametBuildPath, to: 'build-info.json', force: true, noErrorOnMissing: true },
           { from: '../LICENSE', to: '.' },
           { from: '../CHANGELOG.md', to: '.', force: true },
           { from: '**/*.json', to: '.' },

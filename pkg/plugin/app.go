@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
@@ -24,6 +25,7 @@ var (
 // This plugin only handles prompt library configuration.
 type App struct {
 	backend.CallResourceHandler
+	chatMu sync.Mutex
 	tracer trace.Tracer
 	// Metrics
 	chatRequestsTotal    metric.Int64Counter
@@ -101,6 +103,7 @@ func NewApp(_ context.Context, settings backend.AppInstanceSettings) (instancemg
 
 func (a *App) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/settings", a.handleSettings)
+	mux.HandleFunc("/chat-history", a.handleChatHistory)
 	mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"message": "ok"}`))

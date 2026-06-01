@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { BuildBadge } from './components/BuildBadge';
 import { CodeBlock } from './components/CodeBlock';
 import { MermaidBlock } from './components/MermaidBlock';
@@ -12,6 +12,7 @@ import remarkGfm from 'remark-gfm';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 
 // Grafana packages
+import { locationService } from '@grafana/runtime';
 import { Alert, Button, TextArea, useStyles2, useTheme2, Icon, ConfirmModal } from '@grafana/ui';
 import { GrafanaTheme2 } from '@grafana/data';
 import { mcp } from '@grafana/llm';
@@ -20,8 +21,13 @@ import { mcp } from '@grafana/llm';
 import { llmService } from '../../../services/llm';
 import type { Message, ToolExecution } from '../../../types/llm.types';
 import { contextService, UserContext, DataSourceContext, DashboardContext } from '../../../services/context';
-import { chatHistoryService } from '../../../services/chatHistory';
+import { chatHistoryService, prepareMessagesForStorage } from '../../../services/chatHistory';
+import { PLUGIN_BASE_URL } from '../../../constants';
 import { truncateMessages } from '../../../services/truncation';
+import {
+  appendDashboardReferencesToReply,
+  appendSaveVerificationWarning,
+} from '../../../services/appendToolReferences';
 import { filterTools } from '../../../services/toolFilter';
 
 // Local hooks
@@ -72,8 +78,8 @@ const formatContext = (dashboard: DashboardContext, user: UserContext, dataSourc
   // Behavioural instructions (positive framing, near top for primacy)
   lines.push(
     `When using tools: call the next tool immediately when you have enough information — ` +
-    `do not narrate your next step in text. Only respond with text when the task is fully ` +
-    `complete or you need clarification from the user. ` +
+    `do not narrate your next step in text ("I will now update...", "Next I will..."). ` +
+    `Only respond with text when the task is fully complete or you need clarification. ` +
     `If a tool returns an error or empty result, explain what failed and why before stopping.`
   );
   lines.push('');
@@ -128,7 +134,21 @@ const formatContext = (dashboard: DashboardContext, user: UserContext, dataSourc
   lines.push('- Loki: LogQL. Call list_loki_label_names/values to discover labels before querying.');
   lines.push('- Time ranges: use Grafana relative format ("now-1h" / "now"). Default to last 1 hour unless the user specifies otherwise.');
 
-  // Dashboard editing
+  // Dashboard lookup / editing
+  lines.push('');
+  lines.push('Dashboard lookup:');
+  lines.push(
+    `- After search_dashboards: call get_dashboard_summary for the target uid so the user sees the panel index table (arrayIndex, panelId, title). The UI also shows this table automatically — still mention uid in your reply.`
+  );
+  lines.push(
+    `- NEVER claim panels were updated or titles changed unless update_dashboard succeeded in this turn (check tool steps). If you only planned changes, say so.`
+  );
+  lines.push(
+    `- When the user provides dashboard uid and panel index/panelId, skip search — use get_dashboard_by_uid or get_dashboard_summary directly.`
+  );
+  lines.push(
+    `- Tell users they can speed up edits by including: dashboard uid, panel arrayIndex (0-based), and/or panelId from the index table.`
+  );
   lines.push('');
   lines.push('Dashboard editing:');
   lines.push(
@@ -145,6 +165,11 @@ const formatContext = (dashboard: DashboardContext, user: UserContext, dataSourc
   );
   lines.push(
     `- When the user asks you to create or change something, use update_dashboard via tools. Do not paste JSON for manual copy unless tools fail.`
+  );
+  lines.push(
+    `- Multiple panels: call get_dashboard_by_uid once, apply ALL panel changes, then update_dashboard. ` +
+      `Prefer one update_dashboard with every panel change over many separate saves. ` +
+      `If you must save one panel at a time, call update_dashboard for panel 1 before writing text about panel 2 — never stop after search/planning text.`
   );
 
   // PromQL anomaly detection (grafana/promql-anomaly-detection)
@@ -205,9 +230,6 @@ const MemoizedReactMarkdown = React.memo(({ content, theme, onRender, isStreamin
 
 MemoizedReactMarkdown.displayName = 'MemoizedReactMarkdown';
 
-
-
-
 export const ChatInterface = () => {
   const styles = useStyles2(getStyles);
   const theme = useTheme2();
@@ -228,7 +250,9 @@ export const ChatInterface = () => {
   const processedPromptRef = useRef<string | null>(null);
   const thinkingStartTimeRef = useRef<number | null>(null);
   const messagesRef = useRef<Message[]>([]);
-  const currentSessionIdRef = useRef<string | undefined>(undefined);
+  const currentSessionIdRef = useRef<string | undefined>();
+  const urlSyncedRef = useRef(false);
+  const historyHydratedRef = useRef(false);
   const [selectedFiles, setSelectedFiles] = useState<Array<{ name: string; content: string; type: 'image' | 'text'; mimeType?: string }>>([]);
   const [modelType, setModelType] = useState<'standard' | 'thinking'>('standard');
   const [previewAttachment, setPreviewAttachment] = useState<{ name: string; content: string; type: 'image' | 'text'; mimeType?: string } | null>(null);
@@ -333,54 +357,150 @@ export const ChatInterface = () => {
     }
   };
 
-  // Keep refs current for persist-on-unmount (e.g. user navigates to a dashboard)
+  // Keep refs current for persist-on-leave (Grafana unmounts the plugin when opening a dashboard)
   messagesRef.current = messages;
   currentSessionIdRef.current = currentSessionId;
 
-  // Persist conversation when leaving the app (Grafana unmounts the plugin)
-  useEffect(() => {
-    return () => {
-      const msgs = messagesRef.current;
-      if (msgs.length === 0) {
-        return;
-      }
-      chatHistoryService.saveSession(msgs, currentSessionIdRef.current);
-    };
+  const applyRestoredSession = useCallback(
+    (restored: { sessionId: string; messages: Message[] }) => {
+      setMessages(restored.messages);
+      setCurrentSessionId(restored.sessionId);
+      currentSessionIdRef.current = restored.sessionId;
+      messagesRef.current = restored.messages;
+      setSearchParams({ chat: 'true', session: restored.sessionId }, { replace: true });
+    },
+    [setSearchParams]
+  );
+
+  const persistActiveSession = useCallback(() => {
+    const msgs = prepareMessagesForStorage(messagesRef.current);
+    if (msgs.length === 0) {
+      return;
+    }
+    const saved = chatHistoryService.saveSession(msgs, currentSessionIdRef.current);
+    if (saved) {
+      currentSessionIdRef.current = saved.id;
+    }
+    void chatHistoryService.flushToServer();
   }, []);
 
-  // Load session from URL, or restore last active conversation when returning via Grafana menu
+  // Save whenever messages change (Grafana often does not fire pagehide when switching to a dashboard)
   useEffect(() => {
+    if (messages.length === 0) {
+      return;
+    }
+    messagesRef.current = messages;
+    const timer = window.setTimeout(() => persistActiveSession(), 300);
+    return () => {
+      window.clearTimeout(timer);
+      persistActiveSession();
+    };
+  }, [messages, currentSessionId, persistActiveSession]);
+
+  // Load history from plugin backend, then restore last session or URL session
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      await chatHistoryService.ensureLoaded();
+      if (cancelled || historyHydratedRef.current) {
+        return;
+      }
+      historyHydratedRef.current = true;
+
+      const sessionId = searchParams.get('session');
+      if (sessionId) {
+        const session = chatHistoryService.getSession(sessionId);
+        if (session) {
+          applyRestoredSession({ sessionId: session.id, messages: session.messages });
+          urlSyncedRef.current = true;
+          return;
+        }
+      }
+
+      if (messagesRef.current.length === 0) {
+        const restored = chatHistoryService.loadLastActiveSession();
+        if (restored) {
+          applyRestoredSession(restored);
+        }
+      }
+      urlSyncedRef.current = true;
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [applyRestoredSession, searchParams]);
+
+  // Restore when Grafana navigates back to this app (use locationService — router pathname is only "/")
+  useEffect(() => {
+    const tryRestore = async () => {
+      const path = locationService.getLocation().pathname || '';
+      if (!path.includes(PLUGIN_BASE_URL)) {
+        return;
+      }
+      if (messagesRef.current.length > 0) {
+        return;
+      }
+      await chatHistoryService.ensureLoaded();
+      const restored = chatHistoryService.loadLastActiveSession();
+      if (restored) {
+        applyRestoredSession(restored);
+      }
+    };
+
+    void tryRestore();
+    const unlisten = locationService.getHistory().listen(() => {
+      void tryRestore();
+    });
+    return unlisten;
+  }, [applyRestoredSession]);
+
+  // Persist when leaving the Grafana app route (dashboard, explore, etc.)
+  useEffect(() => {
+    const history = locationService.getHistory();
+    const unlisten = history.listen((loc) => {
+      const path = loc.pathname || '';
+      if (!path.includes(PLUGIN_BASE_URL)) {
+        persistActiveSession();
+      }
+    });
+
+    const onHide = () => persistActiveSession();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        onHide();
+      }
+    };
+
+    window.addEventListener('pagehide', onHide);
+    window.addEventListener('beforeunload', onHide);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      unlisten();
+      window.removeEventListener('pagehide', onHide);
+      window.removeEventListener('beforeunload', onHide);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      onHide();
+    };
+  }, [persistActiveSession]);
+
+  // Sync URL when opening a session from Previous Conversations after hydration
+  useEffect(() => {
+    if (!historyHydratedRef.current) {
+      return;
+    }
     const sessionId = searchParams.get('session');
-    const isChatActive = searchParams.get('chat');
-
-    if (sessionId) {
-      const session = chatHistoryService.getSession(sessionId);
-      if (session && session.id !== currentSessionId) {
-        setMessages(session.messages);
-        setCurrentSessionId(session.id);
-      }
-      if (session && !isChatActive) {
-        setSearchParams({ chat: 'true', session: sessionId }, { replace: true });
-      }
+    if (!sessionId) {
       return;
     }
-
-    if (isChatActive) {
-      return;
+    const session = chatHistoryService.getSession(sessionId);
+    if (session && session.id !== currentSessionIdRef.current) {
+      applyRestoredSession({ sessionId: session.id, messages: session.messages });
     }
-
-    const lastId = chatHistoryService.getLastActiveSessionId();
-    if (!lastId) {
-      return;
+    if (!searchParams.get('chat')) {
+      setSearchParams({ chat: 'true', session: sessionId }, { replace: true });
     }
-
-    const session = chatHistoryService.getSession(lastId);
-    if (session && session.messages.length > 0) {
-      setMessages(session.messages);
-      setCurrentSessionId(session.id);
-      setSearchParams({ chat: 'true', session: lastId }, { replace: true });
-    }
-  }, [searchParams, currentSessionId, setSearchParams]);
+  }, [searchParams, setSearchParams, applyRestoredSession]);
 
   // Handle pre-filled prompt from navigation state (separate effect to avoid loop)
   useEffect(() => {
@@ -473,9 +593,6 @@ export const ChatInterface = () => {
       return;
     }
 
-    // Set URL param to indicate active chat
-    setSearchParams({ chat: 'true' });
-
     let content = input;
     const attachments: Array<{ name: string; content: string; type: 'image' | 'text'; mimeType?: string }> = [];
 
@@ -492,6 +609,12 @@ export const ChatInterface = () => {
       }
     }
 
+    if (/^continue\.?$/i.test(content.trim())) {
+      content =
+        'Continue the previous task. Use tools immediately to finish any remaining dashboard or panel updates. ' +
+        'Call get_dashboard_by_uid for the latest version, then update_dashboard. Do not repeat earlier searches unless needed.';
+    }
+
     const userMessage: Message = { role: 'user', content, attachments: attachments.length > 0 ? attachments : undefined };
     const newMessages = [...messages, userMessage];
 
@@ -499,6 +622,15 @@ export const ChatInterface = () => {
     setInput('');
     clearFiles();
     setIsLoading(true);
+
+    // Save immediately so history survives navigation before the LLM finishes
+    const draftSession = chatHistoryService.saveSession(newMessages, currentSessionId);
+    if (!draftSession) {
+      return;
+    }
+    setCurrentSessionId(draftSession.id);
+    currentSessionIdRef.current = draftSession.id;
+    setSearchParams({ chat: 'true', session: draftSession.id });
 
     try {
       const dashboard = await contextService.getCurrentDashboard();
@@ -553,20 +685,39 @@ export const ChatInterface = () => {
         });
       }, modelType, controller.signal, mcpClient, mcpTools);
 
+      let displayContent = appendDashboardReferencesToReply(finalContent, finalToolExecutions);
+      displayContent = appendSaveVerificationWarning(displayContent, finalToolExecutions);
+
+      setMessages((prev) => {
+        const updated = [...prev];
+        const last = updated[updated.length - 1];
+        if (last?.role === 'assistant') {
+          updated[updated.length - 1] = {
+            ...last,
+            content: displayContent,
+            thinkingSeconds: thinkingDuration,
+            toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+          };
+        }
+        return updated;
+      });
+
       // Save chat to history after completion
-      // Construct the final assistant message from the data we tracked during streaming
       const finalAssistantMessage: Message = {
         role: 'assistant',
-        content: finalContent,
+        content: displayContent,
         thinkingSeconds: thinkingDuration,
         toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined
       };
       const finalMessages = [...newMessages, finalAssistantMessage];
       const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
-      setCurrentSessionId(savedSession.id);
-      setSearchParams({ chat: 'true', session: savedSession.id });
+      if (savedSession) {
+        setCurrentSessionId(savedSession.id);
+        setSearchParams({ chat: 'true', session: savedSession.id });
+      }
     } catch (error: any) {
       if (error.name === 'AbortError') {
+        persistActiveSession();
         return;
       }
       const errorMessage = `Sorry, I encountered an error: ${error.message || 'Unknown error'} `;
@@ -596,8 +747,10 @@ export const ChatInterface = () => {
       // Save the conversation with the error message
       const finalMessages = [...newMessages, errorAssistantMessage];
       const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
-      setCurrentSessionId(savedSession.id);
-      setSearchParams({ chat: 'true', session: savedSession.id });
+      if (savedSession) {
+        setCurrentSessionId(savedSession.id);
+        setSearchParams({ chat: 'true', session: savedSession.id });
+      }
     } finally {
       setIsLoading(false);
     }
@@ -705,8 +858,10 @@ ${input} `
       };
       const finalMessages = [...newMessages, finalAssistantMessage];
       const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
-      setCurrentSessionId(savedSession.id);
-      setSearchParams({ chat: 'true', session: savedSession.id });
+      if (savedSession) {
+        setCurrentSessionId(savedSession.id);
+        setSearchParams({ chat: 'true', session: savedSession.id });
+      }
     } catch (error: any) {
       if (error.name === 'AbortError') {
         return;
@@ -738,8 +893,10 @@ ${input} `
       // Save the conversation with the error message
       const finalMessages = [...newMessages, errorAssistantMessage];
       const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
-      setCurrentSessionId(savedSession.id);
-      setSearchParams({ chat: 'true', session: savedSession.id });
+      if (savedSession) {
+        setCurrentSessionId(savedSession.id);
+        setSearchParams({ chat: 'true', session: savedSession.id });
+      }
 
       console.error('Chat error:', error);
     } finally {
@@ -954,6 +1111,7 @@ ${input} `
               </Button>
             </div>
           </div>
+          <div className={styles.messagePane}>
           <div
             className={styles.messageList}
             ref={messageListRef}
@@ -1096,13 +1254,15 @@ ${input} `
                 </div >
               );
             })}
-          </div >
-          <div>
+            <div ref={messagesEndRef} aria-hidden="true" />
+          </div>
             {showScrollButton && (
               <button
+                type="button"
                 className={styles.scrollButton}
                 onClick={scrollDownPage}
-                title="Scroll to bottom"
+                title="Scroll to bottom of conversation"
+                data-testid="scroll-to-bottom-button"
               >
                 <Icon name="arrow-down" size="lg" />
               </button>
@@ -1236,7 +1396,6 @@ ${input} `
                 </div>
               </div>
             </div>
-            <div ref={messagesEndRef} />
           </div>
         </>
       )}

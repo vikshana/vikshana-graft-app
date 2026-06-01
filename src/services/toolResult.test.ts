@@ -36,6 +36,25 @@ describe('toolResult', () => {
             expect(formatted).not.toContain('truncated');
         });
 
+        it('includes userReference for get_dashboard_summary', () => {
+            const result = evaluateMcpToolResult(
+                'get_dashboard_summary',
+                {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({
+                                uid: 'dash1',
+                                panels: [{ id: 2, title: 'T', type: 'stat' }],
+                            }),
+                        },
+                    ],
+                }
+            );
+            expect(result.userReference).toContain('dash1');
+            expect(result.userReference).toContain('panelId');
+        });
+
         it('truncates non-dashboard tools at default limit', () => {
             const big = 'y'.repeat(5000);
             const formatted = formatToolResultForLlm('query_prometheus', big);

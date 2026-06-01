@@ -1,33 +1,303 @@
 // Import types from centralized location
+import { config } from '@grafana/runtime';
 import type { Message } from '../types/llm.types';
 import type { ChatSession } from '../types/chat.types';
+import { loadChatHistoryFromServer, saveChatHistoryToServer } from './chatHistoryApi';
 
 // Re-export for backward compatibility
 export type { ChatSession };
 
-const STORAGE_KEY = 'graft_chat_history';
-const LAST_ACTIVE_SESSION_KEY = 'graft_last_active_session';
+const STORAGE_KEY_BASE = 'graft_chat_history';
+const LAST_ACTIVE_SESSION_KEY_BASE = 'graft_last_active_session';
+const ACTIVE_SNAPSHOT_KEY_BASE = 'graft_active_snapshot';
 const DEFAULT_MAX_HISTORY = 50;
 const DEFAULT_RETENTION_DAYS = 30;
 const MAX_PINNED_SESSIONS = 20;
+const GLOBAL_SERVICE_KEY = '__vikshanaGraftChatHistoryService';
+
+/** Stable per user — do not use user.id (can be missing on first paint and split storage). */
+function getStorageSuffix(): string {
+    try {
+        const user = config.bootData?.user;
+        if (user?.orgId != null && user.login) {
+            return `${user.orgId}_${user.login}`;
+        }
+    } catch {
+        // config may be unavailable in tests
+    }
+    return 'default';
+}
+
+function storageKey(base: string): string {
+    const suffix = getStorageSuffix();
+    return suffix === 'default' ? base : `${base}_${suffix}`;
+}
+
+/** Drop trailing empty assistant placeholders so mid-stream navigation still restores user turns. */
+export function prepareMessagesForStorage(messages: Message[]): Message[] {
+    const copy = [...messages];
+    while (copy.length > 0) {
+        const last = copy[copy.length - 1];
+        const emptyAssistant =
+            last.role === 'assistant' &&
+            !last.content?.trim() &&
+            !(last.toolExecutions && last.toolExecutions.length > 0);
+        if (emptyAssistant) {
+            copy.pop();
+        } else {
+            break;
+        }
+    }
+    return copy;
+}
+
+function serializeMessages(messages: Message[]): Message[] {
+    return prepareMessagesForStorage(messages).map((m) => {
+        const base: Message = {
+            role: m.role,
+            content: m.content,
+        };
+        if (m.attachments?.length) {
+            base.attachments = m.attachments.map((a) => ({
+                name: a.name,
+                type: a.type,
+                mimeType: a.mimeType,
+                content: a.content,
+            }));
+        }
+        if (m.toolExecutions?.length) {
+            base.toolExecutions = m.toolExecutions.map((t) => ({
+                name: t.name,
+                status: t.status,
+                error: t.error,
+                toolCallId: t.toolCallId,
+                summary: t.summary,
+                userReference: t.userReference,
+            }));
+        }
+        if (m.thinkingSeconds !== undefined) {
+            base.thinkingSeconds = m.thinkingSeconds;
+        }
+        if (m.interrupted) {
+            base.interrupted = m.interrupted;
+        }
+        return base;
+    });
+}
+
+export interface ActiveSnapshot {
+    sessionId: string;
+    messages: Message[];
+    updatedAt: number;
+}
 
 class ChatHistoryService {
-    private getStoredSessions(): ChatSession[] {
-        try {
-            const stored = localStorage.getItem(STORAGE_KEY);
-            return stored ? JSON.parse(stored) : [];
-        } catch (e) {
-            console.error('[Graft] Error loading chat history:', e);
-            return [];
+    private legacyMigrated = false;
+    private loaded = false;
+    private loadPromise: Promise<void> | null = null;
+    private saveTimer: ReturnType<typeof setTimeout> | null = null;
+    private sessions: ChatSession[] = [];
+    private lastActiveSessionId: string | null = null;
+
+    /** Load history from plugin backend (and migrate browser storage once). */
+    ensureLoaded(): Promise<void> {
+        if (this.loaded) {
+            return Promise.resolve();
+        }
+        if (!this.loadPromise) {
+            this.loadPromise = this.hydrateFromStorage();
+        }
+        return this.loadPromise;
+    }
+
+    /**
+     * Re-sync from localStorage and server (for Previous Conversations page).
+     * Lazy-loaded chunks can hold a stale in-memory copy; localStorage is shared.
+     */
+    async refreshSessions(): Promise<void> {
+        await this.ensureLoaded();
+
+        const fromLocal = this.readLocalBundle();
+        if (fromLocal.sessions.length > 0) {
+            this.mergeSessions(fromLocal.sessions);
+            if (fromLocal.lastActiveId) {
+                this.lastActiveSessionId = fromLocal.lastActiveId;
+            }
+        }
+
+        const fromServer = await loadChatHistoryFromServer();
+        if (fromServer?.sessions?.length) {
+            this.mergeSessions(fromServer.sessions);
+            if (fromServer.lastActiveSessionId) {
+                this.lastActiveSessionId = fromServer.lastActiveSessionId;
+            }
+        }
+
+        this.writeLocalBundle();
+        this.loaded = true;
+    }
+
+    private mergeSessions(incoming: ChatSession[]): void {
+        const byId = new Map(this.sessions.map((s) => [s.id, s]));
+        for (const session of incoming) {
+            if (!session?.id) {
+                continue;
+            }
+            const existing = byId.get(session.id);
+            if (!existing || session.updatedAt >= existing.updatedAt) {
+                byId.set(session.id, session);
+            }
+        }
+        this.sessions = Array.from(byId.values());
+    }
+
+    /** Push in-memory state to the plugin backend immediately. */
+    async flushToServer(): Promise<void> {
+        if (!this.loaded) {
+            await this.ensureLoaded();
+        }
+        if (this.saveTimer) {
+            clearTimeout(this.saveTimer);
+            this.saveTimer = null;
+        }
+        await saveChatHistoryToServer({
+            sessions: this.sessions,
+            lastActiveSessionId: this.lastActiveSessionId,
+        });
+    }
+
+    /** @internal */
+    resetForTests(): void {
+        this.loaded = false;
+        this.loadPromise = null;
+        this.sessions = [];
+        this.lastActiveSessionId = null;
+        this.legacyMigrated = false;
+        if (this.saveTimer) {
+            clearTimeout(this.saveTimer);
+            this.saveTimer = null;
         }
     }
 
-    private saveSessions(sessions: ChatSession[]): void {
-        try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
-        } catch (e) {
-            console.error('[Graft] Error saving chat history:', e);
+    private async hydrateFromStorage(): Promise<void> {
+        this.migrateLegacyKeys();
+
+        const fromServer = await loadChatHistoryFromServer();
+        const fromLocal = this.readLocalBundle();
+
+        if (fromServer && fromServer.sessions.length > 0) {
+            this.sessions = fromServer.sessions;
+            this.lastActiveSessionId = fromServer.lastActiveSessionId;
+        } else if (fromLocal.sessions.length > 0) {
+            this.sessions = fromLocal.sessions;
+            this.lastActiveSessionId = fromLocal.lastActiveId;
+            await saveChatHistoryToServer({
+                sessions: this.sessions,
+                lastActiveSessionId: this.lastActiveSessionId,
+            });
+        } else {
+            this.sessions = [];
+            this.lastActiveSessionId = null;
         }
+
+        this.writeLocalBundle();
+        this.loaded = true;
+    }
+
+    private readJson<T>(key: string): T | null {
+        try {
+            const stored = localStorage.getItem(key);
+            return stored ? (JSON.parse(stored) as T) : null;
+        } catch {
+            return null;
+        }
+    }
+
+    private readLocalBundle(): { sessions: ChatSession[]; lastActiveId: string | null } {
+        const sessions = this.readJson<ChatSession[]>(storageKey(STORAGE_KEY_BASE)) ?? [];
+        const lastActiveId = localStorage.getItem(storageKey(LAST_ACTIVE_SESSION_KEY_BASE));
+        return { sessions, lastActiveId };
+    }
+
+    private writeLocalBundle(): void {
+        const historyKey = storageKey(STORAGE_KEY_BASE);
+        const lastKey = storageKey(LAST_ACTIVE_SESSION_KEY_BASE);
+        try {
+            const data = JSON.stringify(this.sessions);
+            localStorage.setItem(historyKey, data);
+            if (historyKey !== STORAGE_KEY_BASE) {
+                localStorage.setItem(STORAGE_KEY_BASE, data);
+            }
+            if (this.lastActiveSessionId) {
+                localStorage.setItem(lastKey, this.lastActiveSessionId);
+                if (lastKey !== LAST_ACTIVE_SESSION_KEY_BASE) {
+                    localStorage.setItem(LAST_ACTIVE_SESSION_KEY_BASE, this.lastActiveSessionId);
+                }
+            }
+        } catch (e) {
+            console.error('[Graft] Error writing local chat history cache:', e);
+        }
+    }
+
+    private scheduleServerSave(): void {
+        if (this.saveTimer) {
+            clearTimeout(this.saveTimer);
+        }
+        this.saveTimer = setTimeout(() => {
+            void saveChatHistoryToServer({
+                sessions: this.sessions,
+                lastActiveSessionId: this.lastActiveSessionId,
+            });
+        }, 400);
+    }
+
+    private persist(): void {
+        this.writeLocalBundle();
+        this.scheduleServerSave();
+    }
+
+    private migrateLegacyKeys(): void {
+        if (this.legacyMigrated) {
+            return;
+        }
+
+        const historyKey = storageKey(STORAGE_KEY_BASE);
+        const lastKey = storageKey(LAST_ACTIVE_SESSION_KEY_BASE);
+
+        try {
+            const current = this.readJson<ChatSession[]>(historyKey);
+            if (!current?.length) {
+                const legacy = this.readJson<ChatSession[]>(STORAGE_KEY_BASE);
+                if (legacy?.length) {
+                    localStorage.setItem(historyKey, JSON.stringify(legacy));
+                }
+            }
+
+            if (!localStorage.getItem(lastKey)) {
+                const legacyLast = localStorage.getItem(LAST_ACTIVE_SESSION_KEY_BASE);
+                if (legacyLast) {
+                    localStorage.setItem(lastKey, legacyLast);
+                }
+            }
+
+            const suffix = getStorageSuffix();
+            if (suffix !== 'default') {
+                const user = config.bootData?.user;
+                if (user?.id != null && user.orgId != null) {
+                    const oldKey = `${STORAGE_KEY_BASE}_${user.orgId}_${user.id}`;
+                    if (oldKey !== historyKey) {
+                        const oldData = this.readJson<ChatSession[]>(oldKey);
+                        if (oldData?.length && !this.readJson<ChatSession[]>(historyKey)?.length) {
+                            localStorage.setItem(historyKey, JSON.stringify(oldData));
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('[Graft] Error migrating chat history keys:', e);
+        }
+
+        this.legacyMigrated = true;
     }
 
     private generateId(): string {
@@ -35,7 +305,7 @@ class ChatHistoryService {
     }
 
     private generateTitle(messages: Message[]): string {
-        const firstUserMessage = messages.find(m => m.role === 'user');
+        const firstUserMessage = messages.find((m) => m.role === 'user');
         if (firstUserMessage) {
             const content = firstUserMessage.content.trim();
             return content.length > 50 ? content.substring(0, 47) + '...' : content;
@@ -44,59 +314,109 @@ class ChatHistoryService {
     }
 
     getAllSessions(): ChatSession[] {
-        return this.getStoredSessions().sort((a, b) => {
-            // Pinned sessions come first
+        return [...this.sessions].sort((a, b) => {
             if (a.isPinned && !b.isPinned) {
                 return -1;
             }
             if (!a.isPinned && b.isPinned) {
                 return 1;
             }
-            // Then sort by updatedAt (newest first)
             return b.updatedAt - a.updatedAt;
         });
     }
 
     getSession(id: string): ChatSession | undefined {
-        return this.getStoredSessions().find(s => s.id === id);
+        return this.sessions.find((s) => s.id === id);
     }
 
     getLastActiveSessionId(): string | null {
+        return this.lastActiveSessionId;
+    }
+
+    setLastActiveSessionId(id: string): void {
+        this.lastActiveSessionId = id;
+        this.persist();
+    }
+
+    clearLastActiveSessionId(): void {
+        this.lastActiveSessionId = null;
         try {
-            return localStorage.getItem(LAST_ACTIVE_SESSION_KEY);
+            localStorage.removeItem(storageKey(LAST_ACTIVE_SESSION_KEY_BASE));
+            localStorage.removeItem(LAST_ACTIVE_SESSION_KEY_BASE);
+            sessionStorage.removeItem(storageKey(ACTIVE_SNAPSHOT_KEY_BASE));
+            sessionStorage.removeItem(ACTIVE_SNAPSHOT_KEY_BASE);
         } catch (e) {
-            console.error('[Graft] Error loading last active session:', e);
+            console.error('[Graft] Error clearing last active session:', e);
+        }
+        this.scheduleServerSave();
+    }
+
+    /** Fast restore when returning from a dashboard in the same browser tab. */
+    saveActiveSnapshot(sessionId: string, messages: Message[]): void {
+        const toStore = serializeMessages(messages);
+        if (toStore.length === 0) {
+            return;
+        }
+        const snap: ActiveSnapshot = {
+            sessionId,
+            messages: toStore,
+            updatedAt: Date.now(),
+        };
+        try {
+            const key = storageKey(ACTIVE_SNAPSHOT_KEY_BASE);
+            const data = JSON.stringify(snap);
+            sessionStorage.setItem(key, data);
+            sessionStorage.setItem(ACTIVE_SNAPSHOT_KEY_BASE, data);
+        } catch (e) {
+            console.error('[Graft] Error saving active snapshot:', e);
+        }
+    }
+
+    loadActiveSnapshot(): ActiveSnapshot | null {
+        try {
+            const key = storageKey(ACTIVE_SNAPSHOT_KEY_BASE);
+            const raw = sessionStorage.getItem(key) ?? sessionStorage.getItem(ACTIVE_SNAPSHOT_KEY_BASE);
+            if (!raw) {
+                return null;
+            }
+            const snap = JSON.parse(raw) as ActiveSnapshot;
+            if (!snap?.sessionId || !snap.messages?.length) {
+                return null;
+            }
+            return snap;
+        } catch (e) {
+            console.error('[Graft] Error loading active snapshot:', e);
             return null;
         }
     }
 
-    setLastActiveSessionId(id: string): void {
-        try {
-            localStorage.setItem(LAST_ACTIVE_SESSION_KEY, id);
-        } catch (e) {
-            console.error('[Graft] Error saving last active session:', e);
+    /** Restore the conversation the user had open when they left the app. */
+    loadLastActiveSession(): { sessionId: string; messages: Message[] } | null {
+        const snap = this.loadActiveSnapshot();
+        if (snap) {
+            return { sessionId: snap.sessionId, messages: snap.messages };
         }
-    }
 
-    clearLastActiveSessionId(): void {
-        try {
-            localStorage.removeItem(LAST_ACTIVE_SESSION_KEY);
-        } catch (e) {
-            console.error('[Graft] Error clearing last active session:', e);
+        const lastId = this.getLastActiveSessionId();
+        if (!lastId) {
+            return null;
         }
+        const session = this.getSession(lastId);
+        if (!session?.messages?.length) {
+            return null;
+        }
+        return { sessionId: session.id, messages: session.messages };
     }
 
     togglePinSession(id: string): boolean {
-        const sessions = this.getStoredSessions();
-        const session = sessions.find(s => s.id === id);
+        const session = this.sessions.find((s) => s.id === id);
 
         if (!session) {
             return false;
         }
 
         if (!session.isPinned) {
-            // Check limit before pinning
-            const pinnedCount = sessions.filter(s => s.isPinned).length;
+            const pinnedCount = this.sessions.filter((s) => s.isPinned).length;
             if (pinnedCount >= MAX_PINNED_SESSIONS) {
                 return false;
             }
@@ -105,86 +425,94 @@ class ChatHistoryService {
             session.isPinned = false;
         }
 
-        this.saveSessions(sessions);
+        this.persist();
         return true;
     }
 
-    saveSession(messages: Message[], sessionId?: string): ChatSession {
-        const sessions = this.getStoredSessions();
-        const now = Date.now();
+    saveSession(messages: Message[], sessionId?: string): ChatSession | null {
+        const toStore = serializeMessages(messages);
+        if (toStore.length === 0) {
+            return null;
+        }
 
+        const now = Date.now();
         let session: ChatSession;
 
         if (sessionId) {
-            const existing = sessions.find(s => s.id === sessionId);
+            const existing = this.sessions.find((s) => s.id === sessionId);
             if (existing) {
-                existing.messages = messages;
+                existing.messages = toStore;
                 existing.updatedAt = now;
-                existing.title = this.generateTitle(messages);
+                existing.title = this.generateTitle(toStore);
                 session = existing;
             } else {
                 session = {
                     id: sessionId,
-                    title: this.generateTitle(messages),
-                    messages,
+                    title: this.generateTitle(toStore),
+                    messages: toStore,
                     createdAt: now,
                     updatedAt: now,
                 };
-                sessions.push(session);
+                this.sessions.push(session);
             }
         } else {
             session = {
                 id: this.generateId(),
-                title: this.generateTitle(messages),
-                messages,
+                title: this.generateTitle(toStore),
+                messages: toStore,
                 createdAt: now,
                 updatedAt: now,
             };
-            sessions.push(session);
+            this.sessions.push(session);
         }
 
-        this.saveSessions(sessions);
-        this.setLastActiveSessionId(session.id);
+        this.lastActiveSessionId = session.id;
+        this.saveActiveSnapshot(session.id, toStore);
+        this.persist();
         return session;
     }
 
     deleteSession(id: string): void {
-        const sessions = this.getStoredSessions().filter(s => s.id !== id);
-        this.saveSessions(sessions);
-        if (this.getLastActiveSessionId() === id) {
-            this.clearLastActiveSessionId();
+        this.sessions = this.sessions.filter((s) => s.id !== id);
+        if (this.lastActiveSessionId === id) {
+            this.lastActiveSessionId = null;
         }
+        this.persist();
     }
 
     cleanupOldSessions(maxHistory: number = DEFAULT_MAX_HISTORY, retentionDays: number = DEFAULT_RETENTION_DAYS): void {
-        let sessions = this.getStoredSessions();
+        const cutoffTime = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+        let sessions = this.sessions.filter((s) => s.isPinned || s.createdAt > cutoffTime);
 
-        // Remove sessions older than retention period, but keep pinned ones
-        const cutoffTime = Date.now() - (retentionDays * 24 * 60 * 60 * 1000);
-        sessions = sessions.filter(s => s.isPinned || s.createdAt > cutoffTime);
-
-        // Keep only the most recent sessions up to maxHistory, but always keep pinned ones
-        // Note: This logic might need refinement if pinned sessions exceed maxHistory, 
-        // but for now we'll assume maxHistory > MAX_PINNED_SESSIONS.
-        // We'll separate pinned and unpinned for cleanup.
-
-        const pinnedSessions = sessions.filter(s => s.isPinned);
-        let unpinnedSessions = sessions.filter(s => !s.isPinned);
+        const pinnedSessions = sessions.filter((s) => s.isPinned);
+        let unpinnedSessions = sessions.filter((s) => !s.isPinned);
 
         if (unpinnedSessions.length + pinnedSessions.length > maxHistory) {
             const availableSlots = Math.max(0, maxHistory - pinnedSessions.length);
             unpinnedSessions = unpinnedSessions.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, availableSlots);
         }
 
-        sessions = [...pinnedSessions, ...unpinnedSessions];
-
-        this.saveSessions(sessions);
+        this.sessions = [...pinnedSessions, ...unpinnedSessions];
+        this.persist();
     }
 
     clearAll(): void {
-        localStorage.removeItem(STORAGE_KEY);
+        this.sessions = [];
+        this.lastActiveSessionId = null;
+        localStorage.removeItem(storageKey(STORAGE_KEY_BASE));
+        localStorage.removeItem(STORAGE_KEY_BASE);
         this.clearLastActiveSessionId();
+        void saveChatHistoryToServer({ sessions: [], lastActiveSessionId: null });
     }
 }
 
-export const chatHistoryService = new ChatHistoryService();
+function getOrCreateChatHistoryService(): ChatHistoryService {
+    const g = globalThis as Record<string, ChatHistoryService | undefined>;
+    if (!g[GLOBAL_SERVICE_KEY]) {
+        g[GLOBAL_SERVICE_KEY] = new ChatHistoryService();
+    }
+    return g[GLOBAL_SERVICE_KEY];
+}
+
+/** Single instance across lazy-loaded chunks (ChatInterface vs ChatHistory). */
+export const chatHistoryService = getOrCreateChatHistoryService();

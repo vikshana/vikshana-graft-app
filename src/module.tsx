@@ -7,10 +7,13 @@ const LazyApp = lazy(() => import('./components/features/App/App'));
 const LazyAppConfig = lazy(() => import('./components/features/AppConfig/AppConfig'));
 
 import { mcp } from '@grafana/llm';
+import { GRAFT_BUILD_VERSION } from './buildInfo';
+// Eager import so chatHistoryService global singleton exists before lazy route chunks load
+import './services/chatHistory';
 
 const App = (props: AppRootProps) => (
   <Suspense fallback={<LoadingPlaceholder text="" />}>
-    <mcp.MCPClientProvider appName="vikshana-graft-app" appVersion="0.1.0">
+    <mcp.MCPClientProvider appName="vikshana-graft-app" appVersion={GRAFT_BUILD_VERSION}>
       <LazyApp {...props} />
     </mcp.MCPClientProvider>
   </Suspense>

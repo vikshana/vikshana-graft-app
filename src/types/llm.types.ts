@@ -11,6 +11,8 @@ export interface ToolExecution {
     toolCallId?: string;
     /** Short human-readable outcome (e.g. saved dashboard version) */
     summary?: string;
+    /** Markdown table shown in chat (uid / panel index) — not sent back to the LLM */
+    userReference?: string;
 }
 
 /**

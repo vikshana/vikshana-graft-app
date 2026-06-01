@@ -181,8 +181,16 @@ font-size: 14px;
 font-size: 12px;
 color: ${theme.colors.text.secondary};
 `,
+  messagePane: css`
+flex: 1;
+min-height: 0;
+position: relative;
+display: flex;
+flex-direction: column;
+`,
   messageList: css`
-flex-grow: 1;
+flex: 1;
+min-height: 0;
 overflow-y: auto;
 padding: ${theme.spacing(2)};
 display: flex;
@@ -322,9 +330,8 @@ padding: ${theme.spacing(1)};
 `,
   scrollButton: css`
 position: absolute;
-bottom: 120px;
-left: 50%;
-transform: translateX(-50%);
+bottom: ${theme.spacing(2)};
+right: ${theme.spacing(3)};
 width: 40px;
 height: 40px;
 border-radius: 50%;

@@ -1,9 +1,16 @@
-import { chatHistoryService, ChatSession } from './chatHistory';
+import { chatHistoryService, ChatSession, prepareMessagesForStorage } from './chatHistory';
+
+jest.mock('./chatHistoryApi', () => ({
+    loadChatHistoryFromServer: jest.fn().mockResolvedValue(null),
+    saveChatHistoryToServer: jest.fn().mockResolvedValue(true),
+}));
 
 describe('ChatHistoryService', () => {
-    beforeEach(() => {
-        // Clear localStorage before each test
+    beforeEach(async () => {
         localStorage.clear();
+        sessionStorage.clear();
+        chatHistoryService.resetForTests();
+        await chatHistoryService.ensureLoaded();
     });
 
     describe('Pinning', () => {
@@ -109,12 +116,47 @@ describe('ChatHistoryService', () => {
         });
     });
 
+    describe('prepareMessagesForStorage', () => {
+        it('removes trailing empty assistant placeholders', () => {
+            const messages = [
+                { role: 'user' as const, content: 'Hi' },
+                { role: 'assistant' as const, content: '' },
+            ];
+            expect(prepareMessagesForStorage(messages)).toEqual([{ role: 'user', content: 'Hi' }]);
+        });
+    });
+
+    describe('loadLastActiveSession', () => {
+        it('returns the last saved session', () => {
+            const messages = [{ role: 'user' as const, content: 'Remember' }];
+            const saved = chatHistoryService.saveSession(messages);
+            expect(saved).not.toBeNull();
+            const loaded = chatHistoryService.loadLastActiveSession();
+            expect(loaded?.sessionId).toBe(saved!.id);
+            expect(loaded?.messages).toEqual(messages);
+        });
+
+        it('prefers sessionStorage snapshot for same-tab restore', () => {
+            const messages = [{ role: 'user' as const, content: 'From snapshot' }];
+            const saved = chatHistoryService.saveSession(messages);
+            expect(saved).not.toBeNull();
+            chatHistoryService.saveActiveSnapshot(saved!.id, messages);
+            const loaded = chatHistoryService.loadLastActiveSession();
+            expect(loaded?.messages[0].content).toBe('From snapshot');
+        });
+
+        it('returns null when saving empty messages', () => {
+            expect(chatHistoryService.saveSession([])).toBeNull();
+        });
+    });
+
     describe('Last active session', () => {
         it('should track the last saved session', () => {
             const messages = [{ role: 'user' as const, content: 'Hello' }];
             const saved = chatHistoryService.saveSession(messages);
+            expect(saved).not.toBeNull();
 
-            expect(chatHistoryService.getLastActiveSessionId()).toBe(saved.id);
+            expect(chatHistoryService.getLastActiveSessionId()).toBe(saved!.id);
         });
 
         it('should clear last active when session is deleted', () => {

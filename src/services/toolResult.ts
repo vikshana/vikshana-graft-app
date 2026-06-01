@@ -1,3 +1,9 @@
+import {
+    enrichDashboardToolResult,
+    getDashboardUserReference,
+    summarizeDashboardTool,
+} from './dashboardReference';
+
 /** Default cap for most MCP tool results sent back to the LLM */
 const MAX_TOOL_RESULT_CHARS = 4000;
 
@@ -55,7 +61,7 @@ function tryParseJson(text: string): unknown | null {
 export function evaluateMcpToolResult(
     toolName: string,
     result: unknown
-): { ok: boolean; text: string; error?: string; summary?: string } {
+): { ok: boolean; text: string; error?: string; summary?: string; userReference?: string } {
     if (result && typeof result === 'object' && (result as { isError?: boolean }).isError === true) {
         const text = extractTextContent(result);
         return { ok: false, text, error: text || 'Tool returned isError' };
@@ -90,6 +96,12 @@ export function evaluateMcpToolResult(
         }
     }
 
+    const userReference = getDashboardUserReference(toolName, text);
+    const dashboardSummary = summarizeDashboardTool(toolName, text);
+    if (dashboardSummary || userReference) {
+        return { ok: true, text, summary: dashboardSummary, userReference };
+    }
+
     const lower = text.toLowerCase();
     if (
         lower.includes('permission denied') ||
@@ -104,15 +116,19 @@ export function evaluateMcpToolResult(
 }
 
 export function formatToolResultForLlm(toolName: string, text: string): string {
+    let enriched = enrichDashboardToolResult(toolName, text);
+
     const maxChars = DASHBOARD_TOOLS.has(toolName)
         ? MAX_DASHBOARD_TOOL_RESULT_CHARS
         : MAX_TOOL_RESULT_CHARS;
 
-    if (text.length <= maxChars) {
-        return text;
+    if (enriched.length <= maxChars) {
+        return enriched;
     }
 
-    const truncated = text.slice(0, maxChars);
-    const omittedChars = text.length - maxChars;
+    const textToTruncate = enriched;
+
+    const truncated = textToTruncate.slice(0, maxChars);
+    const omittedChars = textToTruncate.length - maxChars;
     return `${truncated}\n...[truncated — ${omittedChars} characters omitted. For dashboards, use get_dashboard_property for specific fields if needed.]`;
 }

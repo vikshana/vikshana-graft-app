@@ -10,6 +10,7 @@ import { css } from '@emotion/css';
 // Local utilities
 import { initOtel } from '../../../utils/otel';
 import { promptLibraryService } from '../../../services/promptLibrary';
+import { chatHistoryService } from '../../../services/chatHistory';
 import { CategoryDef } from '../../../types/prompt.types';
 
 // Local components
@@ -27,6 +28,7 @@ export default function App(props: AppRootProps) {
   useEffect(() => {
     initOtel();
     document.title = 'Graft AI Assistant';
+    void chatHistoryService.ensureLoaded();
 
     // Initialize prompt library with configured prompts
     const promptLibrarySettings = props.meta.jsonData?.promptLibrary as CategoryDef[] | undefined;
