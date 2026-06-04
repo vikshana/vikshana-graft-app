@@ -8,6 +8,7 @@ import { listDashboardPanels, type DashboardPanelEntry } from './panelDiscovery'
 import { parseSearchHitsFromMcpText } from './dashboardSearchParse';
 import { isMachineId } from './dashboardCloneParse';
 import type { PanelJsonDuplicateRequest } from './panelJsonDuplicateParse';
+import { sanitizeInfluxFluxPanel } from './sanitizeInfluxFluxPanel';
 
 type PanelRecord = Record<string, unknown>;
 
@@ -166,7 +167,7 @@ export async function runProgrammaticPanelJsonDuplicate(
     }
 
     const nextId = maxPanelId(entries) + 1;
-    const newPanel = JSON.parse(JSON.stringify(request.panelJson)) as PanelRecord;
+    const newPanel = sanitizeInfluxFluxPanel(request.panelJson) as PanelRecord;
     newPanel.id = nextId;
     newPanel.gridPos = computeAppendGridPos(entries, newPanel);
 
