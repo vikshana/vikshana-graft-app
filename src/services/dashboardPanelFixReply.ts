@@ -14,6 +14,7 @@ import {
 import { parseScopedPanelFixRequest } from './panelFixScope';
 import { formatScopedPanelCrossReference } from './panelCrossReference';
 import { appendSuggestedQueryHint } from './suggestedQueryHint';
+import { formatContinueActionBlock } from './continueAction';
 import { stripPanelIndexTables } from './dashboardTaskStatus';
 import { userWantsBulkPeerBandFix } from './bulkPeerBandFixParse';
 
@@ -354,14 +355,14 @@ export function applyOperatorFriendlyPanelFixReply(
         return panelFixReplyWithHint(undefined, status, latest, toolExecutions);
     }
 
-    const continueLine = scoped
-        ? `**What to do:** Reply **Continue** — Graft will run the save step (uid and panel id are already set).`
-        : `**What to do:** Reply **Continue**, or include dashboard uid + panel id in your message.`;
+    const continueDetail = scoped
+        ? 'Graft will run the save step now (dashboard uid and panel id are already set).'
+        : 'If you reply manually, include dashboard uid and panel id.';
 
     const status =
         `### Not finished yet\n\n` +
         `${dashboard} — ${scoped ? panelScopeLabel : panelLabel}: no confirmed save this turn.${failDetail}\n\n` +
-        continueLine;
+        formatContinueActionBlock(continueDetail);
     return panelFixReplyWithHint(undefined, status, latest, toolExecutions);
 }
 

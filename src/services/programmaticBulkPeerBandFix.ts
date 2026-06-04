@@ -287,3 +287,39 @@ export async function runProgrammaticBulkPeerBandFix(
         verificationNote,
     };
 }
+
+export function formatBulkPeerBandFixReply(
+    result: ProgrammaticBulkPeerBandFixResult,
+    buildNumber: number
+): string {
+    const header = result.ok
+        ? `### Done (vs. Peer Band panels updated) (Graft build ${buildNumber})`
+        : `### Could not update vs. Peer Band panels (Graft build ${buildNumber})`;
+
+    if (!result.ok) {
+        const matched =
+            result.panelsMatched > 0
+                ? `\n- **Matched:** ${result.panelsMatched} panel(s)`
+                : '';
+        const changed =
+            result.panelsChanged > 0
+                ? `\n- **Saved before verify failed:** ${result.panelsChanged} panel(s)`
+                : '';
+        return (
+            `${header}\n\n` +
+            `${result.error ?? 'Unknown error'}${matched}${changed}\n\n` +
+            (result.verificationNote ? `${result.verificationNote}\n\n` : '') +
+            `**What to do:** Hard-refresh the dashboard (**Cmd+Shift+R**). ` +
+            `If panels still show **Error** or PromQL, reply **Continue** or paste the bulk peer-band fix prompt again.`
+        );
+    }
+
+    return (
+        `${header}\n\n` +
+        `- **Panels updated:** ${result.panelsChanged} of ${result.panelsMatched} matched\n` +
+        `- **Query targets rewritten:** ${result.targetsFixed}\n\n` +
+        `${result.verificationNote ?? ''}\n\n` +
+        `**What to do:** Hard-refresh the dashboard (**Cmd+Shift+R**). ` +
+        `Open a few “vs. Peer Band” panels — legends should show Flux series labels, not raw PromQL.`
+    );
+}

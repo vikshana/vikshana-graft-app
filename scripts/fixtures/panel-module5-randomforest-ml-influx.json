@@ -2,9 +2,7 @@
   "id": null,
   "type": "timeseries",
   "title": "Module 5 Current — RandomForest ML (Influx)",
-  "description": "Python RandomForest bands (30-day model), **not** peer ±2σ.\n\n| Series | Source |\n|--------|--------|\n| Actual | Influx tag `machine` + `_field` |\n| Upper / Lower / Expected | Influx `ml_predictions` written by the ML exporter **backfill** (`upper`, `lower`, `expected` fields) |\n\n**Live / last ~35 days:** use your existing **History Comparison** panel (PromQL: `machine_metrics`, `last_over_time(machine_metric_*[6m])`) — same RandomForest, scraped into Prometheus.\n\n**Older dates (e.g. May 11–12):** use this panel — Prometheus has no samples that far back; bands come from `ml_predictions` only after backfill.\n\nSet the **dashboard** time picker to your incident window (do not use panel-level timeFrom/timeTo).\n\nReplace `Module5_Current_A` / title for other modules. Datasource UID = same as working Module 5 peer-band Flux panel.",
-  "timeFrom": "2026-05-11T19:00:00Z",
-  "timeTo": "2026-05-12T19:00:00Z",
+  "description": "Python RandomForest bands (30-day model), **not** peer ±2σ.\n\n| Series | Source |\n|--------|--------|\n| Actual | Influx tag `machine` + `_field` |\n| Upper / Lower / Expected | Influx `ml_predictions` written by the ML exporter **backfill** (`upper`, `lower`, `expected` fields) |\n\nUse the **dashboard** time picker only — do **not** set panel-level timeFrom/timeTo (that clips the chart to one incident window).\n\nReplace `Module5_Current_A` / title for other modules. Datasource UID = same as working Module 5 peer-band Flux panel.",
   "timezone": "browser",
   "datasource": {
     "type": "influxdb",

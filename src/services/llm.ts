@@ -632,7 +632,7 @@ export const llmService = {
 
                 if (
                     (stepLimitPending || narrationStuck) &&
-                    autoContinueRounds < (scopedFixActive ? 1 : MAX_AUTO_CONTINUE_ROUNDS) &&
+                    autoContinueRounds < MAX_AUTO_CONTINUE_ROUNDS &&
                     hasTools
                 ) {
                     autoContinueRounds++;

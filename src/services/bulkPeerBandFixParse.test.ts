@@ -49,6 +49,16 @@ describe('parseBulkPeerBandFixRequest', () => {
         });
     });
 
+    it('parses Module 5 reference with do not change other panels', () => {
+        const prompt =
+            'On dashboard uid 6gawrgawrgragg, fix all panels whose title contains "vs. Peer Band". ' +
+            'Use the same Flux query fix that worked on Module 5. Do not change other panels.';
+        expect(parseBulkPeerBandFixRequest(prompt)).toEqual({
+            dashboardUid: '6gawrgawrgragg',
+            titleContains: 'vs. Peer Band',
+        });
+    });
+
     it('returns null for single-panel scoped fix', () => {
         const scoped =
             'Fix only panel named "Module 5 Current — vs. Peer Band (Modules 1–4,6–8 Avg ± 2σ)" on dashboard uid 6gawrgawrgragg';

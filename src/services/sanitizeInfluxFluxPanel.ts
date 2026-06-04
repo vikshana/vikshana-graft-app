@@ -326,7 +326,11 @@ export function repairInfluxFluxPanel(
 ): InfluxFluxPanelRepairResult {
     const fixes: string[] = [];
     const before = JSON.stringify(panel);
+    const hadPanelTimeOverride = panel.timeFrom != null || panel.timeTo != null;
     let out = sanitizeInfluxFluxPanel(panel);
+    if (hadPanelTimeOverride) {
+        fixes.push('removed panel timeFrom/timeTo — use dashboard time picker only');
+    }
 
     if (!panelUsesFluxQueries(out)) {
         return { panel: out, changed: before !== JSON.stringify(out), fixes };

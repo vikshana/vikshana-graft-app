@@ -25,6 +25,15 @@ import { chatHistoryService, prepareMessagesForStorage } from '../../../services
 import { PLUGIN_BASE_URL } from '../../../constants';
 import { replaceChatSessionInUrl } from '../../../utils/chatSessionUrl';
 import { truncateMessages } from '../../../services/truncation';
+import { runGraftChatTurn } from '../../../services/graftChatTurn';
+import {
+    CONTINUE_USER_MESSAGE,
+    hasSuccessfulDashboardSave,
+    isSyntheticContinueUserMessage,
+    MAX_UI_AUTO_CONTINUE_ROUNDS,
+    responseNeedsContinueAction,
+} from '../../../services/continueAction';
+import { ContinueActionBanner } from './ContinueActionBanner';
 import {
   appendDashboardReferencesToReply,
   appendSaveVerificationWarning,
@@ -62,6 +71,15 @@ import {
   formatInfluxPanelRepairReply,
   runProgrammaticInfluxPanelRepair,
 } from '../../../services/programmaticInfluxPanelRepair';
+import {
+  formatBulkPeerBandFixClarification,
+  parseBulkPeerBandFixRequest,
+  userWantsBulkPeerBandFix,
+} from '../../../services/bulkPeerBandFixParse';
+import {
+  formatBulkPeerBandFixReply,
+  runProgrammaticBulkPeerBandFix,
+} from '../../../services/programmaticBulkPeerBandFix';
 
 // Local hooks
 import { useRollingPlaceholder, usePluginSettings, useAutoScroll } from './hooks';
@@ -281,6 +299,15 @@ export const ChatInterface = () => {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [autoContinuing, setAutoContinuing] = useState(false);
+  const lastVisibleMessageIndex = React.useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (!isSyntheticContinueUserMessage(messages[i])) {
+        return i;
+      }
+    }
+    return -1;
+  }, [messages]);
   const [searchParams, setSearchParams] = useSearchParams();
   const [isListening, setIsListening] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | undefined>();
@@ -295,6 +322,7 @@ export const ChatInterface = () => {
   const processedPromptRef = useRef<string | null>(null);
   const thinkingStartTimeRef = useRef<number | null>(null);
   const messagesRef = useRef<Message[]>([]);
+  const pendingSendContentRef = useRef<string | null>(null);
   const currentSessionIdRef = useRef<string | undefined>();
   const urlSyncedRef = useRef(false);
   const historyHydratedRef = useRef(false);
@@ -634,11 +662,17 @@ export const ChatInterface = () => {
   };
 
   const handleSend = async () => {
-    if (!input.trim()) {
+    const pendingContent = pendingSendContentRef.current;
+    pendingSendContentRef.current = null;
+    const messageText = pendingContent ?? input;
+    if (!messageText.trim()) {
       return;
     }
+    if (!pendingContent) {
+      setInput('');
+    }
 
-    let content = input;
+    let content = messageText;
     const attachments: Array<{ name: string; content: string; type: 'image' | 'text'; mimeType?: string }> = [];
 
     if (selectedFiles.length > 0) {
@@ -657,7 +691,12 @@ export const ChatInterface = () => {
     if (/^continue\.?$/i.test(content.trim())) {
       const priorUsers = messages.filter((m) => m.role === 'user').map((m) => m.content);
       const prior = latestNonContinueUserMessage(priorUsers);
-      if (prior && (parseSinglePanelCopyRequest(prior) || isExplicitSinglePanelCopyRequest(prior))) {
+      if (
+        prior &&
+        (parseSinglePanelCopyRequest(prior) ||
+          isExplicitSinglePanelCopyRequest(prior) ||
+          parseBulkPeerBandFixRequest(prior))
+      ) {
         content = prior;
       } else {
         content =
@@ -830,6 +869,80 @@ export const ChatInterface = () => {
         return;
       }
 
+      const bulkPeerBandRequest = parseBulkPeerBandFixRequest(content);
+      if (userWantsBulkPeerBandFix(content)) {
+        clearActiveCloneIntent();
+        errorPathTag = 'bulk-peer-band-fix';
+      }
+      if (userWantsBulkPeerBandFix(content) && !bulkPeerBandRequest) {
+        finalContent = formatBulkPeerBandFixClarification();
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = { role: 'assistant', content: finalContent };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+      if (bulkPeerBandRequest) {
+        if (!mcpClient) {
+          finalContent =
+            '### Could not fix peer-band panels\n\nGrafana MCP tools are not connected. Open **Grafana LLM / MCP settings**, enable MCP for Graft, hard-refresh, then try again.';
+        } else {
+          const bulkResult = await runProgrammaticBulkPeerBandFix(mcpClient, bulkPeerBandRequest);
+          finalContent = formatBulkPeerBandFixReply(bulkResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = bulkResult.toolExecutions;
+          if (!bulkResult.ok) {
+            recordGraftFailure({
+              buildNumber: GRAFT_BUILD_NUMBER,
+              intent: 'bulk_peer_band_fix',
+              userMessagePreview: content,
+              error: bulkResult.error ?? 'Unknown error',
+            });
+          }
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions:
+                finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
       const influxPanelRepairRequest = parseInfluxPanelRepairRequest(content);
       if (messageMentionsInfluxPanelRepair(content) && influxPanelRepairRequest && mcpClient) {
         errorPathTag = 'influx-panel-repair';
@@ -955,70 +1068,108 @@ export const ChatInterface = () => {
 
       const context = formatContext(dashboard, user, dataSources);
 
-      const truncatedMessages = truncateMessages(newMessages, 10);
+      thinkingStartTimeRef.current = null;
+      let displayContent = '';
+      let messagesForContinue = newMessages;
 
-      await llmService.chat(truncatedMessages, context, (fullContent, toolExecutions) => {
-        // Capture the latest values for saving after completion
+      const streamAssistant = (fullContent: string, toolExecutions?: ToolExecution[], ts?: number) => {
         finalContent = fullContent;
         finalToolExecutions = toolExecutions || [];
-        // Track thinking block timing
         const trimmedContent = fullContent.trimStart();
         if (trimmedContent.startsWith('<think>') && thinkingStartTimeRef.current === null) {
-          // First time we see <think> tag, record the start time
           thinkingStartTimeRef.current = Date.now();
         }
-
-        if (fullContent.includes('</think>') && thinkingStartTimeRef.current !== null && thinkingDuration === undefined) {
-          // We've received the closing tag, calculate the duration
-          thinkingDuration = Math.floor((Date.now() - thinkingStartTimeRef.current) / 1000);
+        if (
+            fullContent.includes('</think>') &&
+            thinkingStartTimeRef.current !== null &&
+            thinkingDuration === undefined
+        ) {
+            thinkingDuration = Math.floor((Date.now() - thinkingStartTimeRef.current) / 1000);
         }
-
+        if (ts !== undefined) {
+            thinkingDuration = ts;
+        }
         setMessages((prev) => {
-          const updated = [...prev];
-          const lastMessage = updated[updated.length - 1];
-          updated[updated.length - 1] = {
-            ...lastMessage,
-            content: fullContent,
-            thinkingSeconds: thinkingDuration,
-            toolExecutions: toolExecutions
-          };
-          return updated;
+            const updated = [...prev];
+            const lastMessage = updated[updated.length - 1];
+            if (lastMessage?.role === 'assistant') {
+                updated[updated.length - 1] = {
+                    ...lastMessage,
+                    content: fullContent,
+                    thinkingSeconds: thinkingDuration,
+                    toolExecutions: toolExecutions,
+                };
+            }
+            return updated;
         });
-      }, modelType, controller.signal, mcpClient, mcpTools);
+      };
 
-      const recentUserTexts = newMessages
-        .filter((m) => m.role === 'user')
-        .map((m) => m.content);
-      let displayContent = isSimpleConversationalMessage(content)
-        ? finalContent
-        : appendDashboardReferencesToReply(
-            finalContent,
-            finalToolExecutions,
-            recentUserTexts,
-            content
-          );
-      if (!isSimpleConversationalMessage(content)) {
-        displayContent = appendSaveVerificationWarning(
-          displayContent,
-          finalToolExecutions,
-          recentUserTexts,
-          content
-        );
-      }
-
-      setMessages((prev) => {
-        const updated = [...prev];
-        const last = updated[updated.length - 1];
-        if (last?.role === 'assistant') {
-          updated[updated.length - 1] = {
-            ...last,
+      const applyTurnResult = (
+        turn: Awaited<ReturnType<typeof runGraftChatTurn>>,
+        conversationBase: Message[]
+      ) => {
+        displayContent = turn.displayContent;
+        finalToolExecutions = turn.toolExecutions;
+        thinkingDuration = turn.thinkingSeconds;
+        const assistantMessage: Message = {
+            role: 'assistant',
             content: displayContent,
             thinkingSeconds: thinkingDuration,
             toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
-          };
-        }
-        return updated;
+        };
+        messagesForContinue = [...conversationBase, assistantMessage];
+        messagesRef.current = messagesForContinue;
+        setMessages(messagesForContinue);
+      };
+
+      const firstTurn = await runGraftChatTurn({
+        conversationMessages: newMessages,
+        fallbackUserMessage: content,
+        context,
+        modelType,
+        signal: controller.signal,
+        mcpClient,
+        mcpTools,
+        onStream: streamAssistant,
       });
+      applyTurnResult(firstTurn, newMessages);
+
+      const originalUserContent =
+        latestNonContinueUserMessage(newMessages.filter((m) => m.role === 'user').map((m) => m.content)) ??
+        content;
+
+      if (
+        !isSimpleConversationalMessage(originalUserContent) &&
+        responseNeedsContinueAction(displayContent) &&
+        !hasSuccessfulDashboardSave(finalToolExecutions)
+      ) {
+        setAutoContinuing(true);
+        let uiContinueRound = 0;
+        while (
+            uiContinueRound < MAX_UI_AUTO_CONTINUE_ROUNDS &&
+            responseNeedsContinueAction(displayContent) &&
+            !hasSuccessfulDashboardSave(finalToolExecutions)
+        ) {
+            uiContinueRound++;
+            const continueUserMsg: Message = { role: 'user', content: CONTINUE_USER_MESSAGE };
+            const withContinue = [...messagesForContinue, continueUserMsg];
+            setMessages([...withContinue, { role: 'assistant', content: '' }]);
+            messagesRef.current = [...withContinue, { role: 'assistant', content: '' }];
+
+            const nextTurn = await runGraftChatTurn({
+                conversationMessages: withContinue,
+                fallbackUserMessage: originalUserContent,
+                context,
+                modelType,
+                signal: controller.signal,
+                mcpClient,
+                mcpTools,
+                onStream: streamAssistant,
+            });
+            applyTurnResult(nextTurn, withContinue);
+        }
+        setAutoContinuing(false);
+      }
 
       // Save chat to history after completion
       const finalAssistantMessage: Message = {
@@ -1027,7 +1178,7 @@ export const ChatInterface = () => {
         thinkingSeconds: thinkingDuration,
         toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined
       };
-      const finalMessages = [...newMessages, finalAssistantMessage];
+      const finalMessages = messagesForContinue;
       const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
       if (savedSession) {
         setCurrentSessionId(savedSession.id);
@@ -1436,9 +1587,12 @@ ${input} `
             ref={messageListRef}
             onScroll={handleScroll}
           >
-            {messages.map((msg, index) => {
-              const isLastMessage = index === messages.length - 1;
-              const isStreaming = isLastMessage && isLoading && msg.role === 'assistant';
+            {messages
+              .map((msg, index) => ({ msg, index }))
+              .filter(({ msg }) => !isSyntheticContinueUserMessage(msg))
+              .map(({ msg, index }) => {
+              const isLastVisibleMessage = index === lastVisibleMessageIndex;
+              const isStreaming = isLastVisibleMessage && isLoading && msg.role === 'assistant';
               const messageCopied = copiedMessageIndex === index;
 
               const handleCopyMessage = async () => {
@@ -1492,6 +1646,19 @@ ${input} `
                         isStreaming={isStreaming}
                       />
                     )}
+                    {msg.role === 'assistant' &&
+                      !isStreaming &&
+                      responseNeedsContinueAction(mainContent || msg.content) && (
+                        <ContinueActionBanner
+                          theme={theme}
+                          disabled={isLoading}
+                          autoContinuing={autoContinuing && isLastVisibleMessage}
+                          onContinue={() => {
+                            pendingSendContentRef.current = CONTINUE_USER_MESSAGE;
+                            void handleSend();
+                          }}
+                        />
+                      )}
                     {isStreaming && thinkingContent === null && (
                       <div className={styles.thinkingIndicator}>
                         <div className={styles.thinkingDots}>

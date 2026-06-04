@@ -1,4 +1,5 @@
 import type { ToolExecution } from '../types/llm.types';
+import { formatContinueActionBlock } from './continueAction';
 import {
     getIncompleteCloneProgress,
     parsePanelCountsFromToolExecutions,
@@ -299,12 +300,14 @@ export function assessCloneTask(
     return null;
 }
 
-const CONTINUE_HINT =
-    '**What to do:** This is a **full dashboard clone** (all panels from the source layout). Reply **Continue** (type exactly that word) — Graft also auto-continues after a short pause when possible. ' +
-    'To copy **one panel only**, say: `Create a new panel on the TARGET dashboard that is a copy of the "PANEL TITLE" panel on SOURCE`.';
+const CONTINUE_HINT = formatContinueActionBlock(
+    'This is a **full dashboard clone** (all panels from the source layout). ' +
+        'To copy **one panel only**, say: `Create a new panel on the TARGET dashboard that is a copy of the "PANEL TITLE" panel on SOURCE`.'
+);
 
-const CONTINUE_HINT_NOT_STARTED =
-    '**What to do:** Reply **Continue** (type exactly that word). Graft will save the dashboard automatically — you do not need panel numbers or UIDs.';
+const CONTINUE_HINT_NOT_STARTED = formatContinueActionBlock(
+    'Graft looked up the source dashboard but has not saved the target yet.'
+);
 
 export function formatPlainEnglishCloneStatus(status: CloneTaskStatus, cloneIntent?: string): string {
     const effective = cloneIntent ? getEffectiveCloneFieldsFromIntent(cloneIntent) : null;
@@ -465,11 +468,11 @@ export function applyOperatorFriendlyDashboardReply(
     }
 
     if (!status) {
-        return (
-            `### Not finished yet\n\n` +
-            `Graft is still working on **${extractRequestedDashboardTitle(cloneIntent) ?? 'your dashboard'}**. ` +
-            `**What to do:** Reply **Continue** again.`
-        );
+            return (
+                `### Not finished yet\n\n` +
+                `Graft is still working on **${extractRequestedDashboardTitle(cloneIntent) ?? 'your dashboard'}**.` +
+                formatContinueActionBlock()
+            );
     }
 
     const formatted = formatPlainEnglishCloneStatus(status, cloneIntent);
