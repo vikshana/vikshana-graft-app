@@ -1,4 +1,9 @@
-import { chatHistoryService, ChatSession, prepareMessagesForStorage } from './chatHistory';
+import {
+    chatHistoryService,
+    ChatSession,
+    prepareMessagesForStorage,
+    sessionFingerprint,
+} from './chatHistory';
 
 jest.mock('./chatHistoryApi', () => ({
     loadChatHistoryFromServer: jest.fn().mockResolvedValue(null),
@@ -113,6 +118,53 @@ describe('ChatHistoryService', () => {
             // Unpinned sessions should also be sorted by updatedAt (newest first)
             expect(allSessions[2].id).toBe('session-3');
             expect(allSessions[3].id).toBe('session-1');
+        });
+    });
+
+    describe('dedupeSessions', () => {
+        it('merges sessions with the same first user message and turn count', () => {
+            const messages = [{ role: 'user' as const, content: 'Fix dashboard panels' }];
+            chatHistoryService.saveSession(messages, 'session-a');
+            chatHistoryService.saveSession(messages, 'session-b');
+            expect(chatHistoryService.getAllSessions()).toHaveLength(1);
+            expect(chatHistoryService.getAllSessions()[0].id).toBe('session-b');
+        });
+
+        it('keeps distinct conversations with different first prompts', () => {
+            chatHistoryService.saveSession([{ role: 'user', content: 'Question A' }], 'a');
+            chatHistoryService.saveSession([{ role: 'user', content: 'Question B' }], 'b');
+            expect(chatHistoryService.getAllSessions()).toHaveLength(2);
+        });
+
+        it('reuses last active session when saving without id after continuation', () => {
+            const messages = [{ role: 'user' as const, content: 'Continue work' }];
+            const first = chatHistoryService.saveSession(messages, 'session-1');
+            expect(first?.id).toBe('session-1');
+            const extended = [
+                ...messages,
+                { role: 'assistant' as const, content: 'Working on it' },
+                { role: 'user' as const, content: 'Also update panel 2' },
+            ];
+            const second = chatHistoryService.saveSession(extended);
+            expect(second?.id).toBe('session-1');
+            expect(chatHistoryService.getAllSessions()).toHaveLength(1);
+        });
+    });
+
+    describe('sessionFingerprint', () => {
+        it('includes first user message and user turn count', () => {
+            const fp = sessionFingerprint({
+                id: 'x',
+                title: 't',
+                createdAt: 0,
+                updatedAt: 0,
+                messages: [
+                    { role: 'user', content: 'Hello' },
+                    { role: 'assistant', content: 'Hi' },
+                    { role: 'user', content: 'Again' },
+                ],
+            });
+            expect(fp).toBe('Hello|u2');
         });
     });
 

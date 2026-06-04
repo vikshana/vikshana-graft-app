@@ -1,0 +1,112 @@
+/** Captures a Grafana dashboard uid after the word "uid" (uid=abc, uid "abc", uid:'abc'). */
+export const DASHBOARD_UID_AFTER_LABEL = /uid\s*[=:#]?\s*["']?([a-zA-Z0-9]{6,})["']?/i;
+
+function collectUidMatches(text: string, pattern: RegExp): string[] {
+    const ids: string[] = [];
+    for (const m of text.matchAll(pattern)) {
+        if (m[1]) {
+            ids.push(m[1]);
+        }
+    }
+    return ids;
+}
+
+/** User referred to a Grafana dashboard (incl. "dash board" typo and uid-in-quotes). */
+export function mentionsDashboard(message: string): boolean {
+    return (
+        /\bdashboard\b/i.test(message) ||
+        /\bdash\s*board\b/i.test(message) ||
+        (/\buid\b/i.test(message) && /["'][a-zA-Z0-9]{6,}["']/i.test(message))
+    );
+}
+
+/** Grafana dashboard uid from natural phrasing. */
+export function extractDashboardUidFromMessage(message: string): string | undefined {
+    const text = message.trim();
+    const patterns = [
+        /\bhas\s+the\s+UID\s*["']([a-zA-Z0-9]+)["']/i,
+        /\bUID\s*["']([a-zA-Z0-9]+)["']/i,
+        /\bdash\s*board\s*["']([a-zA-Z0-9]+)["']/i,
+        /\bdashboard\s+(?:with\s+)?uid\s*[=:#]?\s*["']?([a-zA-Z0-9]{6,})["']?/i,
+        /\bdashboard\s+["']([a-zA-Z0-9]{6,})["']/i,
+        DASHBOARD_UID_AFTER_LABEL,
+        /\b(?:the\s+)?dashboard\s+([a-z][a-z0-9]{8,})\b/i,
+    ];
+    for (const re of patterns) {
+        const m = text.match(re);
+        if (m?.[1]) {
+            return m[1];
+        }
+    }
+    return undefined;
+}
+
+/** All Grafana dashboard uids mentioned in a message (deduped, order preserved). */
+export function extractAllDashboardUids(message: string): string[] {
+    const text = message.trim();
+    const ids: string[] = [];
+    ids.push(...collectUidMatches(text, /\bhas\s+the\s+UID\s*["']([a-zA-Z0-9]+)["']/gi));
+    ids.push(...collectUidMatches(text, /\bUID\s*["']([a-zA-Z0-9]+)["']/gi));
+    ids.push(...collectUidMatches(text, /\bdash\s*board\s*["']([a-zA-Z0-9]+)["']/gi));
+    ids.push(
+        ...collectUidMatches(text, /\bdashboard\s+(?:with\s+)?uid\s*[=:#]?\s*["']?([a-zA-Z0-9]{6,})["']?/gi)
+    );
+    ids.push(...collectUidMatches(text, /\bdashboard\s*["']([a-zA-Z0-9]{6,})["']/gi));
+    ids.push(...collectUidMatches(text, new RegExp(`\\b${DASHBOARD_UID_AFTER_LABEL.source}`, 'gi')));
+    return [...new Set(ids)];
+}
+
+/** Grafana panel id from "panel id 35" — NOT the same as array index. */
+export function extractPanelIdFromMessage(message: string): number | undefined {
+    const patterns = [
+        /\bpanel\s*id\s*#?\s*(\d+)/i,
+        /\bpanelid\s*#?\s*(\d+)/i,
+    ];
+    for (const re of patterns) {
+        const m = message.match(re);
+        if (m?.[1]) {
+            const n = Number(m[1]);
+            if (Number.isFinite(n)) {
+                return n;
+            }
+        }
+    }
+    return undefined;
+}
+
+/** Top-level arrayIndex from "panel index 35", "array index 35". */
+export function extractPanelArrayIndexFromMessage(message: string): number | undefined {
+    const patterns = [
+        /\b(?:panel|array)\s*index\s*#?\s*(\d+)/i,
+        /\barrayindex\s*#?\s*(\d+)/i,
+    ];
+    for (const re of patterns) {
+        const m = message.match(re);
+        if (m?.[1]) {
+            const n = Number(m[1]);
+            if (Number.isFinite(n)) {
+                return n;
+            }
+        }
+    }
+    return undefined;
+}
+
+/** Panel title from named / titled / which is named phrasing. */
+export function extractPanelTitleFromMessage(message: string): string | undefined {
+    const patterns = [
+        /\b(?:which\s+is\s+)?named\s+[""]([^""]+)[""]/i,
+        /\b(?:which\s+is\s+)?named\s+"([^"]+)"/i,
+        /\btitled\s+[""]([^""]+)[""]/i,
+        /\btitled\s+"([^"]+)"/i,
+        /\bpanel\s+named\s+[""]([^""]+)[""]/i,
+        /\bpanel\s+named\s+"([^"]+)"/i,
+    ];
+    for (const re of patterns) {
+        const m = message.match(re);
+        if (m?.[1]?.trim()) {
+            return m[1].trim().replace(/[.\s]+$/u, '');
+        }
+    }
+    return undefined;
+}

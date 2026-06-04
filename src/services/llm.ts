@@ -2,37 +2,207 @@ import { llm } from '@grafana/llm';
 
 // Import types from centralized location
 import type { Message, ToolExecution } from '../types/llm.types';
+import {
+    assistantPromisesMorePanels,
+    getIncompleteCloneProgress,
+    resolveDashboardCloneIntent,
+} from './dashboardCloneProgress';
+import {
+    buildForcedCloneContinueLlmMessage,
+    countContinueMessages,
+    getCloneSessionMeta,
+} from './cloneSessionStorage';
+import { assessCloneTask } from './dashboardTaskStatus';
+import {
+    appendRateLimitWaitNotice,
+    isRateLimitError,
+    stripLeakedToolCallMarkup,
+    stripRateLimitWaitNotice,
+    waitForRateLimitCooldown,
+} from './chatError';
+import {
+    executeChunkedUpdateDashboard,
+    formatChunkedUpdateForLlm,
+    shouldChunkUpdateDashboardArgs,
+} from './dashboardChunkedUpdate';
 import { evaluateMcpToolResult, formatToolResultForLlm } from './toolResult';
+import { extractDashboardFromGetByUid } from './programmaticDashboardClone';
+import {
+    commitRevertSnapshotAfterSave,
+    setPendingRevertBaseline,
+} from './dashboardRevertStorage';
+import {
+    buildForcedPanelFixContinueLlmMessage,
+    parseScopedPanelFixRequest,
+} from './panelFixScope';
+import { applyPanelFixScopeEnforcement } from './panelFixEnforcement';
+import {
+    getPanelFixScope,
+    setPanelFixBaseline,
+    setPanelFixResolvedPanel,
+} from './panelFixSessionStorage';
+import { normalizeUpdateDashboardArgs } from './updateDashboardArgs';
+import { resolvePanelForScopedFix } from './panelDiscovery';
+import { tryInterceptRenameBeforeLlm } from './renameLlmGuard';
+import { messageDescribesDashboardRename } from './dashboardRenameParse';
 
 // Re-export types for backward compatibility
 export type { ToolExecution };
 
 /** Total MCP tool executions per user message (multi-panel edits need many steps). */
-export const MAX_TOOL_STEPS = 40;
+export const MAX_TOOL_STEPS = 60;
 
-/** Extra LLM rounds when the step limit or a narration-only stop is detected. */
+/** Extra LLM rounds when partially done (kept low to avoid Grafana LLM rate limits). */
 export const MAX_AUTO_CONTINUE_ROUNDS = 2;
+
+/** Pause between auto-continue LLM calls (ms) to reduce 429 rate-limit errors. */
+export const AUTO_CONTINUE_DELAY_MS = 2500;
 
 const CONTINUE_NOTICE =
     '\n\n---\n**Stopped after the maximum automated tool steps.** Reply **"Continue"** to finish the remaining work.';
+
+const INCOMPLETE_CLONE_NOTICE =
+    '\n\n---\n**Dashboard clone not finished.** Reply **"Continue"** to copy the remaining panels.';
 
 const CONTINUATION_USER_MESSAGE =
     'Continue the task from where you stopped. Call tools immediately (get_dashboard_by_uid then update_dashboard as needed). ' +
     'Do not describe what you will do next — execute the remaining panel/dashboard updates now.';
 
-/** Model stopped with planning text but never saved the dashboard. */
+const CLONE_CONTINUATION_SUFFIX =
+    ' For machine dashboard clones: get_dashboard_by_uid(source template), replace machine (and related) labels in every target, ' +
+    'then update_dashboard on the target uid (update the existing target-machine dashboard if search found one). ' +
+    'Do not ask the user to pick option 1 vs 2 — proceed with the update.';
+
+const DISCOVERY_TOOLS = new Set([
+    'search_dashboards',
+    'get_dashboard_summary',
+    'get_dashboard_by_uid',
+    'search_folders',
+]);
+
+/** User asked to change or create dashboard/panel content. */
+export function userWantsDashboardWork(userContent: string): boolean {
+    if (messageDescribesDashboardRename(userContent)) {
+        return false;
+    }
+    return (
+        /\b(update|modify|change|edit|fix|convert|add|create|clone|copy|duplicate|replicate)\b/i.test(userContent) &&
+        /\b(panel|dashboard|chart|graph|visual)/i.test(userContent)
+    );
+}
+
+export function buildContinuationUserMessage(
+    userContent: string,
+    toolExecutions: ToolExecution[] = [],
+    recentUserMessages: string[] = []
+): string {
+    const scoped =
+        parseScopedPanelFixRequest(userContent) ??
+        parseScopedPanelFixRequest(
+            [...recentUserMessages].reverse().find((m) => !/^continue\.?$/i.test(m.trim())) ?? ''
+        );
+    if (scoped) {
+        return buildForcedPanelFixContinueLlmMessage(scoped, toolExecutions);
+    }
+
+    const cloneIntent = resolveDashboardCloneIntent(recentUserMessages) ?? userContent;
+    const meta = getCloneSessionMeta();
+    const status = assessCloneTask(cloneIntent, toolExecutions, recentUserMessages);
+    if (status?.state === 'not_started' || status?.state === 'stuck') {
+        const m = meta ?? { intent: cloneIntent, continueAttempts: 0 };
+        return buildForcedCloneContinueLlmMessage({ ...m, intent: cloneIntent });
+    }
+    const incomplete = getIncompleteCloneProgress(cloneIntent, toolExecutions, cloneIntent);
+    if (incomplete) {
+        const from = incomplete.targetPanels;
+        const to = incomplete.sourcePanels - 1;
+        return (
+            CONTINUATION_USER_MESSAGE +
+            ` Target uid=${incomplete.targetUid} has ${incomplete.targetPanels}/${incomplete.sourcePanels} panels. ` +
+            `Copy panels arrayIndex ${from} through ${to} from source uid=${incomplete.sourceUid} ` +
+            `(machine labels from the user's request). Call get_dashboard_by_uid on both if needed, then update_dashboard on the target. ` +
+            `Do not print panel index tables or ask questions — save the next batch now.`
+        );
+    }
+    if (/\b(visual copy|clone|copy of|new dashboard)\b/i.test(userContent)) {
+        return CONTINUATION_USER_MESSAGE + CLONE_CONTINUATION_SUFFIX;
+    }
+    return CONTINUATION_USER_MESSAGE;
+}
+
+/** Model stopped before dashboard work the user requested is complete. */
 export function needsDashboardContinueNudge(
     userContent: string,
     assistantContent: string,
-    toolExecutions: ToolExecution[]
+    toolExecutions: ToolExecution[],
+    recentUserMessages: string[] = []
 ): boolean {
-    const userWantsEdit =
-        /\b(update|modify|change|edit|fix|convert|add)\b/i.test(userContent) &&
-        /\b(panel|dashboard|chart|graph)/i.test(userContent);
+    const intent =
+        [...recentUserMessages].reverse().find((m) => !/^continue\.?$/i.test(m.trim())) ??
+        userContent;
+    const scoped = parseScopedPanelFixRequest(intent);
+    if (scoped) {
+        return !toolExecutions.some(
+            (t) => t.name === 'update_dashboard' && t.status === 'success'
+        );
+    }
+
+    const cloneIntent = resolveDashboardCloneIntent(recentUserMessages) ?? userContent;
+
+    if (!userWantsDashboardWork(cloneIntent) && !userWantsDashboardWork(userContent)) {
+        return false;
+    }
+
+    const cloneTask = assessCloneTask(cloneIntent, toolExecutions, recentUserMessages);
+    if (cloneTask?.state === 'in_progress') {
+        const have = cloneTask.targetPanels ?? 0;
+        const total = cloneTask.sourcePanels ?? 0;
+        const sameDashboard =
+            cloneTask.sourceUid &&
+            cloneTask.targetUid &&
+            cloneTask.sourceUid === cloneTask.targetUid;
+        const sameTitle =
+            cloneTask.sourceTitle &&
+            cloneTask.targetTitle &&
+            cloneTask.sourceTitle.toLowerCase() === cloneTask.targetTitle.toLowerCase();
+        if (total >= 3 && have >= total - 1 && (sameDashboard || sameTitle)) {
+            return false;
+        }
+        return true;
+    }
+
+    if (getIncompleteCloneProgress(cloneIntent, toolExecutions, cloneIntent)) {
+        return true;
+    }
+
     const saved = toolExecutions.some((t) => t.name === 'update_dashboard' && t.status === 'success');
+    if (saved && !assistantPromisesMorePanels(assistantContent)) {
+        return false;
+    }
+
     const planningStop =
-        /\b(I will|I'll|now I will|now I'll|let me now|going to update|next I will)\b/i.test(assistantContent);
-    return userWantsEdit && !saved && planningStop;
+        /\b(I will|I'll|now I will|now I'll|I'll now|I will now|let me now|going to update|next I will)\b/i.test(
+            assistantContent
+        );
+    const clarificationStop =
+        /\b(Would you like|Which would you prefer|Please choose|Let me know which|Reply with \*\*Continue\*\*|option 1|option 2)\b/i.test(
+            assistantContent
+        );
+    const hadDiscovery = toolExecutions.some(
+        (t) => DISCOVERY_TOOLS.has(t.name) && t.status === 'success'
+    );
+    const lookupOnlyStop = hadDiscovery && !toolExecutions.some((t) => t.name === 'update_dashboard');
+    const partialNarrationStop = saved && assistantPromisesMorePanels(assistantContent);
+    const firstPassCloneLookup =
+        cloneTask?.state === 'not_started' && lookupOnlyStop && countContinueMessages(recentUserMessages) === 0;
+
+    return (
+        planningStop ||
+        clarificationStop ||
+        lookupOnlyStop ||
+        partialNarrationStop ||
+        firstPassCloneLookup
+    );
 }
 
 export const llmService = {
@@ -116,15 +286,52 @@ export const llmService = {
         const model = modelType === 'thinking' ? llm.Model.LARGE : llm.Model.BASE;
         const hasTools = Boolean(tools && tools.length > 0);
 
+        let latestDisplayContent = '';
+        let latestToolExecutions: ToolExecution[] = [];
+
+        const trackedUpdate = (content: string, toolExecutions?: ToolExecution[]) => {
+            latestDisplayContent = content;
+            if (toolExecutions) {
+                latestToolExecutions = toolExecutions;
+            }
+            onUpdate(content, toolExecutions);
+        };
+
+        const renameIntercept = await tryInterceptRenameBeforeLlm(validMessages, mcpClient, trackedUpdate);
+        if (renameIntercept !== null) {
+            return stripLeakedToolCallMarkup(renameIntercept);
+        }
+
         const callLlm = async () => {
             if (signal?.aborted) {
                 throw new Error('Aborted');
             }
-            return llm.chatCompletions({
-                model,
-                messages: llmMessages,
-                tools: hasTools ? tools : undefined,
-            } as any);
+            const maxAttempts = 2;
+            let lastError: unknown;
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                try {
+                    return await llm.chatCompletions({
+                        model,
+                        messages: llmMessages,
+                        tools: hasTools ? tools : undefined,
+                    } as any);
+                } catch (err) {
+                    lastError = err;
+                    if (!isRateLimitError(err) || attempt >= maxAttempts || signal?.aborted) {
+                        throw err;
+                    }
+                    console.warn(
+                        `[Graft] Rate limited (attempt ${attempt}/${maxAttempts}), waiting 60s then retrying`
+                    );
+                    await waitForRateLimitCooldown(signal, (remainingMs) => {
+                        trackedUpdate(
+                            appendRateLimitWaitNotice(latestDisplayContent, remainingMs),
+                            latestToolExecutions
+                        );
+                    });
+                }
+            }
+            throw lastError;
         };
 
         const executeToolBatch = async (
@@ -145,7 +352,7 @@ export const llmService = {
                     status: 'pending',
                     toolCallId,
                 });
-                onUpdate(fullContent, toolExecutions);
+                trackedUpdate(fullContent, toolExecutions);
 
                 const updateToolExecution = (
                     status: ToolExecution['status'],
@@ -164,7 +371,7 @@ export const llmService = {
                             toolExecutions[toolExecIndex].userReference = userReference;
                         }
                     }
-                    onUpdate(fullContent, toolExecutions);
+                    trackedUpdate(fullContent, toolExecutions);
                 };
 
                 try {
@@ -172,32 +379,107 @@ export const llmService = {
                         throw new Error('MCP Client not available');
                     }
 
-                    const args = JSON.parse(toolCall.function.arguments);
-                    const result = await mcpClient.callTool({
-                        name: toolName,
-                        arguments: args,
-                    });
+                    let args = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
 
-                    const evaluated = evaluateMcpToolResult(toolName, result);
-                    const llmContent = formatToolResultForLlm(toolName, evaluated.text);
+                    if (toolName === 'update_dashboard') {
+                        args = normalizeUpdateDashboardArgs(args);
+                        args = applyPanelFixScopeEnforcement(args);
+                    }
 
-                    llmMessages.push({
-                        role: 'tool',
-                        content: evaluated.ok
-                            ? llmContent
-                            : `Error: ${evaluated.error ?? 'Tool failed'}\n\n${llmContent}`,
-                        tool_call_id: toolCallId,
-                    });
-
-                    if (evaluated.ok) {
-                        updateToolExecution(
-                            'success',
-                            undefined,
-                            evaluated.summary,
-                            evaluated.userReference
+                    if (toolName === 'update_dashboard' && shouldChunkUpdateDashboardArgs(args)) {
+                        toolExecutions.pop();
+                        const chunked = await executeChunkedUpdateDashboard(
+                            mcpClient,
+                            args,
+                            toolExecutions
                         );
+                        for (const step of toolExecutions) {
+                            if (step.name === 'update_dashboard' && !step.toolCallId) {
+                                step.toolCallId = toolCallId;
+                            }
+                        }
+                        trackedUpdate(fullContent, toolExecutions);
+
+                        if (chunked.ok && chunked.uid) {
+                            commitRevertSnapshotAfterSave(chunked.uid);
+                        }
+
+                        const llmContent = formatChunkedUpdateForLlm(chunked);
+                        llmMessages.push({
+                            role: 'tool',
+                            content: chunked.ok
+                                ? llmContent
+                                : `Error: ${chunked.error ?? 'Chunked save failed'}\n\n${llmContent}`,
+                            tool_call_id: toolCallId,
+                        });
                     } else {
-                        updateToolExecution('error', evaluated.error ?? 'Tool returned an error');
+                        const result = await mcpClient.callTool({
+                            name: toolName,
+                            arguments: args,
+                        });
+
+                        const evaluated = evaluateMcpToolResult(toolName, result);
+                        const llmContent = formatToolResultForLlm(toolName, evaluated.text);
+
+                        llmMessages.push({
+                            role: 'tool',
+                            content: evaluated.ok
+                                ? llmContent
+                                : `Error: ${evaluated.error ?? 'Tool failed'}\n\n${llmContent}`,
+                            tool_call_id: toolCallId,
+                        });
+
+                        if (evaluated.ok) {
+                            if (toolName === 'get_dashboard_by_uid') {
+                                const uid = typeof args.uid === 'string' ? args.uid : '';
+                                const extracted = extractDashboardFromGetByUid(evaluated.text);
+                                if (extracted?.dashboard && uid) {
+                                    const title =
+                                        typeof extracted.dashboard.title === 'string'
+                                            ? extracted.dashboard.title
+                                            : undefined;
+                                    setPendingRevertBaseline(uid, extracted.dashboard, title);
+
+                                    const scope = getPanelFixScope();
+                                    if (scope && uid === scope.dashboardUid) {
+                                        setPanelFixBaseline(extracted.dashboard);
+                                        const resolved = resolvePanelForScopedFix(
+                                            extracted.dashboard,
+                                            scope
+                                        );
+                                        if (resolved.ok) {
+                                            setPanelFixResolvedPanel({
+                                                panelId: resolved.resolved.entry.panelId,
+                                                panelTitle: resolved.resolved.entry.title,
+                                                panelArrayIndex: resolved.resolved.entry.arrayIndex,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                            if (toolName === 'update_dashboard') {
+                                const savedUid =
+                                    typeof args.uid === 'string'
+                                        ? args.uid
+                                        : args.dashboard &&
+                                            typeof args.dashboard === 'object' &&
+                                            typeof (args.dashboard as { uid?: string }).uid ===
+                                                'string'
+                                          ? (args.dashboard as { uid: string }).uid
+                                          : evaluated.summary?.match(/uid=([^\s,]+)/)?.[1];
+                                if (savedUid) {
+                                    commitRevertSnapshotAfterSave(savedUid);
+                                }
+                            }
+                            updateToolExecution(
+                                'success',
+                                undefined,
+                                evaluated.summary,
+                                evaluated.userReference
+                            );
+                        } else {
+                            updateToolExecution('error', evaluated.error ?? 'Tool returned an error');
+                        }
                     }
                 } catch (error: any) {
                     console.error(`[Graft] Tool execution failed: ${error.message}`);
@@ -225,7 +507,7 @@ export const llmService = {
             const toolExecutions: ToolExecution[] = [];
 
             if (fullContent) {
-                onUpdate(fullContent, toolExecutions);
+                trackedUpdate(fullContent, toolExecutions);
             }
 
             let toolSteps = 0;
@@ -233,6 +515,9 @@ export const llmService = {
             let hitStepLimit = false;
             const lastUserContent =
                 [...validMessages].reverse().find((m) => m.role === 'user')?.content ?? '';
+            const userMessageHistory = validMessages
+                .filter((m) => m.role === 'user')
+                .map((m) => (typeof m.content === 'string' ? m.content : String(m.content ?? '')));
 
             const runToolLoop = async (): Promise<void> => {
                 while (toolCalls && toolCalls.length > 0) {
@@ -267,21 +552,37 @@ export const llmService = {
                     const nextChoice = nextResponse.choices[0];
                     fullContent = nextChoice.message?.content || fullContent;
                     toolCalls = nextChoice.message?.tool_calls || [];
-                    onUpdate(fullContent, toolExecutions);
+                    trackedUpdate(fullContent, toolExecutions);
                 }
             };
 
             outer: while (true) {
                 await runToolLoop();
 
+                const scopedFixActive =
+                    getPanelFixScope() ?? parseScopedPanelFixRequest(lastUserContent);
+                const scopedSaveFailed =
+                    scopedFixActive &&
+                    toolExecutions.some((t) => t.name === 'update_dashboard' && t.status === 'error') &&
+                    !toolExecutions.some((t) => t.name === 'update_dashboard' && t.status === 'success');
+                if (scopedSaveFailed) {
+                    console.warn('[Graft] Scoped panel fix save failed — stopping auto-continue');
+                    break outer;
+                }
+
                 const stepLimitPending = hitStepLimit && toolCalls && toolCalls.length > 0;
                 const narrationStuck =
                     (!toolCalls || toolCalls.length === 0) &&
-                    needsDashboardContinueNudge(lastUserContent, fullContent, toolExecutions);
+                    needsDashboardContinueNudge(
+                        lastUserContent,
+                        fullContent,
+                        toolExecutions,
+                        userMessageHistory
+                    );
 
                 if (
                     (stepLimitPending || narrationStuck) &&
-                    autoContinueRounds < MAX_AUTO_CONTINUE_ROUNDS &&
+                    autoContinueRounds < (scopedFixActive ? 1 : MAX_AUTO_CONTINUE_ROUNDS) &&
                     hasTools
                 ) {
                     autoContinueRounds++;
@@ -293,9 +594,20 @@ export const llmService = {
                         }`
                     );
 
+                    if (AUTO_CONTINUE_DELAY_MS > 0) {
+                        await new Promise((r) => setTimeout(r, AUTO_CONTINUE_DELAY_MS));
+                    }
+                    if (signal?.aborted) {
+                        throw new Error('Aborted');
+                    }
+
                     llmMessages.push({
                         role: 'user',
-                        content: CONTINUATION_USER_MESSAGE,
+                        content: buildContinuationUserMessage(
+                            lastUserContent,
+                            toolExecutions,
+                            userMessageHistory
+                        ),
                     });
 
                     const contResponse = await callLlm();
@@ -306,7 +618,7 @@ export const llmService = {
                     const contChoice = contResponse.choices[0];
                     fullContent = contChoice.message?.content || fullContent;
                     toolCalls = contChoice.message?.tool_calls || [];
-                    onUpdate(fullContent, toolExecutions);
+                    trackedUpdate(fullContent, toolExecutions);
                     continue outer;
                 }
 
@@ -317,11 +629,11 @@ export const llmService = {
                 console.warn('[Graft] Max tool steps reached after auto-continue, stopping');
                 if (!fullContent.includes(CONTINUE_NOTICE)) {
                     fullContent += CONTINUE_NOTICE;
-                    onUpdate(fullContent, toolExecutions);
+                    trackedUpdate(fullContent, toolExecutions);
                 }
             }
 
-            return fullContent;
+            return stripLeakedToolCallMarkup(stripRateLimitWaitNotice(fullContent));
         } catch (error: any) {
             console.error('[Graft] Chat Error:', error);
             console.error('[Graft] Error details:', {

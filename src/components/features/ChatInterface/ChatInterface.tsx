@@ -23,6 +23,7 @@ import type { Message, ToolExecution } from '../../../types/llm.types';
 import { contextService, UserContext, DataSourceContext, DashboardContext } from '../../../services/context';
 import { chatHistoryService, prepareMessagesForStorage } from '../../../services/chatHistory';
 import { PLUGIN_BASE_URL } from '../../../constants';
+import { replaceChatSessionInUrl } from '../../../utils/chatSessionUrl';
 import { truncateMessages } from '../../../services/truncation';
 import {
   appendDashboardReferencesToReply,
@@ -630,7 +631,7 @@ export const ChatInterface = () => {
     }
     setCurrentSessionId(draftSession.id);
     currentSessionIdRef.current = draftSession.id;
-    setSearchParams({ chat: 'true', session: draftSession.id });
+    replaceChatSessionInUrl(draftSession.id);
 
     try {
       const dashboard = await contextService.getCurrentDashboard();

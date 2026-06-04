@@ -1,5 +1,5 @@
 // External libraries
-import React, { lazy, Suspense, useEffect } from 'react';
+import React, { Suspense, useEffect } from 'react';
 import { Route, Routes } from 'react-router-dom';
 
 // Grafana packages
@@ -15,11 +15,29 @@ import { CategoryDef } from '../../../types/prompt.types';
 
 // Local components
 import { ErrorBoundary } from '../../ErrorBoundary';
+import { lazyWithChunkRetry, clearChunkReloadFlags } from '../../../utils/lazyWithChunkRetry';
 
-// Lazy loaded route components
-const ChatInterface = lazy(() => import('../ChatInterface/ChatInterface').then(m => ({ default: m.ChatInterface })));
-const ChatHistory = lazy(() => import('../../../pages/ChatHistory').then(m => ({ default: m.ChatHistory })));
-const PromptLibrary = lazy(() => import('../../../pages/PromptLibrary').then(m => ({ default: m.PromptLibrary })));
+const ChatInterface = lazyWithChunkRetry(
+  () =>
+    import(/* webpackChunkName: "graft-chat" */ '../ChatInterface/ChatInterface').then((m) => ({
+      default: m.ChatInterface,
+    })),
+  'graft-chat'
+);
+const ChatHistory = lazyWithChunkRetry(
+  () =>
+    import(/* webpackChunkName: "graft-history" */ '../../../pages/ChatHistory').then((m) => ({
+      default: m.ChatHistory,
+    })),
+  'graft-history'
+);
+const PromptLibrary = lazyWithChunkRetry(
+  () =>
+    import(/* webpackChunkName: "graft-prompt-library" */ '../../../pages/PromptLibrary').then((m) => ({
+      default: m.PromptLibrary,
+    })),
+  'graft-prompt-library'
+);
 
 
 export default function App(props: AppRootProps) {
@@ -29,6 +47,7 @@ export default function App(props: AppRootProps) {
     initOtel();
     document.title = 'Graft AI Assistant';
     void chatHistoryService.ensureLoaded();
+    clearChunkReloadFlags();
 
     // Initialize prompt library with configured prompts
     const promptLibrarySettings = props.meta.jsonData?.promptLibrary as CategoryDef[] | undefined;

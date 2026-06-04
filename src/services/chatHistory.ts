@@ -149,6 +149,32 @@ class ChatHistoryService {
             }
         }
         this.sessions = Array.from(byId.values());
+        this.dedupeSessions();
+    }
+
+    /** Collapse duplicate rows (race saves / dual localStorage keys / server merge). */
+    dedupeSessions(): void {
+        const byFingerprint = new Map<string, ChatSession>();
+        for (const session of this.sessions) {
+            if (!session?.id || !session.messages?.length) {
+                continue;
+            }
+            const fp = sessionFingerprint(session);
+            const existing = byFingerprint.get(fp);
+            if (!existing || session.updatedAt >= existing.updatedAt) {
+                byFingerprint.set(fp, session);
+            }
+        }
+        const kept = Array.from(byFingerprint.values());
+        const keptIds = new Set(kept.map((s) => s.id));
+        if (this.lastActiveSessionId && !keptIds.has(this.lastActiveSessionId)) {
+            const evicted = this.sessions.find((s) => s.id === this.lastActiveSessionId);
+            const fp = evicted?.messages?.length ? sessionFingerprint(evicted) : null;
+            const replacement = fp ? kept.find((s) => sessionFingerprint(s) === fp) : undefined;
+            this.lastActiveSessionId =
+                replacement?.id ?? kept.sort((a, b) => b.updatedAt - a.updatedAt)[0]?.id ?? null;
+        }
+        this.sessions = kept;
     }
 
     /** Push in-memory state to the plugin backend immediately. */
@@ -200,7 +226,14 @@ class ChatHistoryService {
             this.lastActiveSessionId = null;
         }
 
+        this.dedupeSessions();
         this.writeLocalBundle();
+        if (this.sessions.length > 0) {
+            void saveChatHistoryToServer({
+                sessions: this.sessions,
+                lastActiveSessionId: this.lastActiveSessionId,
+            });
+        }
         this.loaded = true;
     }
 
@@ -214,9 +247,24 @@ class ChatHistoryService {
     }
 
     private readLocalBundle(): { sessions: ChatSession[]; lastActiveId: string | null } {
-        const sessions = this.readJson<ChatSession[]>(storageKey(STORAGE_KEY_BASE)) ?? [];
+        const historyKey = storageKey(STORAGE_KEY_BASE);
+        const sessions = this.readJson<ChatSession[]>(historyKey) ?? [];
         const lastActiveId = localStorage.getItem(storageKey(LAST_ACTIVE_SESSION_KEY_BASE));
-        return { sessions, lastActiveId };
+        if (historyKey === STORAGE_KEY_BASE) {
+            return { sessions, lastActiveId };
+        }
+        const legacy = this.readJson<ChatSession[]>(STORAGE_KEY_BASE) ?? [];
+        if (legacy.length === 0) {
+            return { sessions, lastActiveId };
+        }
+        const merged = [...sessions];
+        const ids = new Set(sessions.map((s) => s.id));
+        for (const s of legacy) {
+            if (s?.id && !ids.has(s.id)) {
+                merged.push(s);
+            }
+        }
+        return { sessions: merged, lastActiveId };
     }
 
     private writeLocalBundle(): void {
@@ -435,11 +483,19 @@ class ChatHistoryService {
             return null;
         }
 
+        let resolvedId = sessionId;
+        if (!resolvedId && this.lastActiveSessionId) {
+            const active = this.getSession(this.lastActiveSessionId);
+            if (active && isSameConversation(active.messages, toStore)) {
+                resolvedId = active.id;
+            }
+        }
+
         const now = Date.now();
         let session: ChatSession;
 
-        if (sessionId) {
-            const existing = this.sessions.find((s) => s.id === sessionId);
+        if (resolvedId) {
+            const existing = this.sessions.find((s) => s.id === resolvedId);
             if (existing) {
                 existing.messages = toStore;
                 existing.updatedAt = now;
@@ -447,7 +503,7 @@ class ChatHistoryService {
                 session = existing;
             } else {
                 session = {
-                    id: sessionId,
+                    id: resolvedId,
                     title: this.generateTitle(toStore),
                     messages: toStore,
                     createdAt: now,
@@ -468,6 +524,7 @@ class ChatHistoryService {
 
         this.lastActiveSessionId = session.id;
         this.saveActiveSnapshot(session.id, toStore);
+        this.dedupeSessions();
         this.persist();
         return session;
     }
@@ -516,3 +573,36 @@ function getOrCreateChatHistoryService(): ChatHistoryService {
 
 /** Single instance across lazy-loaded chunks (ChatInterface vs ChatHistory). */
 export const chatHistoryService = getOrCreateChatHistoryService();
+
+/** Exported for unit tests. */
+export function sessionFingerprint(session: ChatSession): string {
+    const firstUser = session.messages.find((m) => m.role === 'user');
+    if (!firstUser?.content?.trim()) {
+        return `id:${session.id}`;
+    }
+    const preview = firstUser.content.trim().slice(0, 120);
+    const userTurns = session.messages.filter((m) => m.role === 'user').length;
+    return `${preview}|u${userTurns}`;
+}
+
+function isSameConversation(stored: Message[], incoming: Message[]): boolean {
+    const a = prepareMessagesForStorage(stored);
+    const b = prepareMessagesForStorage(incoming);
+    if (a.length === 0 || b.length === 0) {
+        return false;
+    }
+    const firstA = a.find((m) => m.role === 'user');
+    const firstB = b.find((m) => m.role === 'user');
+    if (!firstA || !firstB || firstA.content.trim() !== firstB.content.trim()) {
+        return false;
+    }
+    if (b.length < a.length) {
+        return false;
+    }
+    for (let i = 0; i < a.length; i++) {
+        if (a[i].role !== b[i].role || a[i].content !== b[i].content) {
+            return false;
+        }
+    }
+    return true;
+}

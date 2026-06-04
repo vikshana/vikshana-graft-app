@@ -22,6 +22,8 @@ const mockLlmHealth = jest.fn().mockResolvedValue({
     }
 });
 
+const mockUseMCPClient = jest.fn().mockReturnValue({ enabled: false, client: null });
+
 jest.mock('@grafana/llm', () => ({
     llm: {
         health: () => mockLlmHealth(),
@@ -30,7 +32,7 @@ jest.mock('@grafana/llm', () => ({
         Model: { BASE: 'base', LARGE: 'large' }
     },
     mcp: {
-        useMCPClient: jest.fn().mockReturnValue({ enabled: false, client: null }),
+        useMCPClient: (...args: unknown[]) => mockUseMCPClient(...args),
         convertToolsToOpenAI: jest.fn().mockReturnValue([])
     }
 }));
@@ -89,6 +91,7 @@ describe('ChatInterface', () => {
                 large: { ok: true }
             }
         });
+        mockUseMCPClient.mockReturnValue({ enabled: false, client: null });
         (contextService.getCurrentDashboard as jest.Mock).mockResolvedValue({});
         (contextService.getUserContext as jest.Mock).mockReturnValue({ login: 'testuser', name: 'Test User' });
         (contextService.getDataSources as jest.Mock).mockReturnValue([]);
@@ -735,6 +738,37 @@ describe('ChatInterface', () => {
 
             await waitFor(() => {
                 expect(screen.getByTestId('chat-input')).toBeDisabled();
+            });
+        });
+
+        it('enables programmatic send when MCP is connected without LLM', async () => {
+            mockLlmHealth.mockResolvedValue({
+                configured: false,
+                ok: false,
+                models: {}
+            });
+            mockUseMCPClient.mockReturnValue({
+                enabled: true,
+                client: { listTools: jest.fn().mockResolvedValue({ tools: [] }) },
+            });
+
+            render(
+                <MemoryRouter>
+                    <ChatInterface />
+                </MemoryRouter>
+            );
+
+            const renamePrompt =
+                'Rename the dashboard for the 2505-200033 machine to be NewMachine instead of Keysight';
+
+            await waitFor(() => {
+                expect(screen.getByTestId('chat-input')).not.toBeDisabled();
+            });
+
+            fireEvent.change(screen.getByTestId('chat-input'), { target: { value: renamePrompt } });
+
+            await waitFor(() => {
+                expect(screen.getByTestId('send-message-button')).not.toBeDisabled();
             });
         });
 

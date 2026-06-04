@@ -9,12 +9,11 @@ test.describe('Prompt Library', () => {
         await page.getByTestId('prompt-library-link').click();
         await expect(page).toHaveURL(/.*\/prompts/);
 
-        // Check for pre-configured prompts tab
-        await expect(page.getByText('Pre-configured Prompts')).toBeVisible();
+        // Check for suggested prompts tab (default)
+        await expect(page.getByText('Suggested Prompts')).toBeVisible();
 
-        // Wait for prompts to load and select the first available pre-configured prompt
-        // We use an actual pre-configured prompt from the default library
-        const promptItem = page.getByTestId('pre-configured-prompt-item').first();
+        // Select a suggested prompt
+        const promptItem = page.getByTestId('suggested-prompt-item').first();
         await expect(promptItem).toBeVisible({ timeout: 10000 });
 
         // Get the prompt content text before clicking

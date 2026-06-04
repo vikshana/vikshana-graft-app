@@ -1,9 +1,12 @@
 {
   "name": "graft",
-  "version": "0.1.2-electramet.11",
+  "version": "0.1.2-electramet.109",
   "scripts": {
     "bump:deploy": "node scripts/bump-deploy.mjs",
     "deploy": "bash scripts/deploy-electramet.sh",
+    "deploy:rsync": "bash scripts/deploy-electramet.sh --no-bump --rsync-only",
+    "deploy:frontend": "bash scripts/deploy-electramet.sh --frontend-only",
+    "deploy:clean": "bash scripts/deploy-electramet.sh --clean",
     "build": "webpack -c ./.config/webpack/webpack.config.ts --env production",
     "dev": "webpack -w -c ./.config/webpack/webpack.config.ts --env development",
     "test": "jest --watch --onlyChanged",

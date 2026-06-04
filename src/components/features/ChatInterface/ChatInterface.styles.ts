@@ -144,6 +144,12 @@ align-items: center;
 justify-content: center;
 cursor: pointer;
 transition: all 0.2s;
+touch-action: manipulation;
+-webkit-tap-highlight-color: transparent;
+
+    svg {
+  pointer-events: none;
+}
     
     &:hover {
   background: #ed6f3e;
@@ -546,6 +552,7 @@ justify-content: center;
   sendIconButton: css`
 cursor: pointer;
 background: ${theme.colors.primary.main};
+border: none;
 border-radius: 50%;
 width: 32px;
 height: 32px;
@@ -553,10 +560,21 @@ display: flex;
 align-items: center;
 justify-content: center;
 transition: all 0.2s;
+touch-action: manipulation;
+-webkit-tap-highlight-color: transparent;
+
+    svg {
+  pointer-events: none;
+}
     
     &:hover {
   background: ${theme.colors.primary.shade};
   transform: scale(1.1);
+}
+
+    &:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 `,
   chatHeader: css`
@@ -596,6 +614,11 @@ white-space: nowrap;
   buildBadgeLanding: css`
 margin-top: ${theme.spacing(1)};
 margin-bottom: ${theme.spacing(1)};
+`,
+  sendHint: css`
+font-size: 12px;
+color: ${theme.colors.error.text};
+margin-top: ${theme.spacing(0.5)};
 `,
   loadingContainer: css`
 display: flex;

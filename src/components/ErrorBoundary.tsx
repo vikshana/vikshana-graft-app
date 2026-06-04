@@ -2,6 +2,8 @@ import React from 'react';
 import { GrafanaTheme2 } from '@grafana/data';
 import { Alert, Button, useStyles2 } from '@grafana/ui';
 import { css } from '@emotion/css';
+import { isChunkLoadError } from '../utils/lazyWithChunkRetry';
+import { GRAFT_BUILD_DISPLAY } from '../buildInfo';
 
 interface ErrorBoundaryProps {
     children: React.ReactNode;
@@ -62,19 +64,36 @@ interface DefaultErrorUIProps {
 
 const DefaultErrorUI: React.FC<DefaultErrorUIProps> = ({ error, errorInfo, onReset }) => {
     const styles = useStyles2(getStyles);
+    const chunkError = isChunkLoadError(error);
 
     return (
         <div className={styles.container}>
             <div className={styles.content}>
-                <Alert severity="error" title="Something went wrong">
+                <Alert severity="error" title={chunkError ? 'Graft was updated — reload required' : 'Something went wrong'}>
                     <div className={styles.errorMessage}>
-                        {error?.message || 'An unexpected error occurred'}
+                        {chunkError ? (
+                            <>
+                                Your browser cached an older Graft JavaScript bundle after a deploy. Hard-refresh
+                                (**Cmd+Shift+R** on Mac) or click **Reload Graft** below.
+                                <br />
+                                <br />
+                                <em>{GRAFT_BUILD_DISPLAY}</em>
+                            </>
+                        ) : (
+                            error?.message || 'An unexpected error occurred'
+                        )}
                     </div>
 
                     <div className={styles.actions}>
-                        <Button onClick={onReset} variant="primary">
-                            Try Again
-                        </Button>
+                        {chunkError ? (
+                            <Button onClick={() => window.location.reload()} variant="primary">
+                                Reload Graft
+                            </Button>
+                        ) : (
+                            <Button onClick={onReset} variant="primary">
+                                Try Again
+                            </Button>
+                        )}
                         <Button onClick={() => window.location.href = '/'} variant="secondary">
                             Go to Home
                         </Button>
