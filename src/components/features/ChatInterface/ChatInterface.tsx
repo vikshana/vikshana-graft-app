@@ -635,13 +635,9 @@ export const ChatInterface = () => {
     currentSessionIdRef.current = draftSession.id;
     replaceChatSessionInUrl(draftSession.id);
 
+    let usedSimpleChatPath = false;
+
     try {
-      const dashboard = await contextService.getCurrentDashboard();
-      const user = contextService.getUserContext();
-      const dataSources = contextService.getDataSources();
-
-      const context = formatContext(dashboard, user, dataSources);
-
       // Create a placeholder message for the assistant
       const assistantMessage: Message = { role: 'assistant', content: '' };
       setMessages((prev) => [...prev, assistantMessage]);
@@ -658,21 +654,16 @@ export const ChatInterface = () => {
       let finalToolExecutions: ToolExecution[] = [];
 
       if (isSimpleConversationalMessage(content)) {
-        finalContent = await runSimpleConversationalChat(
-          content,
-          modelType,
-          controller.signal,
-          (fullContent) => {
-            setMessages((prev) => {
-              const updated = [...prev];
-              const last = updated[updated.length - 1];
-              if (last?.role === 'assistant') {
-                updated[updated.length - 1] = { ...last, content: fullContent };
-              }
-              return updated;
-            });
+        usedSimpleChatPath = true;
+        finalContent = await runSimpleConversationalChat(content, modelType, controller.signal);
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
           }
-        );
+          return updated;
+        });
 
         const finalAssistantMessage: Message = {
           role: 'assistant',
@@ -687,6 +678,12 @@ export const ChatInterface = () => {
         }
         return;
       }
+
+      const dashboard = await contextService.getCurrentDashboard();
+      const user = contextService.getUserContext();
+      const dataSources = contextService.getDataSources();
+
+      const context = formatContext(dashboard, user, dataSources);
 
       const truncatedMessages = truncateMessages(newMessages, 10);
 
@@ -758,7 +755,8 @@ export const ChatInterface = () => {
         persistActiveSession();
         return;
       }
-      const errorMessage = `Sorry, I encountered an error: ${error.message || 'Unknown error'} `;
+      const pathTag = usedSimpleChatPath ? '[simple-chat] ' : '[full-llm] ';
+      const errorMessage = `Sorry, I encountered an error: ${pathTag}${error.message || 'Unknown error'} `;
 
       // Create the error assistant message
       const errorAssistantMessage: Message = {
