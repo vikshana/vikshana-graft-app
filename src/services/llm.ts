@@ -206,6 +206,34 @@ export function needsDashboardContinueNudge(
     );
 }
 
+/** One-shot LLM call for casual chat — bypasses tools, context blob, and auto-continue loops. */
+export async function runSimpleConversationalChat(
+    userText: string,
+    modelType: 'standard' | 'thinking' = 'standard',
+    signal?: AbortSignal,
+    onUpdate?: (content: string) => void
+): Promise<string> {
+    if (signal?.aborted) {
+        throw new Error('Aborted');
+    }
+    const model = modelType === 'thinking' ? llm.Model.LARGE : llm.Model.BASE;
+    const response = await llm.chatCompletions({
+        model,
+        messages: [
+            {
+                role: 'system',
+                content:
+                    'You are Graft, a helpful AI assistant embedded in Grafana. ' +
+                    'Answer briefly and clearly.',
+            },
+            { role: 'user', content: userText },
+        ],
+    } as any);
+    const text = response.choices?.[0]?.message?.content ?? '';
+    onUpdate?.(text);
+    return text;
+}
+
 export const llmService = {
     async chat(
         messages: Message[],

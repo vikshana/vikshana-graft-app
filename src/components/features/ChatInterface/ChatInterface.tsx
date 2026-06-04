@@ -18,7 +18,7 @@ import { GrafanaTheme2 } from '@grafana/data';
 import { mcp } from '@grafana/llm';
 
 // Local services
-import { llmService } from '../../../services/llm';
+import { llmService, runSimpleConversationalChat } from '../../../services/llm';
 import type { Message, ToolExecution } from '../../../types/llm.types';
 import { contextService, UserContext, DataSourceContext, DashboardContext } from '../../../services/context';
 import { chatHistoryService, prepareMessagesForStorage } from '../../../services/chatHistory';
@@ -450,10 +450,6 @@ export const ChatInterface = () => {
     };
 
     void tryRestore();
-    const unlisten = locationService.getHistory().listen(() => {
-      void tryRestore();
-    });
-    return unlisten;
   }, [applyRestoredSession]);
 
   // Persist when leaving the Grafana app route (dashboard, explore, etc.)
@@ -660,6 +656,37 @@ export const ChatInterface = () => {
       // Track final content for saving to history
       let finalContent = '';
       let finalToolExecutions: ToolExecution[] = [];
+
+      if (isSimpleConversationalMessage(content)) {
+        finalContent = await runSimpleConversationalChat(
+          content,
+          modelType,
+          controller.signal,
+          (fullContent) => {
+            setMessages((prev) => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last?.role === 'assistant') {
+                updated[updated.length - 1] = { ...last, content: fullContent };
+              }
+              return updated;
+            });
+          }
+        );
+
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+        };
+        const finalMessages = [...newMessages, finalAssistantMessage];
+        const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
 
       const truncatedMessages = truncateMessages(newMessages, 10);
 
