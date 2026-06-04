@@ -6,6 +6,10 @@ import {
     userWantsDashboardPanelFix,
 } from './dashboardCloneProgress';
 import {
+    applyOperatorFriendlyDashboardSaveReply,
+    hasSuccessfulDashboardSave,
+} from './dashboardConciseSaveReply';
+import {
     applyOperatorFriendlyPanelFixReply,
     isPanelFixSession,
     isPanelFixUserMessage,
@@ -16,6 +20,7 @@ import { isDashboardDataInvestigationQuestion } from './dashboardInvestigation';
 import { formatClarificationIfNeeded } from './requestClarity';
 import { appendSuggestedQueryHint } from './suggestedQueryHint';
 import { stripPanelIndexTables } from './dashboardTaskStatus';
+import { formatCompactLookupHint } from './dashboardSaveReplyUtils';
 
 function shouldUsePlainEnglishCloneReply(
     recentUserMessages: string[],
@@ -85,21 +90,21 @@ export function appendDashboardReferencesToReply(
         );
     }
 
-    const blocks = toolExecutions
-        .map((t) => t.userReference?.trim())
-        .filter((b): b is string => Boolean(b));
-
-    if (blocks.length === 0) {
-        return content;
+    if (savedThisTurn) {
+        return applyOperatorFriendlyDashboardSaveReply(
+            content,
+            toolExecutions,
+            recentUserMessages,
+            fallbackUserMessage
+        );
     }
 
-    const marker = 'Dashboard lookup reference';
-    const panelMarker = 'Panel index';
-    if (content.includes(marker) || content.includes(panelMarker)) {
-        return content;
+    let out = stripPanelIndexTables(content);
+    const compact = formatCompactLookupHint(toolExecutions);
+    if (compact && !out.includes('Dashboards found')) {
+        out = out.trim() ? `${out.trim()}\n\n${compact}` : compact;
     }
-
-    return `${content.trim()}\n\n${blocks.join('\n\n')}`;
+    return out;
 }
 
 /** True if the model claimed a dashboard save without a successful update_dashboard tool call. */
@@ -125,11 +130,13 @@ export function asksUserToChooseWithoutSave(
 export function appendSaveVerificationWarning(
     content: string,
     toolExecutions: ToolExecution[],
-    recentUserMessages: string[] = []
+    recentUserMessages: string[] = [],
+    fallbackUserMessage = ''
 ): string {
     if (
-        shouldUseConcisePanelReply(content, toolExecutions, recentUserMessages) ||
-        shouldUsePlainEnglishCloneReply(recentUserMessages, '')
+        shouldUseConcisePanelReply(content, toolExecutions, recentUserMessages, fallbackUserMessage) ||
+        shouldUsePlainEnglishCloneReply(recentUserMessages, fallbackUserMessage) ||
+        hasSuccessfulDashboardSave(toolExecutions)
     ) {
         return content;
     }

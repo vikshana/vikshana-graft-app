@@ -789,11 +789,24 @@ export const ChatInterface = () => {
         });
       }, modelType, controller.signal, mcpClient, mcpTools);
 
+      const recentUserTexts = newMessages
+        .filter((m) => m.role === 'user')
+        .map((m) => m.content);
       let displayContent = isSimpleConversationalMessage(content)
         ? finalContent
-        : appendDashboardReferencesToReply(finalContent, finalToolExecutions);
+        : appendDashboardReferencesToReply(
+            finalContent,
+            finalToolExecutions,
+            recentUserTexts,
+            content
+          );
       if (!isSimpleConversationalMessage(content)) {
-        displayContent = appendSaveVerificationWarning(displayContent, finalToolExecutions);
+        displayContent = appendSaveVerificationWarning(
+          displayContent,
+          finalToolExecutions,
+          recentUserTexts,
+          content
+        );
       }
 
       setMessages((prev) => {
