@@ -189,7 +189,7 @@ export function ensureFluxTargetLegendOverrides(panel: PanelRecord): boolean {
     return changed;
 }
 
-function panelNeedsFluxLegendRepair(panel: PanelRecord): boolean {
+export function panelNeedsFluxLegendRepair(panel: PanelRecord): boolean {
     const title = typeof panel.title === 'string' ? panel.title : '';
     if (/randomforest/i.test(title)) {
         return true;
