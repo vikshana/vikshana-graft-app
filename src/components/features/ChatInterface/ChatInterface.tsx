@@ -35,6 +35,15 @@ import {
   chatInputEnabled,
   chatInputPlaceholder,
 } from '../../../services/programmaticChatIntents';
+import {
+  parseSinglePanelCopyRequest,
+  userWantsSinglePanelCopy,
+} from '../../../services/singlePanelCopyParse';
+import {
+  formatSinglePanelCopyReply,
+  runProgrammaticSinglePanelCopy,
+} from '../../../services/programmaticSinglePanelCopy';
+import { GRAFT_BUILD_NUMBER } from '../../../buildInfo';
 
 // Local hooks
 import { useRollingPlaceholder, usePluginSettings, useAutoScroll } from './hooks';
@@ -254,6 +263,8 @@ export const ChatInterface = () => {
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const processedPromptRef = useRef<string | null>(null);
+  const autoSendPromptRef = useRef<string | null>(null);
+  const sendingRef = useRef(false);
   const thinkingStartTimeRef = useRef<number | null>(null);
   const messagesRef = useRef<Message[]>([]);
   const currentSessionIdRef = useRef<string | undefined>();
@@ -383,11 +394,25 @@ export const ChatInterface = () => {
 
   const applyRestoredSession = useCallback(
     (restored: { sessionId: string; messages: Message[] }) => {
+      if (sendingRef.current || messagesRef.current.length > 0) {
+        return;
+      }
+      messagesRef.current = restored.messages;
       setMessages(restored.messages);
       setCurrentSessionId(restored.sessionId);
       currentSessionIdRef.current = restored.sessionId;
-      messagesRef.current = restored.messages;
-      setSearchParams({ chat: 'true', session: restored.sessionId }, { replace: true });
+      setSearchParams(
+        (prev) => {
+          if (prev.get('session') === restored.sessionId && prev.get('chat') === 'true') {
+            return prev;
+          }
+          const next = new URLSearchParams(prev);
+          next.set('chat', 'true');
+          next.set('session', restored.sessionId);
+          return next;
+        },
+        { replace: true }
+      );
     },
     [setSearchParams]
   );
@@ -450,14 +475,18 @@ export const ChatInterface = () => {
     };
   }, [applyRestoredSession, searchParams]);
 
-  // Restore when Grafana navigates back to this app (use locationService — router pathname is only "/")
+  // Restore last session once when landing on the app (do not listen — URL updates on Send retrigger listen and loop).
   useEffect(() => {
     const tryRestore = async () => {
       const path = locationService.getLocation().pathname || '';
       if (!path.includes(PLUGIN_BASE_URL)) {
         return;
       }
-      if (messagesRef.current.length > 0) {
+      if (messagesRef.current.length > 0 || sendingRef.current) {
+        return;
+      }
+      const urlSessionId = new URLSearchParams(locationService.getLocation().search || '').get('session');
+      if (urlSessionId) {
         return;
       }
       await chatHistoryService.ensureLoaded();
@@ -468,10 +497,6 @@ export const ChatInterface = () => {
     };
 
     void tryRestore();
-    const unlisten = locationService.getHistory().listen(() => {
-      void tryRestore();
-    });
-    return unlisten;
   }, [applyRestoredSession]);
 
   // Persist when leaving the Grafana app route (dashboard, explore, etc.)
@@ -513,23 +538,33 @@ export const ChatInterface = () => {
     if (!sessionId) {
       return;
     }
-    const session = chatHistoryService.getSession(sessionId);
-    if (session && session.id !== currentSessionIdRef.current) {
-      applyRestoredSession({ sessionId: session.id, messages: session.messages });
-    }
     if (!searchParams.get('chat')) {
-      setSearchParams({ chat: 'true', session: sessionId }, { replace: true });
+      setSearchParams(
+        (prev) => {
+          if (prev.get('chat') === 'true') {
+            return prev;
+          }
+          const next = new URLSearchParams(prev);
+          next.set('chat', 'true');
+          next.set('session', sessionId);
+          return next;
+        },
+        { replace: true }
+      );
     }
-  }, [searchParams, setSearchParams, applyRestoredSession]);
+  }, [searchParams, setSearchParams]);
 
   // Handle pre-filled prompt from navigation state (separate effect to avoid loop)
   useEffect(() => {
-    const state = location.state as { prompt?: string; returnTo?: string } | null;
+    const state = location.state as { prompt?: string; autoSend?: boolean; returnTo?: string } | null;
     if (state?.prompt && state.prompt !== processedPromptRef.current) {
       processedPromptRef.current = state.prompt;
       setInput(state.prompt);
+      if (state.autoSend) {
+        autoSendPromptRef.current = state.prompt;
+      }
       // Clear the state so it doesn't persist on refresh/navigation
-      navigate(location.pathname, { replace: true, state: { ...state, prompt: undefined } });
+      navigate(location.pathname, { replace: true, state: { ...state, prompt: undefined, autoSend: undefined } });
     }
   }, [location.state, location.pathname, navigate]);
 
@@ -638,6 +673,7 @@ export const ChatInterface = () => {
     const userMessage: Message = { role: 'user', content, attachments: attachments.length > 0 ? attachments : undefined };
     const newMessages = [...messages, userMessage];
 
+    messagesRef.current = newMessages;
     setMessages(newMessages);
     setInput('');
     clearFiles();
@@ -646,22 +682,74 @@ export const ChatInterface = () => {
     // Save immediately so history survives navigation before the LLM finishes
     const draftSession = chatHistoryService.saveSession(newMessages, currentSessionId);
     if (!draftSession) {
+      setIsLoading(false);
       return;
     }
     setCurrentSessionId(draftSession.id);
     currentSessionIdRef.current = draftSession.id;
     replaceChatSessionInUrl(draftSession.id);
+    sendingRef.current = true;
 
     try {
+      // Create a placeholder message for the assistant
+      const assistantMessage: Message = { role: 'assistant', content: '' };
+      setMessages((prev) => [...prev, assistantMessage]);
+
+      const singlePanelCopyRequest = parseSinglePanelCopyRequest(content);
+      if (singlePanelCopyRequest && userWantsSinglePanelCopy(content)) {
+        if (!mcpClient) {
+          const assistantReply =
+            '### Could not copy panel\n\nGrafana MCP tools are not connected. Open **Grafana LLM / MCP settings**, enable MCP for Graft, hard-refresh this page, then try again.';
+          setMessages((prev) => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            if (last?.role === 'assistant') {
+              updated[updated.length - 1] = { ...last, content: assistantReply };
+            }
+            return updated;
+          });
+          chatHistoryService.saveSession(
+            [...newMessages, { role: 'assistant', content: assistantReply }],
+            currentSessionId
+          );
+          return;
+        }
+
+        const copyResult = await runProgrammaticSinglePanelCopy(mcpClient, singlePanelCopyRequest);
+        const assistantReply = formatSinglePanelCopyReply(copyResult, GRAFT_BUILD_NUMBER);
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: assistantReply,
+              toolExecutions:
+                copyResult.toolExecutions.length > 0 ? copyResult.toolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        chatHistoryService.saveSession(
+          [
+            ...newMessages,
+            {
+              role: 'assistant',
+              content: assistantReply,
+              toolExecutions:
+                copyResult.toolExecutions.length > 0 ? copyResult.toolExecutions : undefined,
+            },
+          ],
+          currentSessionId
+        );
+        return;
+      }
+
       const dashboard = await contextService.getCurrentDashboard();
       const user = contextService.getUserContext();
       const dataSources = contextService.getDataSources();
 
       const context = formatContext(dashboard, user, dataSources);
-
-      // Create a placeholder message for the assistant
-      const assistantMessage: Message = { role: 'assistant', content: '' };
-      setMessages((prev) => [...prev, assistantMessage]);
 
       const controller = new AbortController();
       abortControllerRef.current = controller;
@@ -733,7 +821,7 @@ export const ChatInterface = () => {
       const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
       if (savedSession) {
         setCurrentSessionId(savedSession.id);
-        setSearchParams({ chat: 'true', session: savedSession.id });
+        replaceChatSessionInUrl(savedSession.id);
       }
     } catch (error: any) {
       if (error.name === 'AbortError') {
@@ -769,12 +857,26 @@ export const ChatInterface = () => {
       const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
       if (savedSession) {
         setCurrentSessionId(savedSession.id);
-        setSearchParams({ chat: 'true', session: savedSession.id });
+        replaceChatSessionInUrl(savedSession.id);
       }
     } finally {
       setIsLoading(false);
+      sendingRef.current = false;
+      abortControllerRef.current = null;
     }
   };
+
+  useEffect(() => {
+    const pending = autoSendPromptRef.current;
+    if (!pending || input.trim() !== pending.trim()) {
+      return;
+    }
+    if (!canSendChatMessage({ input, isLoading, llmReady, mcpConnected })) {
+      return;
+    }
+    autoSendPromptRef.current = null;
+    void handleSend();
+  }, [input, isLoading, llmReady, mcpConnected]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -880,7 +982,7 @@ ${input} `
       const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
       if (savedSession) {
         setCurrentSessionId(savedSession.id);
-        setSearchParams({ chat: 'true', session: savedSession.id });
+        replaceChatSessionInUrl(savedSession.id);
       }
     } catch (error: any) {
       if (error.name === 'AbortError') {
@@ -915,7 +1017,7 @@ ${input} `
       const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
       if (savedSession) {
         setCurrentSessionId(savedSession.id);
-        setSearchParams({ chat: 'true', session: savedSession.id });
+        replaceChatSessionInUrl(savedSession.id);
       }
 
       console.error('Chat error:', error);
