@@ -8,7 +8,11 @@ import { listDashboardPanels, type DashboardPanelEntry } from './panelDiscovery'
 import { parseSearchHitsFromMcpText } from './dashboardSearchParse';
 import { isMachineId } from './dashboardCloneParse';
 import type { InfluxPanelRepairRequest } from './influxPanelRepairParse';
-import { repairInfluxFluxPanel } from './sanitizeInfluxFluxPanel';
+import {
+    hasFrameRefIdLegendOverrides,
+    panelNeedsFluxLegendRepair,
+    repairInfluxFluxPanel,
+} from './sanitizeInfluxFluxPanel';
 import { scanPanelFluxIssues } from './panelFluxVerification';
 import { panelFluxOnPrometheusDatasource } from './fluxPeerBandFix';
 import { replacePanelInDashboard, type ScopedPanelFixTarget } from './panelFixScope';
@@ -146,14 +150,16 @@ export async function runProgrammaticInfluxPanelRepair(
     }
 
     const repair = repairInfluxFluxPanel(entry.panel as PanelRecord, baseline.panels);
-    if (!repair.changed && !panelFluxOnPrometheusDatasource(entry.panel as PanelRecord)) {
+    const legendComplete =
+        !panelNeedsFluxLegendRepair(repair.panel) || hasFrameRefIdLegendOverrides(repair.panel);
+    if (!repair.changed && !panelFluxOnPrometheusDatasource(entry.panel as PanelRecord) && legendComplete) {
         return {
             ok: true,
             toolExecutions,
             dashboardUid: resolved.uid,
             dashboardTitle,
             panelTitle: entry.title,
-            fixes: ['No changes required — panel datasource already matches Flux setup'],
+            fixes: ['No changes required — panel datasource and legend overrides already set'],
         };
     }
 
@@ -257,7 +263,5 @@ export function formatInfluxPanelRepairReply(
         `- **Panel:** ${result.panelTitle}\n` +
         (result.version != null ? `- **Version:** ${result.version}\n` : '') +
         `\n**Changes:**\n${fixLines}\n\n` +
-        `Hard-refresh (**Cmd+Shift+R**). Legend should read **Module 5 (Actual)**, **Upper/Lower Bound (RF)**, **Expected (RF)** — not \`_value {_start=...}\`. ` +
-        `If names are still wrong, run this same fix prompt again after confirming build **${buildNumber}** or newer.`
-    );
-}
+        `Hard-refresh (**Cmd+Shift+R**). Legend uses **displayName** overrides per query (A–D), so names should be **Module 5 (Actual)**, **Upper/Lower Bound (RF)**, **Expected (RF)** — not \`_value\`. ` +
+        `In Grafana: Panel → **Overrides** → Fields with name **A** → **Display n

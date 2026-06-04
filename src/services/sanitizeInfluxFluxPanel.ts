@@ -26,10 +26,17 @@ function escapeFluxString(value: string): string {
     return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
-/** Grafana ignores legendFormat for Flux; map _field so legend matches field overrides. */
+/** Grafana ignores legendFormat for Flux; collapse to _time/_value/_field so legend is not _value {tags}. */
 function fluxMapFieldLabelLine(label: string): string {
     const esc = escapeFluxString(label.trim());
-    return `|> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: "${esc}" }))`;
+    return (
+        `|> map(fn: (r) => ({ r with _field: "${esc}" }))\n` +
+        `  |> keep(columns: ["_time", "_value", "_field"])`
+    );
+}
+
+function stripFluxLegendMapLines(query: string): string {
+    return query.replace(/\|>\s*map\s*\(\s*fn:\s*\([^)]*\)\s*=>\s*\([^)]*\)\s*\)\s*/gi, '');
 }
 
 function extractFluxSetFieldLabel(query: string): string | undefined {
@@ -46,11 +53,11 @@ export function normalizeFluxSeriesLegendInTarget(target: TargetRecord): boolean
 
     const refId = typeof target.refId === 'string' ? target.refId.trim() : '';
     const label =
-        extractFluxSetFieldLabel(q) ??
         (typeof target.legendFormat === 'string' && target.legendFormat.trim()
             ? target.legendFormat.trim()
             : undefined) ??
-        (refId ? DEFAULT_FLUX_TARGET_LABELS[refId] : undefined);
+        (refId ? DEFAULT_FLUX_TARGET_LABELS[refId] : undefined) ??
+        extractFluxSetFieldLabel(q);
 
     if (!label) {
         return false;
@@ -83,6 +90,108 @@ export function normalizeFluxSeriesLegendInTarget(target: TargetRecord): boolean
     }
 
     return false;
+}
+
+type OverrideRecord = {
+    matcher?: { id?: string; options?: string };
+    properties?: Array<{ id?: string; value?: unknown }>;
+};
+
+/** Force legend text via byFrameRefID — works when Flux still labels series as _value {tags}. */
+export function ensureFluxTargetLegendOverrides(panel: PanelRecord): boolean {
+    const targets = getPanelTargetList(panel);
+    if (targets.length === 0) {
+        return false;
+    }
+
+    const fieldConfig =
+        panel.fieldConfig && typeof panel.fieldConfig === 'object' && !Array.isArray(panel.fieldConfig)
+            ? ({ ...(panel.fieldConfig as Record<string, unknown>) } as Record<string, unknown>)
+            : { defaults: {} };
+    const overrides: OverrideRecord[] = Array.isArray(fieldConfig.overrides)
+        ? (fieldConfig.overrides as OverrideRecord[]).map((o) => ({
+              matcher: o.matcher ? { ...o.matcher } : undefined,
+              properties: Array.isArray(o.properties) ? o.properties.map((p) => ({ ...p })) : [],
+          }))
+        : [];
+
+    let changed = false;
+    for (const target of targets) {
+        const refId = typeof target.refId === 'string' ? target.refId.trim() : '';
+        if (!refId) {
+            continue;
+        }
+        const label =
+            (typeof target.legendFormat === 'string' && target.legendFormat.trim()
+                ? target.legendFormat.trim()
+                : undefined) ??
+            extractFluxSetFieldLabel(targetQueryText(target)) ??
+            DEFAULT_FLUX_TARGET_LABELS[refId];
+        if (!label) {
+            continue;
+        }
+
+        let entry = overrides.find(
+            (o) => o.matcher?.id === 'byFrameRefID' && String(o.matcher?.options) === refId
+        );
+        if (!entry) {
+            entry = { matcher: { id: 'byFrameRefID', options: refId }, properties: [] };
+            overrides.push(entry);
+            changed = true;
+        }
+        const props = entry.properties ?? (entry.properties = []);
+        const displayIdx = props.findIndex((p) => p.id === 'displayName');
+        if (displayIdx >= 0) {
+            if (props[displayIdx].value !== label) {
+                props[displayIdx].value = label;
+                changed = true;
+            }
+        } else {
+            props.push({ id: 'displayName', value: label });
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        fieldConfig.overrides = overrides;
+        panel.fieldConfig = fieldConfig;
+    }
+    return changed;
+}
+
+function panelNeedsFluxLegendRepair(panel: PanelRecord): boolean {
+    const title = typeof panel.title === 'string' ? panel.title : '';
+    if (/randomforest/i.test(title)) {
+        return true;
+    }
+    return getPanelTargetList(panel).some((t) => /\bml_predictions\b/i.test(targetQueryText(t)));
+}
+
+export function hasFrameRefIdLegendOverrides(panel: PanelRecord): boolean {
+    const targets = getPanelTargetList(panel);
+    if (targets.length === 0) {
+        return false;
+    }
+    const fieldConfig = panel.fieldConfig as { overrides?: OverrideRecord[] } | undefined;
+    const overrides = fieldConfig?.overrides ?? [];
+    return targets.every((target) => {
+        const refId = typeof target.refId === 'string' ? target.refId.trim() : '';
+        if (!refId) {
+            return false;
+        }
+        const label =
+            (typeof target.legendFormat === 'string' && target.legendFormat.trim()) ||
+            DEFAULT_FLUX_TARGET_LABELS[refId];
+        if (!label) {
+            return false;
+        }
+        const entry = overrides.find(
+            (o) => o.matcher?.id === 'byFrameRefID' && String(o.matcher?.options) === refId
+        );
+        return Boolean(
+            entry?.properties?.some((p) => p.id === 'displayName' && p.value === label)
+        );
+    });
 }
 
 /**
@@ -221,6 +330,10 @@ export function repairInfluxFluxPanel(
                 `target ${String(target.refId ?? '?')}: legend label via map(_field) (${String(target.legendFormat)})`
             );
         }
+    }
+
+    if (panelNeedsFluxLegendRepair(out) && ensureFluxTargetLegendOverrides(out)) {
+        fixes.push('panel fieldConfig: displayName overrides by query refId (A–D)');
     }
 
     const changed = before !== JSON.stringify(out);

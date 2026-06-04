@@ -1,6 +1,11 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { repairInfluxFluxPanel, sanitizeInfluxFluxPanel } from './sanitizeInfluxFluxPanel';
+import {
+    ensureFluxTargetLegendOverrides,
+    hasFrameRefIdLegendOverrides,
+    repairInfluxFluxPanel,
+    sanitizeInfluxFluxPanel,
+} from './sanitizeInfluxFluxPanel';
 
 describe('sanitizeInfluxFluxPanel', () => {
     it('fixes boolean rawQuery and removes panel timeFrom/timeTo', () => {
@@ -95,5 +100,23 @@ describe('sanitizeInfluxFluxPanel', () => {
         expect(String(a.query)).not.toContain('set(key: "_field"');
         expect(a.legendFormat).toBe('Module 5 (Actual)');
         expect(fixes.some((f) => f.includes('legend label'))).toBe(true);
+    });
+
+    it('adds byFrameRefID displayName overrides for RandomForest panels', () => {
+        const panel = {
+            title: 'Module 5 Current — RandomForest ML (Influx)',
+            fieldConfig: { defaults: {}, overrides: [] },
+            targets: [
+                { refId: 'A', query: 'from(bucket: v.bucket)', rawQuery: true, legendFormat: 'Module 5 (Actual)' },
+                { refId: 'B', query: 'from(bucket: v.bucket)', rawQuery: true, legendFormat: 'Upper Bound (RF)' },
+            ],
+        };
+        expect(ensureFluxTargetLegendOverrides(panel)).toBe(true);
+        expect(hasFrameRefIdLegendOverrides(panel)).toBe(true);
+        const overrides = (panel.fieldConfig as { overrides: { matcher: { id: string }; properties: { id: string }[] }[] })
+            .overrides;
+        expect(overrides.some((o) => o.matcher.id === 'byFrameRefID' && o.properties.some((p) => p.id === 'displayName'))).toBe(
+            true
+        );
     });
 });
