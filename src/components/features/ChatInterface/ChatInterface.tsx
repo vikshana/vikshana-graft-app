@@ -405,7 +405,7 @@ export const ChatInterface = () => {
     setMessages(restored.messages);
     setCurrentSessionId(restored.sessionId);
     currentSessionIdRef.current = restored.sessionId;
-    replaceChatSessionInUrl(restored.sessionId, { defer: true });
+    replaceChatSessionInUrl(restored.sessionId);
   }, []);
 
   const persistActiveSession = useCallback(() => {
@@ -521,19 +521,6 @@ export const ChatInterface = () => {
       onHide();
     };
   }, [persistActiveSession]);
-
-  // Ensure chat=true in the real URL when a session id is present (no React Router — avoids restore loops).
-  useEffect(() => {
-    if (!historyHydratedRef.current || suppressSessionRestoreRef.current || sendingRef.current) {
-      return;
-    }
-    const sessionId =
-      new URLSearchParams(window.location.search).get('session') ?? searchParams.get('session');
-    if (!sessionId) {
-      return;
-    }
-    replaceChatSessionInUrl(sessionId);
-  }, [searchParams]);
 
   // Handle pre-filled prompt from navigation state (separate effect to avoid loop)
   useEffect(() => {
@@ -670,7 +657,7 @@ export const ChatInterface = () => {
     currentSessionIdRef.current = draftSession.id;
     suppressSessionRestoreRef.current = true;
     sendingRef.current = true;
-    replaceChatSessionInUrl(draftSession.id, { defer: true });
+    replaceChatSessionInUrl(draftSession.id);
 
     try {
       // Create a placeholder message for the assistant
@@ -805,7 +792,7 @@ export const ChatInterface = () => {
       if (savedSession) {
         setCurrentSessionId(savedSession.id);
         currentSessionIdRef.current = savedSession.id;
-        replaceChatSessionInUrl(savedSession.id, { defer: true });
+        replaceChatSessionInUrl(savedSession.id);
       }
     } catch (error: any) {
       if (error.name === 'AbortError') {
@@ -842,7 +829,7 @@ export const ChatInterface = () => {
       if (savedSession) {
         setCurrentSessionId(savedSession.id);
         currentSessionIdRef.current = savedSession.id;
-        replaceChatSessionInUrl(savedSession.id, { defer: true });
+        replaceChatSessionInUrl(savedSession.id);
       }
     } finally {
       setIsLoading(false);
