@@ -150,7 +150,7 @@ function referenceTargetUsesFlux(reference?: PanelRecord): boolean {
     return /\bfrom\s*\(\s*bucket:/i.test(targetQueryText(reference));
 }
 
-function copyDatasourceFromReference(target: PanelRecord, reference?: PanelRecord): boolean {
+export function copyDatasourceFromReference(target: PanelRecord, reference?: PanelRecord): boolean {
     if (!reference?.datasource || typeof reference.datasource !== 'object') {
         return false;
     }
@@ -169,7 +169,7 @@ function copyDatasourceFromReference(target: PanelRecord, reference?: PanelRecor
     return true;
 }
 
-function applyPanelDatasourceFromReference(
+export function applyPanelDatasourceFromReference(
     panel: PanelRecord,
     referencePanel?: PanelRecord,
     referenceTarget?: PanelRecord

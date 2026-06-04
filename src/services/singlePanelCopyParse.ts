@@ -12,6 +12,8 @@ export interface SinglePanelCopyRequest {
     panelTitle: string;
     sourceDashboardUid?: string;
     targetDashboardUid?: string;
+    sourceDashboardTitle?: string;
+    targetDashboardTitle?: string;
     sourceMachineId?: string;
     targetMachineId?: string;
     /** Replace an existing panel on the target when the title matches. Default true. */
@@ -20,6 +22,21 @@ export interface SinglePanelCopyRequest {
 
 function normalizeMessageQuotes(text: string): string {
     return text.replace(/[\u201C\u201D]/g, '"').replace(/[\u2018\u2019]/g, "'");
+}
+
+/** One named panel copied to another dashboard — not a full layout clone. */
+export function isExplicitSinglePanelCopyRequest(userContent: string): boolean {
+    const text = normalizeMessageQuotes(userContent.trim());
+    if (!/\bpanel/i.test(text) || !/\b(copy|same as)\b/i.test(text)) {
+        return false;
+    }
+    if (/\b(?:all panels|every panel|entire dashboard|whole dashboard|visual copy of)\b/i.test(text)) {
+        return false;
+    }
+    return (
+        /\bcopy of (?:the\s+)?"[^"]+"\s+panel\b/i.test(text) ||
+        (/\b(?:new|add|create|make)\b/i.test(text) && /\bpanel\s+on\b/i.test(text) && /\bcopy\b/i.test(text))
+    );
 }
 
 export function extractPanelTitleFromCopyMessage(message: string): string | undefined {
@@ -42,8 +59,43 @@ export function extractPanelTitleFromCopyMessage(message: string): string | unde
     return undefined;
 }
 
+export function extractTargetDashboardTitleForPanelCopy(message: string): string | undefined {
+    const text = normalizeMessageQuotes(message.trim());
+    const onDashboard = text.match(
+        /\b(?:new|add|create)\s+(?:a\s+)?panel\s+on\s+(?:the\s+)?(.+?)\s+dashboard\b/i
+    );
+    if (onDashboard?.[1]?.trim()) {
+        return onDashboard[1].trim();
+    }
+    return undefined;
+}
+
+export function extractSourceDashboardTitleForPanelCopy(message: string): string | undefined {
+    const text = normalizeMessageQuotes(message.trim());
+    const afterPanelTitle = text.match(
+        /\bcopy of (?:the\s+)?"[^"]+"\s+panel\s+on\s+(?:the\s+)?(.+?)(?:\s*\.|\s*$)/i
+    );
+    if (afterPanelTitle?.[1]?.trim()) {
+        return afterPanelTitle[1].trim();
+    }
+    const panelOn = text.match(/\bpanel\s+on\s+(?:the\s+)?(.+?)(?:\s*\.|\s*$)/i);
+    if (panelOn?.[1]?.trim() && !/\bdashboard\b/i.test(panelOn[1])) {
+        return panelOn[1].trim();
+    }
+    return undefined;
+}
+
 export function extractSourceMachineIdForPanelCopy(message: string): string | undefined {
     const text = normalizeMessageQuotes(message.trim());
+    const fromQuotedPanel = text.match(
+        new RegExp(
+            `\\bcopy of (?:the\\s+)?"[^"]+"\\s+panel\\s+on\\s+(?:the\\s+)?(${MACHINE_ID_PATTERN.source})`,
+            'i'
+        )
+    );
+    if (fromQuotedPanel?.[1] && isMachineId(fromQuotedPanel[1])) {
+        return fromQuotedPanel[1];
+    }
     const patterns = [
         new RegExp(`\\bpanel\\s+on\\s+(?:the\\s+)?(?:dashboard\\s+)?(${MACHINE_ID_PATTERN.source})`, 'i'),
         new RegExp(`\\bfrom\\s+(?:dashboard\\s+)?(${MACHINE_ID_PATTERN.source})`, 'i'),
@@ -57,8 +109,15 @@ export function extractSourceMachineIdForPanelCopy(message: string): string | un
     }
 
     const uids = extractAllDashboardUids(text);
-    const target = extractTargetMachineIdForPanelCopy(text);
     const ids = findMachineIdsInText(text);
+    const sourceTitle = extractSourceDashboardTitleForPanelCopy(text);
+    if (sourceTitle) {
+        const fromTitle = findMachineIdsInText(sourceTitle)[0];
+        if (fromTitle) {
+            return fromTitle;
+        }
+    }
+    const target = extractTargetMachineIdForPanelCopy(text);
     if (target && ids.length >= 2) {
         const other = ids.find((id) => id !== target);
         if (other) {
@@ -73,6 +132,22 @@ export function extractSourceMachineIdForPanelCopy(message: string): string | un
 
 export function extractTargetMachineIdForPanelCopy(message: string): string | undefined {
     const text = normalizeMessageQuotes(message.trim());
+    const panelOnTarget = text.match(
+        new RegExp(
+            `\\b(?:new|add|create)\\s+(?:a\\s+)?panel\\s+on\\s+(?:the\\s+)?(${MACHINE_ID_PATTERN.source})`,
+            'i'
+        )
+    );
+    if (panelOnTarget?.[1] && isMachineId(panelOnTarget[1])) {
+        return panelOnTarget[1];
+    }
+    const targetTitle = extractTargetDashboardTitleForPanelCopy(text);
+    if (targetTitle) {
+        const fromTitle = findMachineIdsInText(targetTitle)[0];
+        if (fromTitle) {
+            return fromTitle;
+        }
+    }
     const dataFor = extractTargetMachineId(text);
     if (dataFor && isMachineId(dataFor)) {
         return dataFor;
@@ -95,7 +170,13 @@ export function extractTargetMachineIdForPanelCopy(message: string): string | un
 
 export function messageMentionsSinglePanelCopyIntent(message: string): boolean {
     const text = normalizeMessageQuotes(message.trim());
-    if (!text || messageMentionsPeerBandPanelCopyIntent(text) || describesDashboardCloneLayoutIntent(text)) {
+    if (!text || messageMentionsPeerBandPanelCopyIntent(text)) {
+        return false;
+    }
+    if (isExplicitSinglePanelCopyRequest(text)) {
+        return true;
+    }
+    if (describesDashboardCloneLayoutIntent(text)) {
         return false;
     }
     if (!/\bpanel/i.test(text)) {
@@ -163,13 +244,15 @@ export function parseSinglePanelCopyRequest(message: string): SinglePanelCopyReq
     const replaceExisting = !/\b(?:do not replace|without replacing|keep existing)\b/i.test(text);
     const sourceMachineId = extractSourceMachineIdForPanelCopy(text);
     const targetMachineId = extractTargetMachineIdForPanelCopy(text);
+    const sourceDashboardTitle = extractSourceDashboardTitleForPanelCopy(text);
+    const targetDashboardTitle = extractTargetDashboardTitleForPanelCopy(text);
     const sourceDashboardUid = uids[0];
     const targetDashboardUid = uids.length >= 2 ? uids[1] : undefined;
 
-    if (!sourceDashboardUid && !sourceMachineId) {
+    if (!sourceDashboardUid && !sourceMachineId && !sourceDashboardTitle) {
         return null;
     }
-    if (!targetDashboardUid && !targetMachineId) {
+    if (!targetDashboardUid && !targetMachineId && !targetDashboardTitle) {
         return null;
     }
 
@@ -177,6 +260,8 @@ export function parseSinglePanelCopyRequest(message: string): SinglePanelCopyReq
         panelTitle,
         sourceDashboardUid,
         targetDashboardUid,
+        sourceDashboardTitle,
+        targetDashboardTitle,
         sourceMachineId,
         targetMachineId,
         replaceExisting,
@@ -192,8 +277,9 @@ export function formatSinglePanelCopyClarification(message?: string): string {
     const gapBlock =
         gaps.length > 0 ? `\n\n**Still needed:**\n${gaps.map((g) => `- ${g}`).join('\n')}` : '';
     return (
-        `### Need clarification — copy one panel to another dashboard\n\n` +
-        `Say which **panel title** to copy, the **source** machine or dashboard uid, and the **target** machine or dashboard uid.` +
+        `### Need clarification — copy **one** panel to another dashboard\n\n` +
+        `This copies a **single** panel, not the whole dashboard (no "36 of 41 panels"). ` +
+        `Say which **panel title** to copy, the **source** dashboard, and the **target** dashboard.` +
         `${gapBlock}\n\n` +
         `**Example:** \`${SINGLE_PANEL_COPY_EXAMPLE_PROMPT}\``
     );

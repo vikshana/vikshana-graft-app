@@ -6,7 +6,12 @@ import { userWantsBulkPeerBandFix } from './bulkPeerBandFixParse';
 import { isCrossDashboardPeerBandCopyIntent } from './peerBandShared';
 import { messageDescribesDashboardRename } from './dashboardRenameParse';
 import { isExplicitScopedPanelFixCommand } from './panelFixScope';
-import { messageMentionsSinglePanelCopyIntent } from './singlePanelCopyParse';
+import {
+    isExplicitSinglePanelCopyRequest,
+    messageMentionsSinglePanelCopyIntent,
+} from './singlePanelCopyParse';
+
+export { isExplicitSinglePanelCopyRequest };
 
 export interface DashboardPanelCount {
     uid: string;
@@ -34,6 +39,9 @@ export function describesDashboardCloneLayoutIntent(userContent: string): boolea
     if (messageDescribesDashboardRename(userContent)) {
         return false;
     }
+    if (isExplicitSinglePanelCopyRequest(userContent)) {
+        return false;
+    }
     const wantsCopy =
         /\b(visual copy|clone|copy of|new dashboard)\b/i.test(userContent) ||
         (/\bcreate a dashboard\b/i.test(userContent) && /\bcopy of\b/i.test(userContent));
@@ -42,7 +50,7 @@ export function describesDashboardCloneLayoutIntent(userContent: string): boolea
 
 /** User asked to clone/copy a dashboard layout to another machine or title. */
 export function userWantsDashboardClone(userContent: string): boolean {
-    if (messageMentionsSinglePanelCopyIntent(userContent)) {
+    if (isExplicitSinglePanelCopyRequest(userContent) || messageMentionsSinglePanelCopyIntent(userContent)) {
         return false;
     }
     return describesDashboardCloneLayoutIntent(userContent);
@@ -111,7 +119,7 @@ export function latestNonContinueUserMessage(recentUserMessages: string[]): stri
 /** Find the original plain-English clone request (skips "Continue" follow-ups). */
 export function resolveDashboardCloneIntent(recentUserMessages: string[]): string | undefined {
     const latest = latestNonContinueUserMessage(recentUserMessages);
-    if (latest && userWantsDashboardPanelFix(latest)) {
+    if (latest && (userWantsDashboardPanelFix(latest) || isExplicitSinglePanelCopyRequest(latest))) {
         return undefined;
     }
     if (latest && !userWantsDashboardClone(latest) && !/^continue/i.test(latest)) {
@@ -119,7 +127,7 @@ export function resolveDashboardCloneIntent(recentUserMessages: string[]): strin
     }
 
     const stored = getActiveCloneIntent();
-    if (stored && userWantsDashboardClone(stored)) {
+    if (stored && userWantsDashboardClone(stored) && !isExplicitSinglePanelCopyRequest(stored)) {
         return stored;
     }
 
@@ -131,7 +139,7 @@ export function resolveDashboardCloneIntent(recentUserMessages: string[]): strin
         if (/^continue\b/i.test(msg) && !userWantsDashboardClone(msg)) {
             continue;
         }
-        if (userWantsDashboardPanelFix(msg)) {
+        if (userWantsDashboardPanelFix(msg) || isExplicitSinglePanelCopyRequest(msg)) {
             return undefined;
         }
         if (userWantsDashboardClone(msg)) {

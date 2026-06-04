@@ -54,7 +54,7 @@ export type { ToolExecution };
 export const MAX_TOOL_STEPS = 60;
 
 /** Extra LLM rounds when partially done (kept low to avoid Grafana LLM rate limits). */
-export const MAX_AUTO_CONTINUE_ROUNDS = 2;
+export const MAX_AUTO_CONTINUE_ROUNDS = 4;
 
 /** Pause between auto-continue LLM calls (ms) to reduce 429 rate-limit errors. */
 export const AUTO_CONTINUE_DELAY_MS = 2500;

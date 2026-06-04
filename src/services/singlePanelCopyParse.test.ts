@@ -3,10 +3,12 @@ import {
     extractSourceMachineIdForPanelCopy,
     extractTargetMachineIdForPanelCopy,
     formatSinglePanelCopyExamplePrompt,
+    isExplicitSinglePanelCopyRequest,
     messageMentionsSinglePanelCopyIntent,
     parseSinglePanelCopyRequest,
     userWantsSinglePanelCopy,
 } from './singlePanelCopyParse';
+import { userWantsDashboardClone } from './dashboardCloneProgress';
 
 describe('singlePanelCopyParse', () => {
     const userPrompt =
@@ -58,5 +60,19 @@ describe('singlePanelCopyParse', () => {
     it('example prompt matches parser', () => {
         const example = formatSinglePanelCopyExamplePrompt();
         expect(userWantsSinglePanelCopy(example)).toBe(true);
+    });
+
+    it('parses Alex Total Cu Mass cross-dashboard prompt (not full clone)', () => {
+        const alex =
+            'Make a new panel on the 2505-200033 / NewMachine dashboard that is a copy of the "Total Cu Mass" panel on 2406-176021 / Exsolve';
+        expect(isExplicitSinglePanelCopyRequest(alex)).toBe(true);
+        expect(userWantsDashboardClone(alex)).toBe(false);
+        expect(messageMentionsSinglePanelCopyIntent(alex)).toBe(true);
+        const req = parseSinglePanelCopyRequest(alex);
+        expect(req?.panelTitle).toBe('Total Cu Mass');
+        expect(req?.sourceMachineId).toBe('2406-176021');
+        expect(req?.targetMachineId).toBe('2505-200033');
+        expect(req?.sourceDashboardTitle).toContain('Exsolve');
+        expect(req?.targetDashboardTitle).toContain('NewMachine');
     });
 });

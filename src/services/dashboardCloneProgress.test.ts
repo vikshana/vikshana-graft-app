@@ -1,5 +1,6 @@
 import {
     resolveDashboardCloneIntent,
+    userWantsDashboardClone,
     userWantsDashboardPanelFix,
 } from './dashboardCloneProgress';
 import { setActiveCloneIntent, clearActiveCloneIntent } from './cloneSessionStorage';
@@ -32,6 +33,17 @@ describe('userWantsDashboardPanelFix', () => {
                 'dashboard named "2505-200033 / GlenTest" has a panel named "total current" that shows these errors'
             )
         ).toBe(true);
+    });
+});
+
+const totalCuMassPanelCopy =
+    'Make a new panel on the 2505-200033 / NewMachine dashboard that is a copy of the "Total Cu Mass" panel on 2406-176021 / Exsolve';
+
+describe('single-panel copy vs full clone', () => {
+    it('does not treat Total Cu Mass prompt as dashboard clone', () => {
+        expect(userWantsDashboardClone(totalCuMassPanelCopy)).toBe(false);
+        expect(resolveDashboardCloneIntent([totalCuMassPanelCopy])).toBeUndefined();
+        expect(resolveDashboardCloneIntent([totalCuMassPanelCopy, 'Continue'])).toBeUndefined();
     });
 });
 

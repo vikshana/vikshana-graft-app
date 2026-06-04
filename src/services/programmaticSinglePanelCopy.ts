@@ -114,36 +114,49 @@ function scopeForEntry(entry: DashboardPanelEntry, dashboardUid: string): Scoped
     };
 }
 
+function normalizeDashboardTitle(title: string): string {
+    return title.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
 async function resolveDashboardUid(
     mcpClient: McpClient,
     machineId: string | undefined,
     explicitUid: string | undefined,
+    dashboardTitle: string | undefined,
     toolExecutions: ToolExecution[],
     label: string
 ): Promise<{ uid?: string; title?: string; error?: string }> {
     if (explicitUid) {
         return { uid: explicitUid };
     }
-    if (!machineId || !isMachineId(machineId)) {
-        return { error: `Missing ${label} dashboard uid or machine id` };
+
+    const query =
+        dashboardTitle?.trim() ||
+        (machineId && isMachineId(machineId) ? machineId : undefined);
+    if (!query) {
+        return { error: `Missing ${label} dashboard uid, name, or machine id` };
     }
 
     const searchStep = pendingTool('search_dashboards');
     toolExecutions.push(searchStep);
-    const search = await callMcpTool(mcpClient, 'search_dashboards', { query: machineId });
+    const search = await callMcpTool(mcpClient, 'search_dashboards', { query });
     toolExecutions[toolExecutions.length - 1] = finishTool(searchStep, search);
     if (!search.ok) {
         return { error: search.error ?? `search_dashboards failed for ${label}` };
     }
 
     const hits = parseSearchHitsFromMcpText(search.text);
+    const wantTitle = dashboardTitle ? normalizeDashboardTitle(dashboardTitle) : undefined;
     const match =
-        hits.find((h) => h.title.includes(machineId)) ??
-        hits.find((h) => h.title.toLowerCase().includes(machineId.toLowerCase())) ??
+        (wantTitle ? hits.find((h) => normalizeDashboardTitle(h.title) === wantTitle) : undefined) ??
+        (machineId
+            ? hits.find((h) => h.title.includes(machineId)) ??
+              hits.find((h) => h.title.toLowerCase().includes(machineId.toLowerCase()))
+            : undefined) ??
         hits[0];
 
     if (!match?.uid) {
-        return { error: `No dashboard found for ${label} machine ${machineId}` };
+        return { error: `No dashboard found for ${label} (“${query}”)` };
     }
     return { uid: match.uid, title: match.title };
 }
@@ -183,6 +196,7 @@ export async function runProgrammaticSinglePanelCopy(
         mcpClient,
         request.sourceMachineId,
         request.sourceDashboardUid,
+        request.sourceDashboardTitle,
         toolExecutions,
         'source'
     );
@@ -235,6 +249,7 @@ export async function runProgrammaticSinglePanelCopy(
         mcpClient,
         request.targetMachineId,
         request.targetDashboardUid,
+        request.targetDashboardTitle,
         toolExecutions,
         'target'
     );
@@ -387,8 +402,8 @@ export function formatSinglePanelCopyReply(
     }
 
     return (
-        `### Panel copied (Graft build ${buildNumber})\n\n` +
-        `- **Panel:** ${result.panelTitle}\n` +
+        `### Done — one panel copied (Graft build ${buildNumber})\n\n` +
+        `- **Panel:** ${result.panelTitle} (single panel only — not a full dashboard clone)\n` +
         `- **Source:** ${result.sourceDashboardTitle ?? result.sourceDashboardUid} (\`${result.sourceDashboardUid}\`)\n` +
         `- **Target:** ${result.targetDashboardTitle ?? result.targetDashboardUid} (\`${result.targetDashboardUid}\`)\n` +
         `- **Machine remap:** ${result.sourceMachine} → ${result.targetMachine}\n` +

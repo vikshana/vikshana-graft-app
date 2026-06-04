@@ -300,7 +300,8 @@ export function assessCloneTask(
 }
 
 const CONTINUE_HINT =
-    '**What to do:** Reply **Continue** (type exactly that word). Graft saves in small panel batches automatically until finished.';
+    '**What to do:** This is a **full dashboard clone** (all panels from the source layout). Reply **Continue** (type exactly that word) — Graft also auto-continues after a short pause when possible. ' +
+    'To copy **one panel only**, say: `Create a new panel on the TARGET dashboard that is a copy of the "PANEL TITLE" panel on SOURCE`.';
 
 const CONTINUE_HINT_NOT_STARTED =
     '**What to do:** Reply **Continue** (type exactly that word). Graft will save the dashboard automatically — you do not need panel numbers or UIDs.';

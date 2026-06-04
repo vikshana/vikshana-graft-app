@@ -18,6 +18,7 @@ import {
 import { applyOperatorFriendlyDashboardReply } from './dashboardTaskStatus';
 import { isDashboardDataInvestigationQuestion } from './dashboardInvestigation';
 import { formatClarificationIfNeeded } from './requestClarity';
+import { isExplicitSinglePanelCopyRequest } from './singlePanelCopyParse';
 import { appendSuggestedQueryHint } from './suggestedQueryHint';
 import { stripPanelIndexTables } from './dashboardTaskStatus';
 import { formatCompactLookupHint } from './dashboardSaveReplyUtils';
@@ -27,7 +28,7 @@ function shouldUsePlainEnglishCloneReply(
     fallbackUserMessage = ''
 ): boolean {
     const latest = latestNonContinueUserMessage(recentUserMessages) ?? fallbackUserMessage.trim();
-    if (latest && userWantsDashboardPanelFix(latest)) {
+    if (latest && (userWantsDashboardPanelFix(latest) || isExplicitSinglePanelCopyRequest(latest))) {
         return false;
     }
     if (latest && !resolveDashboardCloneIntent(recentUserMessages)) {

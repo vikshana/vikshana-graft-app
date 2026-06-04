@@ -31,6 +31,8 @@ import {
 } from '../../../services/appendToolReferences';
 import { filterTools } from '../../../services/toolFilter';
 import { isSimpleConversationalMessage } from '../../../services/programmaticChatIntents';
+import { latestNonContinueUserMessage } from '../../../services/dashboardCloneProgress';
+import { clearActiveCloneIntent } from '../../../services/cloneSessionStorage';
 import { GRAFT_BUILD_NUMBER } from '../../../buildInfo';
 import {
   formatSinglePanelCopyClarification,
@@ -652,9 +654,15 @@ export const ChatInterface = () => {
     }
 
     if (/^continue\.?$/i.test(content.trim())) {
-      content =
-        'Continue the previous task. Use tools immediately to finish any remaining dashboard or panel updates. ' +
-        'Call get_dashboard_by_uid for the latest version, then update_dashboard. Do not repeat earlier searches unless needed.';
+      const priorUsers = messages.filter((m) => m.role === 'user').map((m) => m.content);
+      const prior = latestNonContinueUserMessage(priorUsers);
+      if (prior && parseSinglePanelCopyRequest(prior)) {
+        content = prior;
+      } else {
+        content =
+          'Continue the previous task. Use tools immediately to finish any remaining dashboard or panel updates. ' +
+          'Call get_dashboard_by_uid for the latest version, then update_dashboard. Do not repeat earlier searches unless needed.';
+      }
     }
 
     const userMessage: Message = { role: 'user', content, attachments: attachments.length > 0 ? attachments : undefined };
@@ -676,6 +684,7 @@ export const ChatInterface = () => {
     replaceChatSessionInUrl(draftSession.id);
 
     let usedSimpleChatPath = false;
+    let errorPathTag = 'full-llm';
 
     try {
       // Create a placeholder message for the assistant
@@ -719,8 +728,85 @@ export const ChatInterface = () => {
         return;
       }
 
+      const panelCopyRequest = parseSinglePanelCopyRequest(content);
+      if (messageMentionsSinglePanelCopyIntent(content)) {
+        clearActiveCloneIntent();
+        errorPathTag = 'single-panel-copy';
+      }
+      if (messageMentionsSinglePanelCopyIntent(content) && !panelCopyRequest) {
+        finalContent = formatSinglePanelCopyClarification(content);
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = { role: 'assistant', content: finalContent };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      if (panelCopyRequest) {
+        if (!mcpClient) {
+          finalContent =
+            '### Could not copy panel\n\nGrafana MCP tools are not connected. Open **Grafana LLM / MCP settings**, enable MCP for Graft, hard-refresh, then try again.';
+        } else {
+          const copyResult = await runProgrammaticSinglePanelCopy(mcpClient, panelCopyRequest);
+          finalContent = formatSinglePanelCopyReply(copyResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = copyResult.toolExecutions;
+          if (!copyResult.ok) {
+            recordGraftFailure({
+              buildNumber: GRAFT_BUILD_NUMBER,
+              intent: 'single_panel_copy',
+              userMessagePreview: content,
+              error: copyResult.error ?? 'Unknown error',
+              panelTitle: copyResult.panelTitle,
+            });
+          }
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions:
+                finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
       const influxPanelRepairRequest = parseInfluxPanelRepairRequest(content);
       if (messageMentionsInfluxPanelRepair(content) && influxPanelRepairRequest && mcpClient) {
+        errorPathTag = 'influx-panel-repair';
         const repairResult = await runProgrammaticInfluxPanelRepair(mcpClient, influxPanelRepairRequest);
         finalContent = formatInfluxPanelRepairReply(repairResult, GRAFT_BUILD_NUMBER);
         finalToolExecutions = repairResult.toolExecutions;
@@ -804,78 +890,6 @@ export const ChatInterface = () => {
               error: dupResult.error ?? 'Unknown error',
               dashboardTitle: dupResult.dashboardTitle,
               panelTitle: dupResult.sourcePanelTitle,
-            });
-          }
-        }
-        setMessages((prev) => {
-          const updated = [...prev];
-          const last = updated[updated.length - 1];
-          if (last?.role === 'assistant') {
-            updated[updated.length - 1] = {
-              ...last,
-              content: finalContent,
-              toolExecutions:
-                finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
-            };
-          }
-          return updated;
-        });
-        const finalAssistantMessage: Message = {
-          role: 'assistant',
-          content: finalContent,
-          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
-        };
-        const savedSession = chatHistoryService.saveSession(
-          [...newMessages, finalAssistantMessage],
-          currentSessionId
-        );
-        if (savedSession) {
-          setCurrentSessionId(savedSession.id);
-          currentSessionIdRef.current = savedSession.id;
-          replaceChatSessionInUrl(savedSession.id);
-        }
-        return;
-      }
-
-      const panelCopyRequest = parseSinglePanelCopyRequest(content);
-      if (messageMentionsSinglePanelCopyIntent(content) && !panelCopyRequest) {
-        finalContent = formatSinglePanelCopyClarification(content);
-        setMessages((prev) => {
-          const updated = [...prev];
-          const last = updated[updated.length - 1];
-          if (last?.role === 'assistant') {
-            updated[updated.length - 1] = { ...last, content: finalContent };
-          }
-          return updated;
-        });
-        const finalAssistantMessage: Message = { role: 'assistant', content: finalContent };
-        const savedSession = chatHistoryService.saveSession(
-          [...newMessages, finalAssistantMessage],
-          currentSessionId
-        );
-        if (savedSession) {
-          setCurrentSessionId(savedSession.id);
-          currentSessionIdRef.current = savedSession.id;
-          replaceChatSessionInUrl(savedSession.id);
-        }
-        return;
-      }
-
-      if (panelCopyRequest) {
-        if (!mcpClient) {
-          finalContent =
-            '### Could not copy panel\n\nGrafana MCP tools are not connected. Open **Grafana LLM / MCP settings**, enable MCP for Graft, hard-refresh, then try again.';
-        } else {
-          const copyResult = await runProgrammaticSinglePanelCopy(mcpClient, panelCopyRequest);
-          finalContent = formatSinglePanelCopyReply(copyResult, GRAFT_BUILD_NUMBER);
-          finalToolExecutions = copyResult.toolExecutions;
-          if (!copyResult.ok) {
-            recordGraftFailure({
-              buildNumber: GRAFT_BUILD_NUMBER,
-              intent: 'single_panel_copy',
-              userMessagePreview: content,
-              error: copyResult.error ?? 'Unknown error',
-              panelTitle: copyResult.panelTitle,
             });
           }
         }
@@ -998,7 +1012,7 @@ export const ChatInterface = () => {
         persistActiveSession();
         return;
       }
-      const pathTag = usedSimpleChatPath ? '[simple-chat] ' : '[full-llm] ';
+      const pathTag = usedSimpleChatPath ? '[simple-chat] ' : `[${errorPathTag}] `;
       const errorMessage = `Sorry, I encountered an error: ${pathTag}${error.message || 'Unknown error'} `;
 
       // Create the error assistant message
