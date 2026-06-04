@@ -16,6 +16,11 @@ describe('singlePanelCopyParse', () => {
         expect(messageMentionsSinglePanelCopyIntent(userPrompt)).toBe(true);
     });
 
+    it('does not recurse when checking intent (clone vs single-panel)', () => {
+        expect(() => messageMentionsSinglePanelCopyIntent(userPrompt)).not.toThrow();
+        expect(() => parseSinglePanelCopyRequest(userPrompt)).not.toThrow();
+    });
+
     it('parses panel title and machine ids', () => {
         expect(extractPanelTitleFromCopyMessage(userPrompt)).toBe('Pressure');
         expect(extractSourceMachineIdForPanelCopy(userPrompt)).toBe('2210-177097');

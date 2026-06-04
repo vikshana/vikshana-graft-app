@@ -23,12 +23,12 @@ export interface IncompleteCloneProgress {
     targetPanels: number;
 }
 
-/** User asked to clone/copy a dashboard layout to another machine or title. */
-export function userWantsDashboardClone(userContent: string): boolean {
+/**
+ * Clone/copy layout intent without checking single-panel copy (avoids mutual recursion with
+ * messageMentionsSinglePanelCopyIntent).
+ */
+export function describesDashboardCloneLayoutIntent(userContent: string): boolean {
     if (isCrossDashboardPeerBandCopyIntent(userContent)) {
-        return false;
-    }
-    if (messageMentionsSinglePanelCopyIntent(userContent)) {
         return false;
     }
     if (messageDescribesDashboardRename(userContent)) {
@@ -38,6 +38,14 @@ export function userWantsDashboardClone(userContent: string): boolean {
         /\b(visual copy|clone|copy of|new dashboard)\b/i.test(userContent) ||
         (/\bcreate a dashboard\b/i.test(userContent) && /\bcopy of\b/i.test(userContent));
     return wantsCopy && /\b(dashboard|panel)/i.test(userContent);
+}
+
+/** User asked to clone/copy a dashboard layout to another machine or title. */
+export function userWantsDashboardClone(userContent: string): boolean {
+    if (messageMentionsSinglePanelCopyIntent(userContent)) {
+        return false;
+    }
+    return describesDashboardCloneLayoutIntent(userContent);
 }
 
 /** User asked to fix or troubleshoot a panel on an existing dashboard (not a new clone). */

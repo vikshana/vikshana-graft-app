@@ -6,7 +6,7 @@ import {
     MACHINE_ID_PATTERN,
 } from './dashboardCloneParse';
 import { messageMentionsPeerBandPanelCopyIntent } from './peerBandPanelCopyParse';
-import { userWantsDashboardClone } from './dashboardCloneProgress';
+import { describesDashboardCloneLayoutIntent } from './dashboardCloneProgress';
 
 export interface SinglePanelCopyRequest {
     panelTitle: string;
@@ -95,7 +95,7 @@ export function extractTargetMachineIdForPanelCopy(message: string): string | un
 
 export function messageMentionsSinglePanelCopyIntent(message: string): boolean {
     const text = normalizeMessageQuotes(message.trim());
-    if (!text || messageMentionsPeerBandPanelCopyIntent(text) || userWantsDashboardClone(text)) {
+    if (!text || messageMentionsPeerBandPanelCopyIntent(text) || describesDashboardCloneLayoutIntent(text)) {
         return false;
     }
     if (!/\bpanel/i.test(text)) {
