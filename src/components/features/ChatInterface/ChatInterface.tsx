@@ -30,20 +30,6 @@ import {
   appendSaveVerificationWarning,
 } from '../../../services/appendToolReferences';
 import { filterTools } from '../../../services/toolFilter';
-import {
-  canSendChatMessage,
-  chatInputEnabled,
-  chatInputPlaceholder,
-} from '../../../services/programmaticChatIntents';
-import {
-  parseSinglePanelCopyRequest,
-  userWantsSinglePanelCopy,
-} from '../../../services/singlePanelCopyParse';
-import {
-  formatSinglePanelCopyReply,
-  runProgrammaticSinglePanelCopy,
-} from '../../../services/programmaticSinglePanelCopy';
-import { GRAFT_BUILD_NUMBER } from '../../../buildInfo';
 
 // Local hooks
 import { useRollingPlaceholder, usePluginSettings, useAutoScroll } from './hooks';
@@ -263,9 +249,6 @@ export const ChatInterface = () => {
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const processedPromptRef = useRef<string | null>(null);
-  const autoSendPromptRef = useRef<string | null>(null);
-  const sendingRef = useRef(false);
-  const suppressSessionRestoreRef = useRef(false);
   const thinkingStartTimeRef = useRef<number | null>(null);
   const messagesRef = useRef<Message[]>([]);
   const currentSessionIdRef = useRef<string | undefined>();
@@ -305,20 +288,6 @@ export const ChatInterface = () => {
 
   // Use rolling placeholder hook for animated text
   const rollingPlaceholder = useRollingPlaceholder();
-
-  const mcpConnected = Boolean(mcpClient);
-  const chatEnabled = chatInputEnabled(llmReady, mcpConnected);
-  const canSendNow = canSendChatMessage({
-    input,
-    isLoading,
-    llmReady,
-    mcpConnected,
-  });
-  const inputPlaceholderText = chatInputPlaceholder({
-    llmReady,
-    mcpConnected,
-    rollingPlaceholder,
-  });
 
   // Get user context for personalized greeting
   const userContext = contextService.getUserContext();
@@ -394,11 +363,7 @@ export const ChatInterface = () => {
   currentSessionIdRef.current = currentSessionId;
 
   const applyRestoredSession = useCallback((restored: { sessionId: string; messages: Message[] }) => {
-    if (
-      suppressSessionRestoreRef.current ||
-      sendingRef.current ||
-      messagesRef.current.length > 0
-    ) {
+    if (messagesRef.current.length > 0) {
       return;
     }
     messagesRef.current = restored.messages;
@@ -443,8 +408,7 @@ export const ChatInterface = () => {
       }
       historyHydratedRef.current = true;
 
-      const sessionId =
-        new URLSearchParams(window.location.search).get('session') ?? searchParams.get('session');
+      const sessionId = searchParams.get('session');
       if (sessionId) {
         const session = chatHistoryService.getSession(sessionId);
         if (session) {
@@ -465,21 +429,16 @@ export const ChatInterface = () => {
     return () => {
       cancelled = true;
     };
-    // Intentionally once on mount — do not re-run when searchParams change during Send.
-  }, [applyRestoredSession]);
+  }, [applyRestoredSession, searchParams]);
 
-  // Restore last session once when landing on the app (do not listen — URL updates on Send retrigger listen and loop).
+  // Restore when Grafana navigates back to this app (use locationService — router pathname is only "/")
   useEffect(() => {
     const tryRestore = async () => {
       const path = locationService.getLocation().pathname || '';
       if (!path.includes(PLUGIN_BASE_URL)) {
         return;
       }
-      if (messagesRef.current.length > 0 || sendingRef.current) {
-        return;
-      }
-      const urlSessionId = new URLSearchParams(locationService.getLocation().search || '').get('session');
-      if (urlSessionId) {
+      if (messagesRef.current.length > 0) {
         return;
       }
       await chatHistoryService.ensureLoaded();
@@ -490,6 +449,10 @@ export const ChatInterface = () => {
     };
 
     void tryRestore();
+    const unlisten = locationService.getHistory().listen(() => {
+      void tryRestore();
+    });
+    return unlisten;
   }, [applyRestoredSession]);
 
   // Persist when leaving the Grafana app route (dashboard, explore, etc.)
@@ -522,17 +485,36 @@ export const ChatInterface = () => {
     };
   }, [persistActiveSession]);
 
+  // Sync URL when opening a session from Previous Conversations after hydration
+  useEffect(() => {
+    if (!historyHydratedRef.current) {
+      return;
+    }
+    const sessionId =
+      new URLSearchParams(window.location.search).get('session') ?? searchParams.get('session');
+    if (!sessionId) {
+      return;
+    }
+    const session = chatHistoryService.getSession(sessionId);
+    if (
+      session &&
+      session.id !== currentSessionIdRef.current &&
+      messagesRef.current.length === 0
+    ) {
+      applyRestoredSession({ sessionId: session.id, messages: session.messages });
+    } else if (sessionId) {
+      replaceChatSessionInUrl(sessionId);
+    }
+  }, [searchParams, applyRestoredSession]);
+
   // Handle pre-filled prompt from navigation state (separate effect to avoid loop)
   useEffect(() => {
-    const state = location.state as { prompt?: string; autoSend?: boolean; returnTo?: string } | null;
+    const state = location.state as { prompt?: string; returnTo?: string } | null;
     if (state?.prompt && state.prompt !== processedPromptRef.current) {
       processedPromptRef.current = state.prompt;
       setInput(state.prompt);
-      if (state.autoSend) {
-        autoSendPromptRef.current = state.prompt;
-      }
       // Clear the state so it doesn't persist on refresh/navigation
-      navigate(location.pathname, { replace: true, state: { ...state, prompt: undefined, autoSend: undefined } });
+      navigate(location.pathname, { replace: true, state: { ...state, prompt: undefined } });
     }
   }, [location.state, location.pathname, navigate]);
 
@@ -650,75 +632,22 @@ export const ChatInterface = () => {
     // Save immediately so history survives navigation before the LLM finishes
     const draftSession = chatHistoryService.saveSession(newMessages, currentSessionId);
     if (!draftSession) {
-      setIsLoading(false);
       return;
     }
     setCurrentSessionId(draftSession.id);
     currentSessionIdRef.current = draftSession.id;
-    suppressSessionRestoreRef.current = true;
-    sendingRef.current = true;
     replaceChatSessionInUrl(draftSession.id);
 
     try {
-      // Create a placeholder message for the assistant
-      const assistantMessage: Message = { role: 'assistant', content: '' };
-      setMessages((prev) => [...prev, assistantMessage]);
-
-      const singlePanelCopyRequest = parseSinglePanelCopyRequest(content);
-      if (singlePanelCopyRequest && userWantsSinglePanelCopy(content)) {
-        if (!mcpClient) {
-          const assistantReply =
-            '### Could not copy panel\n\nGrafana MCP tools are not connected. Open **Grafana LLM / MCP settings**, enable MCP for Graft, hard-refresh this page, then try again.';
-          setMessages((prev) => {
-            const updated = [...prev];
-            const last = updated[updated.length - 1];
-            if (last?.role === 'assistant') {
-              updated[updated.length - 1] = { ...last, content: assistantReply };
-            }
-            return updated;
-          });
-          chatHistoryService.saveSession(
-            [...newMessages, { role: 'assistant', content: assistantReply }],
-            currentSessionId
-          );
-          return;
-        }
-
-        const copyResult = await runProgrammaticSinglePanelCopy(mcpClient, singlePanelCopyRequest);
-        const assistantReply = formatSinglePanelCopyReply(copyResult, GRAFT_BUILD_NUMBER);
-        setMessages((prev) => {
-          const updated = [...prev];
-          const last = updated[updated.length - 1];
-          if (last?.role === 'assistant') {
-            updated[updated.length - 1] = {
-              ...last,
-              content: assistantReply,
-              toolExecutions:
-                copyResult.toolExecutions.length > 0 ? copyResult.toolExecutions : undefined,
-            };
-          }
-          return updated;
-        });
-        chatHistoryService.saveSession(
-          [
-            ...newMessages,
-            {
-              role: 'assistant',
-              content: assistantReply,
-              toolExecutions:
-                copyResult.toolExecutions.length > 0 ? copyResult.toolExecutions : undefined,
-            },
-          ],
-          currentSessionId
-        );
-        return;
-      }
-
       const dashboard = await contextService.getCurrentDashboard();
       const user = contextService.getUserContext();
       const dataSources = contextService.getDataSources();
 
       const context = formatContext(dashboard, user, dataSources);
+
+      // Create a placeholder message for the assistant
+      const assistantMessage: Message = { role: 'assistant', content: '' };
+      setMessages((prev) => [...prev, assistantMessage]);
 
       const controller = new AbortController();
       abortControllerRef.current = controller;
@@ -758,7 +687,6 @@ export const ChatInterface = () => {
             thinkingSeconds: thinkingDuration,
             toolExecutions: toolExecutions
           };
-          messagesRef.current = updated;
           return updated;
         });
       }, modelType, controller.signal, mcpClient, mcpTools);
@@ -791,7 +719,6 @@ export const ChatInterface = () => {
       const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
       if (savedSession) {
         setCurrentSessionId(savedSession.id);
-        currentSessionIdRef.current = savedSession.id;
         replaceChatSessionInUrl(savedSession.id);
       }
     } catch (error: any) {
@@ -828,28 +755,12 @@ export const ChatInterface = () => {
       const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
       if (savedSession) {
         setCurrentSessionId(savedSession.id);
-        currentSessionIdRef.current = savedSession.id;
         replaceChatSessionInUrl(savedSession.id);
       }
     } finally {
       setIsLoading(false);
-      sendingRef.current = false;
-      suppressSessionRestoreRef.current = false;
-      abortControllerRef.current = null;
     }
   };
-
-  useEffect(() => {
-    const pending = autoSendPromptRef.current;
-    if (!pending || input.trim() !== pending.trim()) {
-      return;
-    }
-    if (!canSendChatMessage({ input, isLoading, llmReady, mcpConnected })) {
-      return;
-    }
-    autoSendPromptRef.current = null;
-    void handleSend();
-  }, [input, isLoading, llmReady, mcpConnected]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1070,13 +981,6 @@ ${input} `
                 </Alert>
               )}
 
-              {!settingsLoading && !llmReady && mcpConnected && (
-                <Alert title="MCP connected" severity="info" style={{ marginBottom: '16px' }}>
-                  General chat needs the Grafana LLM plugin. Programmatic dashboard prompts (rename,
-                  clone, panel copy) work when MCP is connected — type a prompt and press Send.
-                </Alert>
-              )}
-
               {selectedFiles.length > 0 && (
                 <div className={styles.filePreviewList}>
                   {selectedFiles.map((file, index) => (
@@ -1095,11 +999,11 @@ ${input} `
                 value={input}
                 onChange={(e) => setInput(e.currentTarget.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={inputPlaceholderText}
+                placeholder={!llmReady ? 'Configure Grafana LLM plugin to start chatting...' : rollingPlaceholder}
                 rows={3}
                 style={{ resize: 'none', flex: 1, border: 'none', outline: 'transparent' }}
                 className={styles.landingTextArea}
-                disabled={!chatEnabled}
+                disabled={!llmReady}
               />
               <div className={styles.landingInputFooter}>
                 {/* Mode toggle - disabled when LLM is not ready or specific model unavailable */}
@@ -1157,14 +1061,7 @@ ${input} `
                       <line x1="8" y1="23" x2="16" y2="23"></line>
                     </svg>
                   </div>
-                  <button
-                    onClick={handleSend}
-                    disabled={isLoading || !canSendNow}
-                    className={styles.landingSendButton}
-                    aria-label="Send message"
-                    data-testid="send-message-button"
-                    title={!canSendNow ? 'Enter a message first' : 'Send message'}
-                  >
+                  <button onClick={handleSend} disabled={isLoading || !llmReady} className={styles.landingSendButton} aria-label="Send message" data-testid="send-message-button" title={!llmReady ? 'LLM plugin not configured' : 'Send message'}>
                     <svg viewBox="0 0 24 24" width="16" height="16" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="12" y1="19" x2="12" y2="5"></line>
                       <polyline points="5 12 12 5 19 12"></polyline>
@@ -1425,11 +1322,11 @@ ${input} `
                 data-testid="chat-input"
                 value={input}
                 onChange={(e) => setInput(e.currentTarget.value)}
-                placeholder={inputPlaceholderText}
+                placeholder={!llmReady ? 'Configure Grafana LLM plugin to send messages...' : 'Ask Graft'}
                 rows={2}
                 className={styles.textArea}
                 onKeyDown={handleKeyDown}
-                disabled={!chatEnabled}
+                disabled={!llmReady}
               />
               <div className={styles.inputFooter}>
                 {/* Mode toggle - shown when both models are available */}
@@ -1487,16 +1384,9 @@ ${input} `
                   </div>
                   <div
                     className={styles.sendIconButton}
-                    onClick={isLoading ? handleStop : canSendNow ? handleSend : undefined}
-                    title={isLoading ? 'Stop' : !canSendNow ? 'Enter a message first' : 'Send'}
-                    data-testid="send-message-button"
-                    style={
-                      !canSendNow && !isLoading
-                        ? { opacity: 0.5, cursor: 'not-allowed' }
-                        : isLoading
-                          ? { background: theme.colors.secondary.main }
-                          : undefined
-                    }
+                    onClick={isLoading ? handleStop : (llmReady ? handleSend : undefined)}
+                    title={!llmReady ? 'LLM plugin not configured' : (isLoading ? "Stop" : "Send")}
+                    style={!llmReady ? { opacity: 0.5, cursor: 'not-allowed' } : (isLoading ? { background: theme.colors.secondary.main } : undefined)}
                   >
                     {isLoading ? (
                       <div style={{ width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
