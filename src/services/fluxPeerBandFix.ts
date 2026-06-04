@@ -252,6 +252,49 @@ export function findReferenceFluxPeerBandTargetA(panels: unknown[]): PanelRecord
     return findReferenceFluxPeerBandPanel(panels)?.targetA;
 }
 
+/** Any dashboard panel that already runs Flux against Influx (peer band or other). */
+export function findAnyFluxReferencePanel(panels: unknown[]): ReferenceFluxPeerBandPanel | undefined {
+    const peer = findReferenceFluxPeerBandPanel(panels);
+    if (peer) {
+        return peer;
+    }
+    if (!Array.isArray(panels)) {
+        return undefined;
+    }
+    for (const raw of panels) {
+        if (!raw || typeof raw !== 'object') {
+            continue;
+        }
+        const panel = raw as PanelRecord;
+        for (const target of getPanelTargetList(panel)) {
+            if (/\bfrom\s*\(\s*bucket:/i.test(targetQueryText(target))) {
+                return { panel, targetA: target };
+            }
+        }
+    }
+    return undefined;
+}
+
+export function panelUsesFluxQueries(panel: PanelRecord): boolean {
+    return getPanelTargetList(panel).some((t) => /\bfrom\s*\(\s*bucket:/i.test(targetQueryText(t)));
+}
+
+export function targetDatasourceType(target: PanelRecord): string {
+    const ds = target.datasource;
+    if (typeof ds === 'object' && ds !== null) {
+        return String((ds as { type?: string }).type ?? '').toLowerCase();
+    }
+    return '';
+}
+
+export function panelFluxOnPrometheusDatasource(panel: PanelRecord): boolean {
+    return getPanelTargetList(panel).some(
+        (t) =>
+            /\bfrom\s*\(\s*bucket:/i.test(targetQueryText(t)) &&
+            (targetDatasourceType(t) === 'prometheus' || targetDatasourceType(t) === '')
+    );
+}
+
 export function inferActualFieldFromPanelTitle(title: string): string | undefined {
     const m = title.match(/Module\s*(\d+)\s+(Current|Voltage)\b/i);
     if (!m) {

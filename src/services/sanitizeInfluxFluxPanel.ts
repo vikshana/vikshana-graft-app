@@ -1,3 +1,13 @@
+import {
+    applyPanelDatasourceFromReference,
+    copyDatasourceFromReference,
+    findAnyFluxReferencePanel,
+    getPanelTargetList,
+    panelUsesFluxQueries,
+    targetDatasourceType,
+    targetQueryText,
+} from './fluxPeerBandFix';
+
 type PanelRecord = Record<string, unknown>;
 type TargetRecord = Record<string, unknown>;
 
@@ -15,14 +25,19 @@ export function normalizeInfluxFluxTarget(target: TargetRecord): TargetRecord {
 
     if (q) {
         out.query = q;
-        out.expr = q;
         out.rawQuery = q;
         out.editorMode = 'code';
+        const dsType = targetDatasourceType(out as PanelRecord);
+        if (dsType.includes('influx')) {
+            delete out.expr;
+        } else if (!out.expr || out.expr !== q) {
+            out.expr = q;
+        }
     } else if (out.rawQuery === true && typeof out.query === 'string') {
         const text = out.query as string;
-        out.expr = text;
         out.rawQuery = text;
         out.editorMode = 'code';
+        delete out.expr;
     }
 
     return out;
@@ -44,20 +59,75 @@ export function sanitizeInfluxFluxPanel(panel: PanelRecord): PanelRecord {
     const ds = out.datasource;
     if (ds && typeof ds === 'object' && !Array.isArray(ds)) {
         const rec = ds as Record<string, unknown>;
-        if (rec.uid && rec.type === 'influxdb') {
-            out.datasource = { uid: rec.uid };
-        }
-    }
-
-    for (const target of (out.targets as TargetRecord[]) ?? []) {
-        const tds = target.datasource;
-        if (tds && typeof tds === 'object' && !Array.isArray(tds)) {
-            const rec = tds as Record<string, unknown>;
-            if (rec.uid) {
-                target.datasource = { uid: rec.uid };
+        if (rec.uid) {
+            out.datasource = JSON.parse(JSON.stringify(rec));
+            if ((out.datasource as Record<string, unknown>).type === 'influxdb') {
+                delete (out.datasource as Record<string, unknown>).type;
             }
         }
     }
 
+    for (const target of getPanelTargetList(out)) {
+        const tds = target.datasource;
+        if (tds && typeof tds === 'object' && !Array.isArray(tds)) {
+            const rec = { ...(tds as Record<string, unknown>) };
+            if (rec.type === 'influxdb') {
+                delete rec.type;
+            }
+            target.datasource = rec;
+        }
+    }
+
     return out;
+}
+
+export interface InfluxFluxPanelRepairResult {
+    panel: PanelRecord;
+    changed: boolean;
+    fixes: string[];
+}
+
+/**
+ * Flux on a Prometheus datasource causes PromQL parse errors (e.g. unexpected identifier "v").
+ * Copy datasource from a working Flux panel on the same dashboard.
+ */
+export function repairInfluxFluxPanel(
+    panel: PanelRecord,
+    dashboardPanels?: unknown[]
+): InfluxFluxPanelRepairResult {
+    const fixes: string[] = [];
+    const before = JSON.stringify(panel);
+    let out = sanitizeInfluxFluxPanel(panel);
+
+    if (!panelUsesFluxQueries(out)) {
+        return { panel: out, changed: before !== JSON.stringify(out), fixes };
+    }
+
+    const ref = dashboardPanels ? findAnyFluxReferencePanel(dashboardPanels) : undefined;
+    if (ref) {
+        for (const target of getPanelTargetList(out)) {
+            if (copyDatasourceFromReference(target, ref.targetA)) {
+                fixes.push(`target ${String(target.refId ?? '?')}: datasource matched working Flux panel`);
+            }
+            const dsType = targetDatasourceType(target);
+            const flux = targetQueryText(target);
+            if (dsType.includes('influx') && flux) {
+                target.query = flux;
+                target.rawQuery = flux;
+                delete target.expr;
+            }
+        }
+        if (applyPanelDatasourceFromReference(out, ref.panel, ref.targetA)) {
+            fixes.push('panel datasource matched working Flux panel');
+        }
+    }
+
+    const changed = before !== JSON.stringify(out);
+    if (panelUsesFluxQueries(out) && getPanelTargetList(out).some((t) => targetDatasourceType(t) === 'prometheus')) {
+        fixes.push(
+            'WARNING: Flux queries still on Prometheus datasource — set datasource to the same source as your working peer-band panel in Grafana'
+        );
+    }
+
+    return { panel: out, changed, fixes };
 }

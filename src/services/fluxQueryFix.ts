@@ -105,6 +105,7 @@ export function deepSanitizeFluxStrings(value: unknown, aggressive: boolean): { 
 }
 
 import { applyModule5PeerBandFluxFixes } from './fluxPeerBandFix';
+import { repairInfluxFluxPanel } from './sanitizeInfluxFluxPanel';
 
 /** Apply Flux sanitization to all query-like fields on a panel's targets. */
 export function applyFluxFixesToPanel(
@@ -114,28 +115,44 @@ export function applyFluxFixesToPanel(
         dashboardTitle?: string;
         referenceTarget?: PanelRecord;
         referencePanel?: PanelRecord;
+        dashboardPanels?: unknown[];
     }
 ): { panel: PanelRecord; changed: boolean; targetsFixed: number } {
-    const peer = applyModule5PeerBandFluxFixes(panel, {
+    let workingPanel = panel;
+    let changed = false;
+    let targetsFixed = 0;
+
+    const repair = repairInfluxFluxPanel(panel, options?.dashboardPanels);
+    if (repair.changed) {
+        workingPanel = repair.panel;
+        changed = true;
+        targetsFixed = Math.max(targetsFixed, 1);
+    }
+
+    const peer = applyModule5PeerBandFluxFixes(workingPanel, {
         force: options?.aggressive === true,
         dashboardTitle: options?.dashboardTitle,
         referenceTarget: options?.referenceTarget,
         referencePanel: options?.referencePanel,
     });
     if (peer.changed) {
-        return peer;
+        return {
+            panel: peer.panel,
+            changed: changed || peer.changed,
+            targetsFixed: Math.max(targetsFixed, peer.targetsFixed),
+        };
     }
 
     const aggressive = options?.aggressive === true;
-    const deep = deepSanitizeFluxStrings(panel, aggressive);
+    const deep = deepSanitizeFluxStrings(workingPanel, aggressive);
     const copy = deep.value as PanelRecord;
 
-    let targetsFixed = 0;
+    let deepTargetsFixed = 0;
     const targets = copy.targets;
     if (Array.isArray(targets)) {
         for (const t of targets) {
             if (t && typeof t === 'object' && fixTargetLikeObject(t as PanelRecord, aggressive)) {
-                targetsFixed += 1;
+                deepTargetsFixed += 1;
             }
         }
     }
@@ -143,15 +160,15 @@ export function applyFluxFixesToPanel(
     if (Array.isArray(queries)) {
         for (const q of queries) {
             if (q && typeof q === 'object' && fixTargetLikeObject(q as PanelRecord, aggressive)) {
-                targetsFixed += 1;
+                deepTargetsFixed += 1;
             }
         }
     }
 
     return {
         panel: copy,
-        changed: deep.changed || targetsFixed > 0,
-        targetsFixed: Math.max(targetsFixed, deep.changed ? 1 : 0),
+        changed: changed || deep.changed || deepTargetsFixed > 0,
+        targetsFixed: Math.max(targetsFixed, deepTargetsFixed, deep.changed ? 1 : 0),
     };
 }
 

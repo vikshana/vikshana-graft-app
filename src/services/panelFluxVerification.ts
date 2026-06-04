@@ -1,3 +1,5 @@
+import { targetDatasourceType } from './fluxPeerBandFix';
+
 type PanelRecord = Record<string, unknown>;
 
 export interface PanelFluxIssue {
@@ -54,6 +56,18 @@ export function scanPanelFluxIssues(panel: PanelRecord): PanelFluxIssue[] {
         }
         const refId = targetRefId(target);
         const legend = targetLegend(target);
+
+        if (
+            /\bfrom\s*\(\s*bucket:/i.test(query) &&
+            (targetDatasourceType(target) === 'prometheus' || targetDatasourceType(target) === '')
+        ) {
+            issues.push({
+                refId,
+                legend,
+                issue:
+                    'Flux query on Prometheus (or missing) datasource — causes parse error unexpected identifier "v"; copy datasource from a working Influx/Flux panel on this dashboard',
+            });
+        }
 
         if (/\bstdDev\b/.test(query)) {
             issues.push({ refId, legend, issue: 'uses invalid token stdDev (use stddev or manual stats)' });

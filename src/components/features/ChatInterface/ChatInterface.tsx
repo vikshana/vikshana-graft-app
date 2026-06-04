@@ -51,6 +51,14 @@ import {
   runProgrammaticPanelJsonDuplicate,
 } from '../../../services/programmaticPanelJsonDuplicate';
 import { recordGraftFailure } from '../../../services/graftOperatorFailureLog';
+import {
+  messageMentionsInfluxPanelRepair,
+  parseInfluxPanelRepairRequest,
+} from '../../../services/influxPanelRepairParse';
+import {
+  formatInfluxPanelRepairReply,
+  runProgrammaticInfluxPanelRepair,
+} from '../../../services/programmaticInfluxPanelRepair';
 
 // Local hooks
 import { useRollingPlaceholder, usePluginSettings, useAutoScroll } from './hooks';
@@ -207,6 +215,18 @@ const formatContext = (dashboard: DashboardContext, user: UserContext, dataSourc
   lines.push('- Use robust strategy for spiky/non-normal signals; adaptive for normally distributed metrics.');
   lines.push('- Bands need ~24h of data before they are reliable. Mention this if bands look too wide or narrow.');
   lines.push('- To add an anomaly panel: get_dashboard_by_uid, append one timeseries panel with the queries above, update_dashboard. Do not stop after describing the steps.');
+
+  lines.push('');
+  lines.push('Influx Flux vs Prometheus (PowerTech):');
+  lines.push(
+    '- Queries with from(bucket: v.bucket) are Influx Flux — datasource must be the same Influx source as working peer-band panels, NOT Prometheus.'
+  );
+  lines.push(
+    '- Putting Flux in expr/rawQuery on a Prometheus datasource causes: parse error unexpected identifier "v". Copy datasource from a working Flux panel; use query + rawQuery strings (not rawQuery: true); do not set panel timeFrom/timeTo.'
+  );
+  lines.push(
+    '- History Comparison (live): PromQL machine_metrics + last_over_time(machine_metric_*[6m]). Historical incident windows: Flux actual + ml_predictions in Influx.'
+  );
 
   return lines.join('\n');
 };
@@ -691,6 +711,51 @@ export const ChatInterface = () => {
         };
         const finalMessages = [...newMessages, finalAssistantMessage];
         const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      const influxPanelRepairRequest = parseInfluxPanelRepairRequest(content);
+      if (messageMentionsInfluxPanelRepair(content) && influxPanelRepairRequest && mcpClient) {
+        const repairResult = await runProgrammaticInfluxPanelRepair(mcpClient, influxPanelRepairRequest);
+        finalContent = formatInfluxPanelRepairReply(repairResult, GRAFT_BUILD_NUMBER);
+        finalToolExecutions = repairResult.toolExecutions;
+        if (!repairResult.ok) {
+          recordGraftFailure({
+            buildNumber: GRAFT_BUILD_NUMBER,
+            intent: 'influx_panel_repair',
+            userMessagePreview: content,
+            error: repairResult.error ?? 'Unknown error',
+            dashboardTitle: repairResult.dashboardTitle,
+            panelTitle: repairResult.panelTitle,
+          });
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions:
+                finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
         if (savedSession) {
           setCurrentSessionId(savedSession.id);
           currentSessionIdRef.current = savedSession.id;

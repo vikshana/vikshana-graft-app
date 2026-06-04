@@ -1,6 +1,6 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { sanitizeInfluxFluxPanel } from './sanitizeInfluxFluxPanel';
+import { repairInfluxFluxPanel, sanitizeInfluxFluxPanel } from './sanitizeInfluxFluxPanel';
 
 describe('sanitizeInfluxFluxPanel', () => {
     it('fixes boolean rawQuery and removes panel timeFrom/timeTo', () => {
@@ -21,6 +21,35 @@ describe('sanitizeInfluxFluxPanel', () => {
         const a = (fixed.targets as Record<string, unknown>[])[0];
         expect(typeof a.rawQuery).toBe('string');
         expect(a.rawQuery).toBe(a.query);
-        expect(a.expr).toBe(a.query);
+    });
+
+    it('removes expr and copies datasource from reference Flux panel', () => {
+        const panel = {
+            targets: [
+                {
+                    refId: 'A',
+                    datasource: { type: 'prometheus', uid: 'x' },
+                    query: 'from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)',
+                    expr: 'from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)',
+                },
+            ],
+        };
+        const refPanels = [
+            {
+                title: 'Module 5 peer',
+                targets: [
+                    {
+                        refId: 'A',
+                        datasource: { type: 'influxdb', uid: 'influx-uid' },
+                        query: 'from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)',
+                    },
+                ],
+            },
+        ];
+        const { panel: fixed, changed, fixes } = repairInfluxFluxPanel(panel, refPanels);
+        expect(changed).toBe(true);
+        expect((fixed.targets as Record<string, unknown>[])[0].datasource).toEqual({ uid: 'influx-uid' });
+        expect((fixed.targets as Record<string, unknown>[])[0].expr).toBeUndefined();
+        expect(fixes.some((f) => f.includes('datasource'))).toBe(true);
     });
 });
