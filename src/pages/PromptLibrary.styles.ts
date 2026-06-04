@@ -251,6 +251,85 @@ export const getStyles = (theme: GrafanaTheme2) => ({
     gap: 4px;
     margin-top: auto;
     padding-top: ${theme.spacing(0.5)};
-  `
+  `,
+  suggestedContainer: css`
+    display: flex;
+    flex-direction: column;
+    gap: ${theme.spacing(2)};
+  `,
+  suggestedIntro: css`
+    margin: 0;
+    color: ${theme.colors.text.secondary};
+    font-size: ${theme.typography.bodySmall.fontSize};
+    line-height: 1.5;
+    max-width: 720px;
+  `,
+  suggestedGrid: css`
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: ${theme.spacing(2)};
+  `,
+  suggestedCard: css`
+    position: relative;
+    background: ${theme.colors.background.secondary};
+    border: 1px solid ${theme.colors.border.weak};
+    border-radius: 8px;
+    padding: ${theme.spacing(2)};
+    padding-right: ${theme.spacing(4)};
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    flex-direction: column;
+    gap: ${theme.spacing(1)};
+    min-height: 180px;
+
+    &:hover {
+      border-color: ${theme.colors.primary.border};
+      box-shadow: ${theme.shadows.z2};
+      transform: translateY(-1px);
+
+      .suggestedArrow {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+  `,
+  suggestedCardHeader: css`
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: ${theme.spacing(1)};
+    padding-right: ${theme.spacing(3)};
+  `,
+  suggestedCardTitle: css`
+    margin: 0;
+    font-size: 15px;
+    font-weight: ${theme.typography.fontWeightMedium};
+    color: ${theme.colors.text.primary};
+  `,
+  suggestedDescription: css`
+    margin: 0;
+    font-size: 12px;
+    color: ${theme.colors.text.secondary};
+  `,
+  suggestedContent: css`
+    font-size: 12px;
+    color: ${theme.colors.text.primary};
+    line-height: 1.45;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    flex: 1;
+  `,
+  suggestedArrow: css`
+    position: absolute;
+    right: ${theme.spacing(1.5)};
+    bottom: ${theme.spacing(1.5)};
+    opacity: 0;
+    transform: translateX(-8px);
+    transition: all 0.2s;
+    color: ${theme.colors.primary.text};
+  `,
 });
 

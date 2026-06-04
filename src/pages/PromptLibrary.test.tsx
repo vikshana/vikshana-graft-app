@@ -31,12 +31,18 @@ describe('PromptLibrary', () => {
         (promptLibraryService.getPreConfiguredPrompts as jest.Mock).mockReturnValue(mockPreConfiguredPrompts);
     });
 
-    it('renders correctly and defaults to pre-configured tab', () => {
+    it('renders correctly and defaults to suggested tab', () => {
         render(<PromptLibrary />);
         expect(screen.getByText('Prompt Library')).toBeInTheDocument();
+        expect(screen.getByText('Suggested Prompts')).toBeInTheDocument();
         expect(screen.getByText('Pre-configured Prompts')).toBeInTheDocument();
         expect(screen.getByText('My Prompts')).toBeInTheDocument();
-        // Check for a known category from pre-configured prompts
+        expect(screen.getByText('Rename machine dashboard')).toBeInTheDocument();
+    });
+
+    it('switches to pre-configured tab', () => {
+        render(<PromptLibrary />);
+        fireEvent.click(screen.getByText('Pre-configured Prompts'));
         expect(screen.getByText('DATASOURCE QUERIES')).toBeInTheDocument();
     });
 
@@ -48,12 +54,11 @@ describe('PromptLibrary', () => {
 
     it('navigates with prompt content when clicked', () => {
         render(<PromptLibrary />);
-        // Find a prompt item (assuming "Show me the rate..." is in the data)
-        const promptItem = screen.getByText(/Show me the rate/i);
+        const promptItem = screen.getByText('Rename machine dashboard');
         fireEvent.click(promptItem);
 
         expect(mockNavigate).toHaveBeenCalledWith('..', {
-            state: { prompt: expect.stringContaining('Show me the rate') }
+            state: { prompt: expect.stringContaining('Rename the dashboard for the 2505-200033 machine') },
         });
     });
 
@@ -90,24 +95,27 @@ describe('PromptLibrary', () => {
         render(<PromptLibrary />);
         const searchInput = screen.getByPlaceholderText('Search prompts...');
 
-        // Search for something specific
-        fireEvent.change(searchInput, { target: { value: 'Kubernetes' } });
+        fireEvent.change(searchInput, { target: { value: 'peer band' } });
 
-        // Should show matching items
-        expect(screen.getByText(/Kubernetes/i)).toBeInTheDocument();
-        // Should hide non-matching items (this is a loose check, assuming "Show me the rate" doesn't contain "Kubernetes")
-        expect(screen.queryByText('Show me the rate')).not.toBeInTheDocument();
+        expect(screen.getByText('Fix all vs. Peer Band panels')).toBeInTheDocument();
+        expect(screen.queryByText('Rename machine dashboard')).not.toBeInTheDocument();
+    });
+
+    it('should allow pinning suggested prompts', () => {
+        (promptLibraryService.getPinnedPreConfiguredPrompts as jest.Mock).mockReturnValue([]);
+        render(<PromptLibrary />);
+
+        const pinButtons = screen.getAllByRole('button', { name: /Pin prompt/i });
+        fireEvent.click(pinButtons[0]);
+
+        expect(promptLibraryService.togglePreConfiguredPin).toHaveBeenCalled();
     });
 
     it('should allow pinning preconfigured prompts', () => {
         (promptLibraryService.getPinnedPreConfiguredPrompts as jest.Mock).mockReturnValue([]);
         render(<PromptLibrary />);
+        fireEvent.click(screen.getByText('Pre-configured Prompts'));
 
-        // Find a prompt item
-        const promptText = /Show me the rate/i;
-        screen.getByText(promptText);
-
-        // Find the pin button associated with this prompt
         const pinButtons = screen.getAllByRole('button', { name: /Pin prompt/i });
         fireEvent.click(pinButtons[0]);
 

@@ -30,6 +30,11 @@ import {
   appendSaveVerificationWarning,
 } from '../../../services/appendToolReferences';
 import { filterTools } from '../../../services/toolFilter';
+import {
+  canSendChatMessage,
+  chatInputEnabled,
+  chatInputPlaceholder,
+} from '../../../services/programmaticChatIntents';
 
 // Local hooks
 import { useRollingPlaceholder, usePluginSettings, useAutoScroll } from './hooks';
@@ -288,6 +293,20 @@ export const ChatInterface = () => {
 
   // Use rolling placeholder hook for animated text
   const rollingPlaceholder = useRollingPlaceholder();
+
+  const mcpConnected = Boolean(mcpClient);
+  const chatEnabled = chatInputEnabled(llmReady, mcpConnected);
+  const canSendNow = canSendChatMessage({
+    input,
+    isLoading,
+    llmReady,
+    mcpConnected,
+  });
+  const inputPlaceholderText = chatInputPlaceholder({
+    llmReady,
+    mcpConnected,
+    rollingPlaceholder,
+  });
 
   // Get user context for personalized greeting
   const userContext = contextService.getUserContext();
@@ -976,6 +995,13 @@ ${input} `
                 </Alert>
               )}
 
+              {!settingsLoading && !llmReady && mcpConnected && (
+                <Alert title="MCP connected" severity="info" style={{ marginBottom: '16px' }}>
+                  General chat needs the Grafana LLM plugin. Programmatic dashboard prompts (rename,
+                  clone, panel copy) work when MCP is connected — type a prompt and press Send.
+                </Alert>
+              )}
+
               {selectedFiles.length > 0 && (
                 <div className={styles.filePreviewList}>
                   {selectedFiles.map((file, index) => (
@@ -994,11 +1020,11 @@ ${input} `
                 value={input}
                 onChange={(e) => setInput(e.currentTarget.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={!llmReady ? 'Configure Grafana LLM plugin to start chatting...' : rollingPlaceholder}
+                placeholder={inputPlaceholderText}
                 rows={3}
                 style={{ resize: 'none', flex: 1, border: 'none', outline: 'transparent' }}
                 className={styles.landingTextArea}
-                disabled={!llmReady}
+                disabled={!chatEnabled}
               />
               <div className={styles.landingInputFooter}>
                 {/* Mode toggle - disabled when LLM is not ready or specific model unavailable */}
@@ -1056,7 +1082,14 @@ ${input} `
                       <line x1="8" y1="23" x2="16" y2="23"></line>
                     </svg>
                   </div>
-                  <button onClick={handleSend} disabled={isLoading || !llmReady} className={styles.landingSendButton} aria-label="Send message" data-testid="send-message-button" title={!llmReady ? 'LLM plugin not configured' : 'Send message'}>
+                  <button
+                    onClick={handleSend}
+                    disabled={isLoading || !canSendNow}
+                    className={styles.landingSendButton}
+                    aria-label="Send message"
+                    data-testid="send-message-button"
+                    title={!canSendNow ? 'Enter a message first' : 'Send message'}
+                  >
                     <svg viewBox="0 0 24 24" width="16" height="16" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="12" y1="19" x2="12" y2="5"></line>
                       <polyline points="5 12 12 5 19 12"></polyline>
@@ -1317,11 +1350,11 @@ ${input} `
                 data-testid="chat-input"
                 value={input}
                 onChange={(e) => setInput(e.currentTarget.value)}
-                placeholder={!llmReady ? 'Configure Grafana LLM plugin to send messages...' : 'Ask Graft'}
+                placeholder={inputPlaceholderText}
                 rows={2}
                 className={styles.textArea}
                 onKeyDown={handleKeyDown}
-                disabled={!llmReady}
+                disabled={!chatEnabled}
               />
               <div className={styles.inputFooter}>
                 {/* Mode toggle - shown when both models are available */}
@@ -1379,9 +1412,16 @@ ${input} `
                   </div>
                   <div
                     className={styles.sendIconButton}
-                    onClick={isLoading ? handleStop : (llmReady ? handleSend : undefined)}
-                    title={!llmReady ? 'LLM plugin not configured' : (isLoading ? "Stop" : "Send")}
-                    style={!llmReady ? { opacity: 0.5, cursor: 'not-allowed' } : (isLoading ? { background: theme.colors.secondary.main } : undefined)}
+                    onClick={isLoading ? handleStop : canSendNow ? handleSend : undefined}
+                    title={isLoading ? 'Stop' : !canSendNow ? 'Enter a message first' : 'Send'}
+                    data-testid="send-message-button"
+                    style={
+                      !canSendNow && !isLoading
+                        ? { opacity: 0.5, cursor: 'not-allowed' }
+                        : isLoading
+                          ? { background: theme.colors.secondary.main }
+                          : undefined
+                    }
                   >
                     {isLoading ? (
                       <div style={{ width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

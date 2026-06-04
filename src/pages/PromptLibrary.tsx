@@ -7,12 +7,15 @@ import { useStyles2, Button, Input, Icon, TabsBar, Tab, Modal, TextArea, Field, 
 // Local services and data
 import { getStyles } from './PromptLibrary.styles';
 import { promptLibraryService, UserPrompt } from '../services/promptLibrary';
+import { filterSuggestedPrompts, groupSuggestedPrompts } from '../data/suggestedPrompts';
+import { messageHasProgrammaticHandler } from '../services/programmaticChatIntents';
 
+type PromptLibraryTab = 'suggested' | 'preconfigured' | 'user';
 
 export const PromptLibrary = () => {
   const styles = useStyles2(getStyles);
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'preconfigured' | 'user'>('preconfigured');
+  const [activeTab, setActiveTab] = useState<PromptLibraryTab>('suggested');
   const [searchQuery, setSearchQuery] = useState('');
   const [userPrompts, setUserPrompts] = useState<UserPrompt[]>(() => promptLibraryService.getUserPromptsSorted());
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -38,7 +41,12 @@ export const PromptLibrary = () => {
   };
 
   const handleUsePrompt = (content: string) => {
-    navigate('..', { state: { prompt: content } });
+    navigate('..', {
+      state: {
+        prompt: content,
+        autoSend: messageHasProgrammaticHandler(content),
+      },
+    });
   };
 
   const handleSavePrompt = () => {
@@ -83,6 +91,9 @@ export const PromptLibrary = () => {
       setTimeout(() => setPinError(null), 3000);
     }
   };
+
+  const filteredSuggested = filterSuggestedPrompts(searchQuery);
+  const groupedSuggested = groupSuggestedPrompts(filteredSuggested);
 
   const filteredPreConfigured = Object.entries(preConfiguredPrompts).reduce((acc, [category, subCats]) => {
     const filteredSubCats = Object.entries(subCats).reduce((subAcc, [subCat, prompts]) => {
@@ -154,6 +165,12 @@ export const PromptLibrary = () => {
         </div>
         <TabsBar className={styles.tabs}>
           <Tab
+            label="Suggested Prompts"
+            active={activeTab === 'suggested'}
+            onChangeTab={() => setActiveTab('suggested')}
+            icon="rocket"
+          />
+          <Tab
             label="Pre-configured Prompts"
             active={activeTab === 'preconfigured'}
             onChangeTab={() => setActiveTab('preconfigured')}
@@ -175,7 +192,48 @@ export const PromptLibrary = () => {
           </div>
         )}
 
-        {activeTab === 'preconfigured' ? (
+        {activeTab === 'suggested' ? (
+          <div className={styles.suggestedContainer}>
+            <p className={styles.suggestedIntro}>
+              Ready-to-use prompts for machine dashboards, peer-band panels, and scoped panel fixes.
+              Graft runs these programmatically when possible — click a prompt to paste it into chat and send when MCP is connected.
+            </p>
+            <div className={styles.promptGrid}>
+              {Object.entries(groupedSuggested).map(([category, prompts]) => (
+                <div key={category} className={styles.categorySection}>
+                  <h2 className={styles.categoryTitle}>{category}</h2>
+                  <div className={styles.suggestedGrid}>
+                    {prompts.map((prompt) => (
+                      <div
+                        key={prompt.id}
+                        className={styles.suggestedCard}
+                        data-testid="suggested-prompt-item"
+                        onClick={() => handleUsePrompt(prompt.content)}
+                      >
+                        <div className={styles.suggestedCardHeader}>
+                          <h3 className={styles.suggestedCardTitle}>{prompt.title}</h3>
+                          <button
+                            className={`${styles.pinButton} ${pinnedPreConfigured.includes(prompt.content) ? 'active' : ''}`}
+                            onClick={(e) => handleTogglePreConfiguredPin(e, prompt.content)}
+                            title={pinnedPreConfigured.includes(prompt.content) ? 'Unpin prompt' : 'Pin prompt'}
+                          >
+                            <Icon
+                              name="star"
+                              type={pinnedPreConfigured.includes(prompt.content) ? 'solid' : 'default'}
+                            />
+                          </button>
+                        </div>
+                        <p className={styles.suggestedDescription}>{prompt.description}</p>
+                        <div className={styles.suggestedContent} data-testid="prompt-content">{prompt.content}</div>
+                        <Icon name="arrow-right" className={styles.suggestedArrow} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : activeTab === 'preconfigured' ? (
           <div className={styles.promptGrid}>
             {Object.entries(filteredPreConfigured).map(([category, subCats]) => (
               <div key={category} className={styles.categorySection}>
