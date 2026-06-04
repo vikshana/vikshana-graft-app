@@ -159,7 +159,9 @@ export async function runProgrammaticInfluxPanelRepair(
             dashboardUid: resolved.uid,
             dashboardTitle,
             panelTitle: entry.title,
-            fixes: ['No changes required — panel datasource and legend overrides already set'],
+            fixes: [
+                'No changes required — datasource, Flux map/keep, and displayName overrides (A–D) already set',
+            ],
         };
     }
 

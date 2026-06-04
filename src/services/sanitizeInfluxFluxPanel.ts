@@ -39,6 +39,29 @@ function stripFluxLegendMapLines(query: string): string {
     return query.replace(/\|>\s*map\s*\(\s*fn:\s*\([^)]*\)\s*=>\s*\([^)]*\)\s*\)\s*/gi, '');
 }
 
+const FLUX_FIELD_KEEP = '|> keep(columns: ["_time", "_value", "_field"])';
+
+/** Last keep() in the pipeline must retain _field or Grafana legends stay "_value". */
+function fluxQueryHasFinalFieldKeep(query: string): boolean {
+    const keeps = [...query.matchAll(/\|>\s*keep\s*\(\s*columns:\s*\[([^\]]+)\]/gi)];
+    if (keeps.length === 0) {
+        return false;
+    }
+    return /"_field"/.test(keeps[keeps.length - 1][1]);
+}
+
+function fluxQueryLabelsField(query: string): boolean {
+    return (
+        /\|>\s*set\s*\(\s*key:\s*"_field"/i.test(query) ||
+        /\|>\s*map\s*\([^)]*_field\s*:/i.test(query)
+    );
+}
+
+function extractFluxMapFieldLabel(query: string): string | undefined {
+    const m = query.match(/_field:\s*"([^"]+)"/i);
+    return m?.[1]?.trim();
+}
+
 function extractFluxSetFieldLabel(query: string): string | undefined {
     const m = query.match(/\|>\s*set\s*\(\s*key:\s*"_field"\s*,\s*value:\s*"([^"]+)"/i);
     return m?.[1]?.trim();
@@ -57,7 +80,8 @@ export function normalizeFluxSeriesLegendInTarget(target: TargetRecord): boolean
             ? target.legendFormat.trim()
             : undefined) ??
         (refId ? DEFAULT_FLUX_TARGET_LABELS[refId] : undefined) ??
-        extractFluxSetFieldLabel(q);
+        extractFluxSetFieldLabel(q) ??
+        extractFluxMapFieldLabel(q);
 
     if (!label) {
         return false;
@@ -70,8 +94,14 @@ export function normalizeFluxSeriesLegendInTarget(target: TargetRecord): boolean
     if (/\|>\s*set\s*\(\s*key:\s*"_field"/i.test(next)) {
         next = next.replace(/\|>\s*set\s*\(\s*key:\s*"_field"\s*,\s*value:\s*"[^"]+"\s*\)\s*/gi, `${mapLine}\n`);
         changed = true;
-    } else if (!/\|>\s*map\s*\(\s*fn:\s*\(\s*r\s*\)\s*=>\s*\(\s*\{\s*_time:/i.test(next)) {
+    } else if (/\|>\s*map\s*\(\s*fn:\s*\(\s*r\s*\)\s*=>\s*\(\s*\{\s*_time:/i.test(next)) {
+        next = `${stripFluxLegendMapLines(next).trim()}\n  ${mapLine}`;
+        changed = true;
+    } else if (!/\|>\s*map\s*\([^)]*_field/i.test(next)) {
         next = `${next.trim()}\n  ${mapLine}`;
+        changed = true;
+    } else if (fluxQueryLabelsField(next) && !fluxQueryHasFinalFieldKeep(next)) {
+        next = `${next.trim()}\n  ${FLUX_FIELD_KEEP}`;
         changed = true;
     }
 

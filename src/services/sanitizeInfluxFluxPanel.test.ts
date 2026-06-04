@@ -102,6 +102,29 @@ describe('sanitizeInfluxFluxPanel', () => {
         expect(fixes.some((f) => f.includes('legend label'))).toBe(true);
     });
 
+    it('replaces legacy _time map and appends keep(_field) for Grafana legend', () => {
+        const panel = {
+            title: 'Module 5 Current — RandomForest ML (Influx)',
+            targets: [
+                {
+                    refId: 'A',
+                    datasource: { uid: 'influx-uid' },
+                    query:
+                        'from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> keep(columns: ["_time", "_value"])\n  |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: "Module 5 (Actual)" }))',
+                    rawQuery: true,
+                    legendFormat: 'Module 5 (Actual)',
+                },
+            ],
+        };
+        const { panel: fixed, changed, fixes } = repairInfluxFluxPanel(panel);
+        expect(changed).toBe(true);
+        const q = String((fixed.targets as Record<string, unknown>[])[0].query);
+        expect(q).toContain('keep(columns: ["_time", "_value", "_field"])');
+        expect(q).toContain('r with _field');
+        expect(q).not.toMatch(/_time:\s*r\._time/);
+        expect(fixes.some((f) => f.includes('legend label'))).toBe(true);
+    });
+
     it('adds byFrameRefID displayName overrides for RandomForest panels', () => {
         const panel = {
             title: 'Module 5 Current — RandomForest ML (Influx)',
