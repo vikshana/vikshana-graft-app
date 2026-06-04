@@ -9,6 +9,7 @@ import {
     userWantsPeerBandPanelCopy,
 } from './peerBandPanelCopyParse';
 import {
+    isExplicitSinglePanelCopyRequest,
     messageMentionsSinglePanelCopyIntent,
     userWantsSinglePanelCopy,
 } from './singlePanelCopyParse';
@@ -26,6 +27,7 @@ export function messageHasProgrammaticHandler(message: string): boolean {
         messageDescribesDashboardRename(text) ||
         userWantsPeerBandPanelCopy(text) ||
         messageMentionsPeerBandPanelCopyIntent(text) ||
+        isExplicitSinglePanelCopyRequest(text) ||
         userWantsSinglePanelCopy(text) ||
         messageMentionsSinglePanelCopyIntent(text) ||
         userWantsBulkPeerBandFix(text) ||

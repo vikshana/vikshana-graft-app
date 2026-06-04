@@ -25,6 +25,12 @@ describe('dashboardPanelCreateReply', () => {
         expect(userWantsPanelCreate('Clone dashboard 2103 to 2505')).toBe(false);
     });
 
+    it('does not treat cross-dashboard panel copy as panel create', () => {
+        const totalCuMass =
+            'Make a new panel on the 2505-200033 / NewMachine dashboard that is a copy of the "Total Cu Mass" panel on 2406-176021 / Exsolve';
+        expect(userWantsPanelCreate(totalCuMass)).toBe(false);
+    });
+
     it('formats panel create with summary at end', () => {
         const tools: ToolExecution[] = [
             {

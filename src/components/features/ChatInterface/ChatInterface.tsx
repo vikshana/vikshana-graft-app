@@ -37,6 +37,7 @@ import { GRAFT_BUILD_NUMBER } from '../../../buildInfo';
 import {
   formatSinglePanelCopyClarification,
   messageMentionsSinglePanelCopyIntent,
+  isExplicitSinglePanelCopyRequest,
   parseSinglePanelCopyRequest,
 } from '../../../services/singlePanelCopyParse';
 import {
@@ -656,7 +657,7 @@ export const ChatInterface = () => {
     if (/^continue\.?$/i.test(content.trim())) {
       const priorUsers = messages.filter((m) => m.role === 'user').map((m) => m.content);
       const prior = latestNonContinueUserMessage(priorUsers);
-      if (prior && parseSinglePanelCopyRequest(prior)) {
+      if (prior && (parseSinglePanelCopyRequest(prior) || isExplicitSinglePanelCopyRequest(prior))) {
         content = prior;
       } else {
         content =
@@ -728,10 +729,33 @@ export const ChatInterface = () => {
         return;
       }
 
+      const explicitSinglePanelCopy = isExplicitSinglePanelCopyRequest(content);
       const panelCopyRequest = parseSinglePanelCopyRequest(content);
-      if (messageMentionsSinglePanelCopyIntent(content)) {
+      if (explicitSinglePanelCopy || messageMentionsSinglePanelCopyIntent(content)) {
         clearActiveCloneIntent();
         errorPathTag = 'single-panel-copy';
+      }
+      if (explicitSinglePanelCopy && !panelCopyRequest) {
+        finalContent = formatSinglePanelCopyClarification(content);
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = { role: 'assistant', content: finalContent };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
       }
       if (messageMentionsSinglePanelCopyIntent(content) && !panelCopyRequest) {
         finalContent = formatSinglePanelCopyClarification(content);
@@ -756,8 +780,10 @@ export const ChatInterface = () => {
         return;
       }
 
-      if (panelCopyRequest) {
-        if (!mcpClient) {
+      if (panelCopyRequest || explicitSinglePanelCopy) {
+        if (!panelCopyRequest) {
+          finalContent = formatSinglePanelCopyClarification(content);
+        } else if (!mcpClient) {
           finalContent =
             '### Could not copy panel\n\nGrafana MCP tools are not connected. Open **Grafana LLM / MCP settings**, enable MCP for Graft, hard-refresh, then try again.';
         } else {

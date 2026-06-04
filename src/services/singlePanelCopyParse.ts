@@ -231,7 +231,7 @@ export const SINGLE_PANEL_COPY_EXAMPLE_PROMPT = formatSinglePanelCopyExampleProm
 
 export function parseSinglePanelCopyRequest(message: string): SinglePanelCopyRequest | null {
     const text = normalizeMessageQuotes(message.trim());
-    if (!messageMentionsSinglePanelCopyIntent(text)) {
+    if (!isExplicitSinglePanelCopyRequest(text) && !messageMentionsSinglePanelCopyIntent(text)) {
         return null;
     }
 

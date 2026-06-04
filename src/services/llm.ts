@@ -46,6 +46,7 @@ import { resolvePanelForScopedFix } from './panelDiscovery';
 import { tryInterceptRenameBeforeLlm } from './renameLlmGuard';
 import { messageDescribesDashboardRename } from './dashboardRenameParse';
 import { isSimpleConversationalMessage } from './programmaticChatIntents';
+import { isExplicitSinglePanelCopyRequest } from './singlePanelCopyParse';
 
 // Re-export types for backward compatibility
 export type { ToolExecution };
@@ -330,6 +331,17 @@ export const llmService = {
             }
             onUpdate(content, toolExecutions);
         };
+
+        if (isExplicitSinglePanelCopyRequest(lastUserText)) {
+            const blocked =
+                '### Single-panel copy only\n\n' +
+                'This message copies **one panel** to another dashboard — not a full layout clone. ' +
+                'Graft should handle it without the LLM clone path.\n\n' +
+                '**What to do:** Hard-refresh (**Cmd+Shift+R**) so the chat badge shows the latest build, then send the same prompt again. ' +
+                'You should see **Done — one panel copied**, not “36 of 41 panels”.';
+            trackedUpdate(blocked, []);
+            return blocked;
+        }
 
         const renameIntercept = await tryInterceptRenameBeforeLlm(validMessages, mcpClient, trackedUpdate);
         if (renameIntercept !== null) {

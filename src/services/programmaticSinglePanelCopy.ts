@@ -53,7 +53,16 @@ function findPanelByExactTitle(
     title: string
 ): DashboardPanelEntry | undefined {
     const want = normalizeTitle(title);
-    return entries.find((e) => normalizeTitle(e.title) === want);
+    const exact = entries.find((e) => normalizeTitle(e.title) === want);
+    if (exact) {
+        return exact;
+    }
+    return entries.find(
+        (e) =>
+            normalizeTitle(e.title).includes(want) ||
+            want.includes(normalizeTitle(e.title)) ||
+            (/total\s*cu\s*mass/i.test(want) && /total\s*cu\s*mass/i.test(e.title))
+    );
 }
 
 function maxPanelId(entries: DashboardPanelEntry[]): number {
@@ -147,11 +156,24 @@ async function resolveDashboardUid(
 
     const hits = parseSearchHitsFromMcpText(search.text);
     const wantTitle = dashboardTitle ? normalizeDashboardTitle(dashboardTitle) : undefined;
+    const subtitle = wantTitle?.includes('/')
+        ? wantTitle.split('/').pop()?.trim()
+        : undefined;
     const match =
         (wantTitle ? hits.find((h) => normalizeDashboardTitle(h.title) === wantTitle) : undefined) ??
+        (wantTitle
+            ? hits.find((h) => normalizeDashboardTitle(h.title).includes(wantTitle))
+            : undefined) ??
+        (subtitle
+            ? hits.find((h) => normalizeDashboardTitle(h.title).includes(subtitle))
+            : undefined) ??
         (machineId
-            ? hits.find((h) => h.title.includes(machineId)) ??
-              hits.find((h) => h.title.toLowerCase().includes(machineId.toLowerCase()))
+            ? hits.find(
+                  (h) =>
+                      h.title.includes(machineId) &&
+                      (!subtitle || normalizeDashboardTitle(h.title).includes(subtitle))
+              ) ??
+              hits.find((h) => h.title.includes(machineId))
             : undefined) ??
         hits[0];
 

@@ -4,7 +4,10 @@ import {
     latestNonContinueUserMessage,
     userWantsDashboardPanelFix,
 } from './dashboardCloneProgress';
-import { messageMentionsSinglePanelCopyIntent } from './singlePanelCopyParse';
+import {
+    isExplicitSinglePanelCopyRequest,
+    messageMentionsSinglePanelCopyIntent,
+} from './singlePanelCopyParse';
 import { stripPanelIndexTables } from './dashboardTaskStatus';
 import {
     HARD_REFRESH_LINE,
@@ -17,10 +20,17 @@ export function userWantsPanelCreate(message: string): boolean {
     if (!text) {
         return false;
     }
-    if (messageMentionsSinglePanelCopyIntent(text) || describesDashboardCloneLayoutIntent(text)) {
+    if (
+        isExplicitSinglePanelCopyRequest(text) ||
+        messageMentionsSinglePanelCopyIntent(text) ||
+        describesDashboardCloneLayoutIntent(text)
+    ) {
         return false;
     }
-    if (/\b(visual copy|clone|copy of|new dashboard)\b/i.test(text)) {
+    if (/\b(visual copy|clone|new dashboard)\b/i.test(text)) {
+        return false;
+    }
+    if (/\bcopy of\b/i.test(text) && /\bpanel\b/i.test(text)) {
         return false;
     }
     if (userWantsDashboardPanelFix(text)) {
