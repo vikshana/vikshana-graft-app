@@ -265,6 +265,7 @@ export const ChatInterface = () => {
   const processedPromptRef = useRef<string | null>(null);
   const autoSendPromptRef = useRef<string | null>(null);
   const sendingRef = useRef(false);
+  const suppressSessionRestoreRef = useRef(false);
   const thinkingStartTimeRef = useRef<number | null>(null);
   const messagesRef = useRef<Message[]>([]);
   const currentSessionIdRef = useRef<string | undefined>();
@@ -392,30 +393,20 @@ export const ChatInterface = () => {
   messagesRef.current = messages;
   currentSessionIdRef.current = currentSessionId;
 
-  const applyRestoredSession = useCallback(
-    (restored: { sessionId: string; messages: Message[] }) => {
-      if (sendingRef.current || messagesRef.current.length > 0) {
-        return;
-      }
-      messagesRef.current = restored.messages;
-      setMessages(restored.messages);
-      setCurrentSessionId(restored.sessionId);
-      currentSessionIdRef.current = restored.sessionId;
-      setSearchParams(
-        (prev) => {
-          if (prev.get('session') === restored.sessionId && prev.get('chat') === 'true') {
-            return prev;
-          }
-          const next = new URLSearchParams(prev);
-          next.set('chat', 'true');
-          next.set('session', restored.sessionId);
-          return next;
-        },
-        { replace: true }
-      );
-    },
-    [setSearchParams]
-  );
+  const applyRestoredSession = useCallback((restored: { sessionId: string; messages: Message[] }) => {
+    if (
+      suppressSessionRestoreRef.current ||
+      sendingRef.current ||
+      messagesRef.current.length > 0
+    ) {
+      return;
+    }
+    messagesRef.current = restored.messages;
+    setMessages(restored.messages);
+    setCurrentSessionId(restored.sessionId);
+    currentSessionIdRef.current = restored.sessionId;
+    replaceChatSessionInUrl(restored.sessionId, { defer: true });
+  }, []);
 
   const persistActiveSession = useCallback(() => {
     const msgs = prepareMessagesForStorage(messagesRef.current);
@@ -452,7 +443,8 @@ export const ChatInterface = () => {
       }
       historyHydratedRef.current = true;
 
-      const sessionId = searchParams.get('session');
+      const sessionId =
+        new URLSearchParams(window.location.search).get('session') ?? searchParams.get('session');
       if (sessionId) {
         const session = chatHistoryService.getSession(sessionId);
         if (session) {
@@ -473,7 +465,8 @@ export const ChatInterface = () => {
     return () => {
       cancelled = true;
     };
-  }, [applyRestoredSession, searchParams]);
+    // Intentionally once on mount — do not re-run when searchParams change during Send.
+  }, [applyRestoredSession]);
 
   // Restore last session once when landing on the app (do not listen — URL updates on Send retrigger listen and loop).
   useEffect(() => {
@@ -529,30 +522,18 @@ export const ChatInterface = () => {
     };
   }, [persistActiveSession]);
 
-  // Sync URL when opening a session from Previous Conversations after hydration
+  // Ensure chat=true in the real URL when a session id is present (no React Router — avoids restore loops).
   useEffect(() => {
-    if (!historyHydratedRef.current) {
+    if (!historyHydratedRef.current || suppressSessionRestoreRef.current || sendingRef.current) {
       return;
     }
-    const sessionId = searchParams.get('session');
+    const sessionId =
+      new URLSearchParams(window.location.search).get('session') ?? searchParams.get('session');
     if (!sessionId) {
       return;
     }
-    if (!searchParams.get('chat')) {
-      setSearchParams(
-        (prev) => {
-          if (prev.get('chat') === 'true') {
-            return prev;
-          }
-          const next = new URLSearchParams(prev);
-          next.set('chat', 'true');
-          next.set('session', sessionId);
-          return next;
-        },
-        { replace: true }
-      );
-    }
-  }, [searchParams, setSearchParams]);
+    replaceChatSessionInUrl(sessionId);
+  }, [searchParams]);
 
   // Handle pre-filled prompt from navigation state (separate effect to avoid loop)
   useEffect(() => {
@@ -687,8 +668,9 @@ export const ChatInterface = () => {
     }
     setCurrentSessionId(draftSession.id);
     currentSessionIdRef.current = draftSession.id;
-    replaceChatSessionInUrl(draftSession.id);
+    suppressSessionRestoreRef.current = true;
     sendingRef.current = true;
+    replaceChatSessionInUrl(draftSession.id, { defer: true });
 
     try {
       // Create a placeholder message for the assistant
@@ -789,6 +771,7 @@ export const ChatInterface = () => {
             thinkingSeconds: thinkingDuration,
             toolExecutions: toolExecutions
           };
+          messagesRef.current = updated;
           return updated;
         });
       }, modelType, controller.signal, mcpClient, mcpTools);
@@ -821,7 +804,8 @@ export const ChatInterface = () => {
       const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
       if (savedSession) {
         setCurrentSessionId(savedSession.id);
-        replaceChatSessionInUrl(savedSession.id);
+        currentSessionIdRef.current = savedSession.id;
+        replaceChatSessionInUrl(savedSession.id, { defer: true });
       }
     } catch (error: any) {
       if (error.name === 'AbortError') {
@@ -857,11 +841,13 @@ export const ChatInterface = () => {
       const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
       if (savedSession) {
         setCurrentSessionId(savedSession.id);
-        replaceChatSessionInUrl(savedSession.id);
+        currentSessionIdRef.current = savedSession.id;
+        replaceChatSessionInUrl(savedSession.id, { defer: true });
       }
     } finally {
       setIsLoading(false);
       sendingRef.current = false;
+      suppressSessionRestoreRef.current = false;
       abortControllerRef.current = null;
     }
   };
