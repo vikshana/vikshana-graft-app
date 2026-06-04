@@ -264,4 +264,6 @@ export function formatInfluxPanelRepairReply(
         (result.version != null ? `- **Version:** ${result.version}\n` : '') +
         `\n**Changes:**\n${fixLines}\n\n` +
         `Hard-refresh (**Cmd+Shift+R**). Legend uses **displayName** overrides per query (A–D), so names should be **Module 5 (Actual)**, **Upper/Lower Bound (RF)**, **Expected (RF)** — not \`_value\`. ` +
-        `In Grafana: Panel → **Overrides** → Fields with name **A** → **Display n
+        `In Grafana: Panel → **Overrides** → Fields with name **A** → **Display name** if you need to verify.`
+    );
+}
