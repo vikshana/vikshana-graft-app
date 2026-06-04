@@ -11,7 +11,14 @@ import {
 type PanelRecord = Record<string, unknown>;
 type TargetRecord = Record<string, unknown>;
 
-/** Grafana Influx Flux targets expect query/expr/rawQuery as the same string — not rawQuery: true. */
+function targetHasInfluxFluxText(target: TargetRecord): boolean {
+    return /\bfrom\s*\(\s*bucket:/i.test(targetQueryText(target as PanelRecord));
+}
+
+/**
+ * Influx Flux targets must use `query` + `rawQuery: true`. Flux in `expr` only (no `query`) causes
+ * Grafana to send Flux as the PromQL `query` parameter → parse error unexpected identifier "v".
+ */
 export function normalizeInfluxFluxTarget(target: TargetRecord): TargetRecord {
     const out = { ...target };
     const q =
@@ -23,21 +30,34 @@ export function normalizeInfluxFluxTarget(target: TargetRecord): TargetRecord {
                 ? out.rawQuery
                 : undefined;
 
-    if (q) {
-        out.query = q;
-        out.rawQuery = q;
-        out.editorMode = 'code';
-        const dsType = targetDatasourceType(out as PanelRecord);
-        if (dsType.includes('influx')) {
+    if (!q) {
+        if (out.rawQuery === true && typeof out.query === 'string') {
+            out.editorMode = 'code';
             delete out.expr;
-        } else if (!out.expr || out.expr !== q) {
-            out.expr = q;
         }
-    } else if (out.rawQuery === true && typeof out.query === 'string') {
-        const text = out.query as string;
-        out.rawQuery = text;
+        return out;
+    }
+
+    const dsType = targetDatasourceType(out as PanelRecord);
+    const isInfluxFlux =
+        dsType.includes('influx') || targetHasInfluxFluxText(out) || out.rawQuery === true;
+
+    if (isInfluxFlux && targetHasInfluxFluxText({ ...out, query: q } as TargetRecord)) {
+        out.query = q;
+        out.rawQuery = true;
         out.editorMode = 'code';
         delete out.expr;
+        delete out.queryText;
+        return out;
+    }
+
+    out.query = q;
+    out.editorMode = 'code';
+    if (dsType.includes('influx')) {
+        out.rawQuery = true;
+        delete out.expr;
+    } else if (!out.expr || out.expr !== q) {
+        out.expr = q;
     }
 
     return out;
@@ -109,16 +129,26 @@ export function repairInfluxFluxPanel(
             if (copyDatasourceFromReference(target, ref.targetA)) {
                 fixes.push(`target ${String(target.refId ?? '?')}: datasource matched working Flux panel`);
             }
-            const dsType = targetDatasourceType(target);
-            const flux = targetQueryText(target);
-            if (dsType.includes('influx') && flux) {
-                target.query = flux;
-                target.rawQuery = flux;
-                delete target.expr;
-            }
         }
         if (applyPanelDatasourceFromReference(out, ref.panel, ref.targetA)) {
             fixes.push('panel datasource matched working Flux panel');
+        }
+    }
+
+    for (const target of getPanelTargetList(out)) {
+        if (!targetHasInfluxFluxText(target)) {
+            continue;
+        }
+        const beforeTarget = JSON.stringify(target);
+        const normalized = normalizeInfluxFluxTarget(target as TargetRecord);
+        Object.assign(target, normalized);
+        if (beforeTarget !== JSON.stringify(target)) {
+            fixes.push(
+                `target ${String(target.refId ?? '?')}: Flux moved to query + rawQuery:true; removed expr`
+            );
+        } else if (typeof target.expr === 'string') {
+            delete target.expr;
+            fixes.push(`target ${String(target.refId ?? '?')}: removed expr (Influx uses query only)`);
         }
     }
 

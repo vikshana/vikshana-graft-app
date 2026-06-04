@@ -69,6 +69,29 @@ export function scanPanelFluxIssues(panel: PanelRecord): PanelFluxIssue[] {
             });
         }
 
+        if (/\bfrom\s*\(\s*bucket:/i.test(query)) {
+            if (typeof target.expr === 'string' && target.expr.trim()) {
+                issues.push({
+                    refId,
+                    legend,
+                    issue:
+                        'Flux is in expr without a proper Influx target shape — move Flux to query, set rawQuery:true, delete expr (fixes unexpected identifier "v")',
+                });
+            } else if (typeof target.query !== 'string' || !target.query.trim()) {
+                issues.push({
+                    refId,
+                    legend,
+                    issue: 'missing query field for Flux — set query to the Flux script and rawQuery:true',
+                });
+            } else if (target.rawQuery !== true && typeof target.rawQuery !== 'string') {
+                issues.push({
+                    refId,
+                    legend,
+                    issue: 'Influx Flux target should set rawQuery:true (code mode)',
+                });
+            }
+        }
+
         if (/\bstdDev\b/.test(query)) {
             issues.push({ refId, legend, issue: 'uses invalid token stdDev (use stddev or manual stats)' });
         }

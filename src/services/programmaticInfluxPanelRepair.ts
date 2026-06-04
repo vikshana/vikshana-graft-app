@@ -175,7 +175,13 @@ export async function runProgrammaticInfluxPanelRepair(
     }
 
     const issues = scanPanelFluxIssues(repair.panel);
-    const promIssue = issues.find((i) => i.issue.includes('Prometheus'));
+    const blocking = issues.filter(
+        (i) =>
+            i.issue.includes('Prometheus') ||
+            i.issue.includes('expr') ||
+            i.issue.includes('missing query')
+    );
+    const promIssue = blocking[0];
     if (promIssue) {
         return {
             ok: false,
@@ -251,6 +257,7 @@ export function formatInfluxPanelRepairReply(
         `- **Panel:** ${result.panelTitle}\n` +
         (result.version != null ? `- **Version:** ${result.version}\n` : '') +
         `\n**Changes:**\n${fixLines}\n\n` +
-        `Hard-refresh (**Cmd+Shift+R**). If queries still fail, confirm datasource matches your working **vs. Peer Band** panel (not Prometheus).`
+        `Hard-refresh (**Cmd+Shift+R**). Open target **A** → Query should show Flux in **query** (code mode), **not** in Prometheus **expr**. ` +
+        `If errors remain, confirm datasource UID matches your working **vs. Peer Band** panel.`
     );
 }

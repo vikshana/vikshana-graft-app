@@ -19,8 +19,31 @@ describe('sanitizeInfluxFluxPanel', () => {
         expect(fixed.timeFrom).toBeUndefined();
         expect(fixed.timeTo).toBeUndefined();
         const a = (fixed.targets as Record<string, unknown>[])[0];
-        expect(typeof a.rawQuery).toBe('string');
-        expect(a.rawQuery).toBe(a.query);
+        expect(a.rawQuery).toBe(true);
+        expect(typeof a.query).toBe('string');
+        expect(a.expr).toBeUndefined();
+    });
+
+    it('fixes expr-only RandomForest targets (query field + rawQuery true)', () => {
+        const panel = {
+            datasource: { type: 'influxdb', uid: 'ffmk2neut49vkf' },
+            targets: [
+                {
+                    refId: 'A',
+                    datasource: { type: 'influxdb', uid: 'ffmk2neut49vkf' },
+                    editorMode: 'code',
+                    expr: 'from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)',
+                    rawQuery:
+                        'from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)',
+                },
+            ],
+        };
+        const fixed = sanitizeInfluxFluxPanel(panel);
+        const a = (fixed.targets as Record<string, unknown>[])[0];
+        expect(a.expr).toBeUndefined();
+        expect(a.rawQuery).toBe(true);
+        expect(typeof a.query).toBe('string');
+        expect(String(a.query)).toContain('from(bucket: v.bucket)');
     });
 
     it('removes expr and copies datasource from reference Flux panel', () => {

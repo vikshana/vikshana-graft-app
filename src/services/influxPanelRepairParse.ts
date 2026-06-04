@@ -25,7 +25,7 @@ export function extractPanelTitleForRepair(message: string): string | undefined 
     for (const re of patterns) {
         const m = text.match(re);
         if (m?.[1]?.trim()) {
-            return m[1].trim();
+            return m[1].trim().replace(/\.+$/, '');
         }
     }
     return extractPanelTitleFromMessage(text);
