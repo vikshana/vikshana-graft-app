@@ -30,6 +30,7 @@ import {
   appendSaveVerificationWarning,
 } from '../../../services/appendToolReferences';
 import { filterTools } from '../../../services/toolFilter';
+import { isSimpleConversationalMessage } from '../../../services/programmaticChatIntents';
 
 // Local hooks
 import { useRollingPlaceholder, usePluginSettings, useAutoScroll } from './hooks';
@@ -691,8 +692,12 @@ export const ChatInterface = () => {
         });
       }, modelType, controller.signal, mcpClient, mcpTools);
 
-      let displayContent = appendDashboardReferencesToReply(finalContent, finalToolExecutions);
-      displayContent = appendSaveVerificationWarning(displayContent, finalToolExecutions);
+      let displayContent = isSimpleConversationalMessage(content)
+        ? finalContent
+        : appendDashboardReferencesToReply(finalContent, finalToolExecutions);
+      if (!isSimpleConversationalMessage(content)) {
+        displayContent = appendSaveVerificationWarning(displayContent, finalToolExecutions);
+      }
 
       setMessages((prev) => {
         const updated = [...prev];

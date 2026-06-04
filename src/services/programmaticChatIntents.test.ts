@@ -2,6 +2,7 @@ import {
     canSendChatMessage,
     canSendWithoutLlm,
     chatInputEnabled,
+    isSimpleConversationalMessage,
     messageHasProgrammaticHandler,
 } from './programmaticChatIntents';
 
@@ -29,6 +30,13 @@ describe('programmaticChatIntents', () => {
     it('enables input when MCP is connected even if LLM is not ready', () => {
         expect(chatInputEnabled(false, true)).toBe(true);
         expect(chatInputEnabled(false, false)).toBe(false);
+    });
+
+    it('detects simple conversational messages', () => {
+        expect(isSimpleConversationalMessage('test')).toBe(true);
+        expect(isSimpleConversationalMessage('hello')).toBe(true);
+        expect(isSimpleConversationalMessage('rename dashboard')).toBe(false);
+        expect(isSimpleConversationalMessage(rename)).toBe(false);
     });
 
     it('allows send for programmatic prompts without LLM', () => {

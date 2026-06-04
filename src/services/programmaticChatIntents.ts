@@ -36,6 +36,25 @@ export function messageHasProgrammaticHandler(message: string): boolean {
     );
 }
 
+/** Casual chat (e.g. "test", "hello") — skip MCP tools and auto-continue loops. */
+export function isSimpleConversationalMessage(message: string): boolean {
+    const text = message.trim();
+    if (!text || text.length > 240) {
+        return false;
+    }
+    if (messageHasProgrammaticHandler(text)) {
+        return false;
+    }
+    if (
+        /\b(dashboard|dash\s*board|panels?|grafana|prometheus|loki|clone|copy of|fix|repair|machine|uid|metric|logql|promql)\b/i.test(
+            text
+        )
+    ) {
+        return false;
+    }
+    return true;
+}
+
 export function canSendWithoutLlm(message: string, mcpConnected: boolean): boolean {
     return mcpConnected && messageHasProgrammaticHandler(message);
 }

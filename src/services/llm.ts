@@ -45,6 +45,7 @@ import { normalizeUpdateDashboardArgs } from './updateDashboardArgs';
 import { resolvePanelForScopedFix } from './panelDiscovery';
 import { tryInterceptRenameBeforeLlm } from './renameLlmGuard';
 import { messageDescribesDashboardRename } from './dashboardRenameParse';
+import { isSimpleConversationalMessage } from './programmaticChatIntents';
 
 // Re-export types for backward compatibility
 export type { ToolExecution };
@@ -284,7 +285,12 @@ export const llmService = {
         }
 
         const model = modelType === 'thinking' ? llm.Model.LARGE : llm.Model.BASE;
-        const hasTools = Boolean(tools && tools.length > 0);
+
+        const lastUserRaw = [...validMessages].reverse().find((m) => m.role === 'user')?.content;
+        const lastUserText = typeof lastUserRaw === 'string' ? lastUserRaw.trim() : '';
+        const simpleTurn = isSimpleConversationalMessage(lastUserText);
+        const effectiveTools = simpleTurn ? undefined : tools;
+        const hasTools = Boolean(effectiveTools && effectiveTools.length > 0);
 
         let latestDisplayContent = '';
         let latestToolExecutions: ToolExecution[] = [];
@@ -313,7 +319,7 @@ export const llmService = {
                     return await llm.chatCompletions({
                         model,
                         messages: llmMessages,
-                        tools: hasTools ? tools : undefined,
+                        tools: hasTools ? effectiveTools : undefined,
                     } as any);
                 } catch (err) {
                     lastError = err;
@@ -508,6 +514,10 @@ export const llmService = {
 
             if (fullContent) {
                 trackedUpdate(fullContent, toolExecutions);
+            }
+
+            if (simpleTurn) {
+                return stripLeakedToolCallMarkup(stripRateLimitWaitNotice(fullContent));
             }
 
             let toolSteps = 0;
