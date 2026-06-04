@@ -93,6 +93,62 @@ die() {
   exit 1
 }
 
+# List commits/tags not yet on origin — review before every deploy.
+show_pending_deploy_queue() {
+  log "Pending deploy queue (review before shipping)"
+  git status -sb || true
+
+  if [[ -n "$(git status --porcelain)" ]]; then
+    echo ""
+    echo "  WARNING: Uncommitted changes (commit or stash before deploy):"
+    git status --short
+  fi
+
+  local upstream
+  upstream="$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || true)"
+  if [[ -n "${upstream}" ]]; then
+    local ahead behind
+    ahead="$(git rev-list --count "${upstream}..HEAD" 2>/dev/null || echo 0)"
+    behind="$(git rev-list --count "HEAD..${upstream}" 2>/dev/null || echo 0)"
+    if [[ "${ahead}" -gt 0 ]]; then
+      echo ""
+      echo "  Commits on this branch not pushed to ${upstream} (${ahead}):"
+      git log "${upstream}..HEAD" --oneline
+    fi
+    if [[ "${behind}" -gt 0 ]]; then
+      echo ""
+      echo "  NOTE: Branch is ${behind} commit(s) behind ${upstream} — consider git pull first."
+    fi
+  fi
+
+  local last_tag
+  last_tag="$(git describe --tags --match 'electramet-build-*' --abbrev=0 2>/dev/null || true)"
+  if [[ -n "${last_tag}" ]]; then
+    local untagged_count
+    untagged_count="$(git rev-list --count "${last_tag}..HEAD" 2>/dev/null || echo 0)"
+    if [[ "${untagged_count}" -gt 0 ]]; then
+      echo ""
+      echo "  Commits since ${last_tag} without a new electramet-build-* tag (${untagged_count}):"
+      git log "${last_tag}..HEAD" --oneline
+      echo ""
+      echo "  Suggested: git tag electramet-build-NN && git push origin HEAD --tags"
+    fi
+  fi
+
+  if [[ -f electramet-build.json && -f package.json ]]; then
+    node -e "
+      const meta = require('./electramet-build.json');
+      const pkg = require('./package.json');
+      const expected = meta.version + '.' + meta.build;
+      if (pkg.version !== expected) {
+        console.log('');
+        console.log('  WARNING: package.json version is ' + pkg.version + ', expected ' + expected);
+      }
+    " 2>/dev/null || true
+  fi
+  echo ""
+}
+
 verify_dist_build() {
   local expected="$1"
   local json_build
@@ -213,6 +269,11 @@ run_go_build() {
 cd "${REPO_ROOT}"
 
 [[ -f package.json ]] || die "package.json not found — run from vikshana-graft-app repo"
+
+show_pending_deploy_queue
+if [[ -n "$(git status --porcelain)" ]]; then
+  die "Uncommitted changes — commit or stash before deploy (see queue above)"
+fi
 
 if [[ "${DO_BUMP}" -eq 1 ]]; then
   log "Bumping deploy build number"

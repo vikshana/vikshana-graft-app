@@ -31,6 +31,16 @@ import {
 } from '../../../services/appendToolReferences';
 import { filterTools } from '../../../services/toolFilter';
 import { isSimpleConversationalMessage } from '../../../services/programmaticChatIntents';
+import { GRAFT_BUILD_NUMBER } from '../../../buildInfo';
+import {
+  formatSinglePanelCopyClarification,
+  messageMentionsSinglePanelCopyIntent,
+  parseSinglePanelCopyRequest,
+} from '../../../services/singlePanelCopyParse';
+import {
+  formatSinglePanelCopyReply,
+  runProgrammaticSinglePanelCopy,
+} from '../../../services/programmaticSinglePanelCopy';
 
 // Local hooks
 import { useRollingPlaceholder, usePluginSettings, useAutoScroll } from './hooks';
@@ -671,6 +681,69 @@ export const ChatInterface = () => {
         };
         const finalMessages = [...newMessages, finalAssistantMessage];
         const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      const panelCopyRequest = parseSinglePanelCopyRequest(content);
+      if (messageMentionsSinglePanelCopyIntent(content) && !panelCopyRequest) {
+        finalContent = formatSinglePanelCopyClarification(content);
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = { role: 'assistant', content: finalContent };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      if (panelCopyRequest) {
+        if (!mcpClient) {
+          finalContent =
+            '### Could not copy panel\n\nGrafana MCP tools are not connected. Open **Grafana LLM / MCP settings**, enable MCP for Graft, hard-refresh, then try again.';
+        } else {
+          const copyResult = await runProgrammaticSinglePanelCopy(mcpClient, panelCopyRequest);
+          finalContent = formatSinglePanelCopyReply(copyResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = copyResult.toolExecutions;
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions:
+                finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
         if (savedSession) {
           setCurrentSessionId(savedSession.id);
           currentSessionIdRef.current = savedSession.id;
