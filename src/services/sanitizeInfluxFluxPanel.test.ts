@@ -75,4 +75,25 @@ describe('sanitizeInfluxFluxPanel', () => {
         expect((fixed.targets as Record<string, unknown>[])[0].expr).toBeUndefined();
         expect(fixes.some((f) => f.includes('datasource'))).toBe(true);
     });
+
+    it('replaces set(_field) with map(_field) for Grafana legend names', () => {
+        const panel = {
+            title: 'Module 5 Current — RandomForest ML (Influx)',
+            targets: [
+                {
+                    refId: 'A',
+                    datasource: { uid: 'influx-uid' },
+                    query:
+                        'from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> set(key: "_field", value: "Module 5 (Actual)")',
+                    rawQuery: true,
+                },
+            ],
+        };
+        const { panel: fixed, fixes } = repairInfluxFluxPanel(panel);
+        const a = (fixed.targets as Record<string, unknown>[])[0];
+        expect(String(a.query)).toContain('map(fn: (r) =>');
+        expect(String(a.query)).not.toContain('set(key: "_field"');
+        expect(a.legendFormat).toBe('Module 5 (Actual)');
+        expect(fixes.some((f) => f.includes('legend label'))).toBe(true);
+    });
 });

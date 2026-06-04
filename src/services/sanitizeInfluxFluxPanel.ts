@@ -15,6 +15,76 @@ function targetHasInfluxFluxText(target: TargetRecord): boolean {
     return /\bfrom\s*\(\s*bucket:/i.test(targetQueryText(target as PanelRecord));
 }
 
+const DEFAULT_FLUX_TARGET_LABELS: Record<string, string> = {
+    A: 'Module 5 (Actual)',
+    B: 'Upper Bound (RF)',
+    C: 'Lower Bound (RF)',
+    D: 'Expected (RF)',
+};
+
+function escapeFluxString(value: string): string {
+    return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/** Grafana ignores legendFormat for Flux; map _field so legend matches field overrides. */
+function fluxMapFieldLabelLine(label: string): string {
+    const esc = escapeFluxString(label.trim());
+    return `|> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: "${esc}" }))`;
+}
+
+function extractFluxSetFieldLabel(query: string): string | undefined {
+    const m = query.match(/\|>\s*set\s*\(\s*key:\s*"_field"\s*,\s*value:\s*"([^"]+)"/i);
+    return m?.[1]?.trim();
+}
+
+/** Replace set(_field) with map(_field) so legends show names, not _value {_start=...}. */
+export function normalizeFluxSeriesLegendInTarget(target: TargetRecord): boolean {
+    const q = targetQueryText(target as PanelRecord);
+    if (!/\bfrom\s*\(\s*bucket:/i.test(q)) {
+        return false;
+    }
+
+    const refId = typeof target.refId === 'string' ? target.refId.trim() : '';
+    const label =
+        extractFluxSetFieldLabel(q) ??
+        (typeof target.legendFormat === 'string' && target.legendFormat.trim()
+            ? target.legendFormat.trim()
+            : undefined) ??
+        (refId ? DEFAULT_FLUX_TARGET_LABELS[refId] : undefined);
+
+    if (!label) {
+        return false;
+    }
+
+    const mapLine = fluxMapFieldLabelLine(label);
+    let next = q;
+    let changed = false;
+
+    if (/\|>\s*set\s*\(\s*key:\s*"_field"/i.test(next)) {
+        next = next.replace(/\|>\s*set\s*\(\s*key:\s*"_field"\s*,\s*value:\s*"[^"]+"\s*\)\s*/gi, `${mapLine}\n`);
+        changed = true;
+    } else if (!/\|>\s*map\s*\(\s*fn:\s*\(\s*r\s*\)\s*=>\s*\(\s*\{\s*_time:/i.test(next)) {
+        next = `${next.trim()}\n  ${mapLine}`;
+        changed = true;
+    }
+
+    if (changed || target.query !== next) {
+        target.query = next;
+        target.rawQuery = true;
+        target.editorMode = 'code';
+        delete target.expr;
+        target.legendFormat = label;
+        return true;
+    }
+
+    if (!target.legendFormat) {
+        target.legendFormat = label;
+        return true;
+    }
+
+    return false;
+}
+
 /**
  * Influx Flux targets must use `query` + `rawQuery: true`. Flux in `expr` only (no `query`) causes
  * Grafana to send Flux as the PromQL `query` parameter → parse error unexpected identifier "v".
@@ -140,15 +210,16 @@ export function repairInfluxFluxPanel(
             continue;
         }
         const beforeTarget = JSON.stringify(target);
-        const normalized = normalizeInfluxFluxTarget(target as TargetRecord);
-        Object.assign(target, normalized);
+        Object.assign(target, normalizeInfluxFluxTarget(target as TargetRecord));
         if (beforeTarget !== JSON.stringify(target)) {
             fixes.push(
-                `target ${String(target.refId ?? '?')}: Flux moved to query + rawQuery:true; removed expr`
+                `target ${String(target.refId ?? '?')}: query + rawQuery:true; removed expr`
             );
-        } else if (typeof target.expr === 'string') {
-            delete target.expr;
-            fixes.push(`target ${String(target.refId ?? '?')}: removed expr (Influx uses query only)`);
+        }
+        if (normalizeFluxSeriesLegendInTarget(target)) {
+            fixes.push(
+                `target ${String(target.refId ?? '?')}: legend label via map(_field) (${String(target.legendFormat)})`
+            );
         }
     }
 

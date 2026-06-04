@@ -257,7 +257,7 @@ export function formatInfluxPanelRepairReply(
         `- **Panel:** ${result.panelTitle}\n` +
         (result.version != null ? `- **Version:** ${result.version}\n` : '') +
         `\n**Changes:**\n${fixLines}\n\n` +
-        `Hard-refresh (**Cmd+Shift+R**). Open target **A** → Query should show Flux in **query** (code mode), **not** in Prometheus **expr**. ` +
-        `If errors remain, confirm datasource UID matches your working **vs. Peer Band** panel.`
+        `Hard-refresh (**Cmd+Shift+R**). Legend should read **Module 5 (Actual)**, **Upper/Lower Bound (RF)**, **Expected (RF)** — not \`_value {_start=...}\`. ` +
+        `If names are still wrong, run this same fix prompt again after confirming build **${buildNumber}** or newer.`
     );
 }
