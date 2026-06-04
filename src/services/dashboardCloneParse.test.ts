@@ -1,6 +1,8 @@
 import {
     extractSourceMachineId,
     extractTargetMachineId,
+    findMachineIdsInText,
+    isMachineId,
     parseCloneIntentMessage,
 } from './dashboardCloneParse';
 
@@ -9,6 +11,14 @@ const keysightUser =
 
 const namedUser =
     'Create a new dashboard named "2505-200033 / GlenTest" that is a visual copy of 2103-176030, with source field data from machine 2505-200033.';
+
+describe('isMachineId', () => {
+    it('accepts PowerTech machine ids and rejects ISO date prefixes', () => {
+        expect(isMachineId('2406-176021')).toBe(true);
+        expect(isMachineId('2026-05')).toBe(false);
+        expect(findMachineIdsInText('timeFrom": "2026-05-11" machine 2406-176021')).toEqual(['2406-176021']);
+    });
+});
 
 describe('extractTargetMachineId', () => {
     it('does not treat the word "from" in "machine from Keysight" as a machine id', () => {

@@ -41,6 +41,16 @@ import {
   formatSinglePanelCopyReply,
   runProgrammaticSinglePanelCopy,
 } from '../../../services/programmaticSinglePanelCopy';
+import {
+  formatPanelJsonDuplicateClarification,
+  messageMentionsPanelJsonDuplicateIntent,
+  parsePanelJsonDuplicateRequest,
+} from '../../../services/panelJsonDuplicateParse';
+import {
+  formatPanelJsonDuplicateReply,
+  runProgrammaticPanelJsonDuplicate,
+} from '../../../services/programmaticPanelJsonDuplicate';
+import { recordGraftFailure } from '../../../services/graftOperatorFailureLog';
 
 // Local hooks
 import { useRollingPlaceholder, usePluginSettings, useAutoScroll } from './hooks';
@@ -689,6 +699,79 @@ export const ChatInterface = () => {
         return;
       }
 
+      const panelJsonDuplicateRequest = parsePanelJsonDuplicateRequest(content);
+      if (messageMentionsPanelJsonDuplicateIntent(content) && !panelJsonDuplicateRequest) {
+        finalContent = formatPanelJsonDuplicateClarification();
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = { role: 'assistant', content: finalContent };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      if (panelJsonDuplicateRequest) {
+        if (!mcpClient) {
+          finalContent =
+            '### Could not add panel from JSON\n\nGrafana MCP tools are not connected. Open **Grafana LLM / MCP settings**, enable MCP for Graft, hard-refresh, then try again.';
+        } else {
+          const dupResult = await runProgrammaticPanelJsonDuplicate(mcpClient, panelJsonDuplicateRequest);
+          finalContent = formatPanelJsonDuplicateReply(dupResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = dupResult.toolExecutions;
+          if (!dupResult.ok) {
+            recordGraftFailure({
+              buildNumber: GRAFT_BUILD_NUMBER,
+              intent: 'panel_json_duplicate',
+              userMessagePreview: content,
+              error: dupResult.error ?? 'Unknown error',
+              dashboardTitle: dupResult.dashboardTitle,
+              panelTitle: dupResult.sourcePanelTitle,
+            });
+          }
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions:
+                finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
       const panelCopyRequest = parseSinglePanelCopyRequest(content);
       if (messageMentionsSinglePanelCopyIntent(content) && !panelCopyRequest) {
         finalContent = formatSinglePanelCopyClarification(content);
@@ -721,6 +804,15 @@ export const ChatInterface = () => {
           const copyResult = await runProgrammaticSinglePanelCopy(mcpClient, panelCopyRequest);
           finalContent = formatSinglePanelCopyReply(copyResult, GRAFT_BUILD_NUMBER);
           finalToolExecutions = copyResult.toolExecutions;
+          if (!copyResult.ok) {
+            recordGraftFailure({
+              buildNumber: GRAFT_BUILD_NUMBER,
+              intent: 'single_panel_copy',
+              userMessagePreview: content,
+              error: copyResult.error ?? 'Unknown error',
+              panelTitle: copyResult.panelTitle,
+            });
+          }
         }
         setMessages((prev) => {
           const updated = [...prev];

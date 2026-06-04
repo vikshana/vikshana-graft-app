@@ -1,15 +1,15 @@
-/** PowerTech-style machine id, e.g. 2103-176030 or 2505-200033 */
-export const MACHINE_ID_PATTERN = /[0-9]{4}-[0-9]+/;
+/** PowerTech-style machine id, e.g. 2103-176030 or 2505-200033 (6+ digits after hyphen — not ISO dates like 2026-05). */
+export const MACHINE_ID_PATTERN = /[0-9]{4}-[0-9]{6,}/;
 
 export function isMachineId(value: string | undefined): boolean {
-    return Boolean(value && MACHINE_ID_PATTERN.test(value) && value.match(/^([0-9]{4}-[0-9]+)$/)?.[1] === value);
+    return Boolean(value && /^[0-9]{4}-[0-9]{6,}$/.test(value));
 }
 
-/** All machine ids in message order (deduped). */
+/** All machine ids in message order (deduped). Ignores date-like YYYY-MM tokens from panel JSON. */
 export function findMachineIdsInText(message: string): string[] {
     const ids: string[] = [];
     for (const m of message.matchAll(new RegExp(MACHINE_ID_PATTERN.source, 'g'))) {
-        if (m[0]) {
+        if (m[0] && isMachineId(m[0])) {
             ids.push(m[0]);
         }
     }
