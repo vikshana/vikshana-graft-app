@@ -41,6 +41,7 @@ import {
 import { filterTools } from '../../../services/toolFilter';
 import { isSimpleConversationalMessage } from '../../../services/programmaticChatIntents';
 import { latestNonContinueUserMessage } from '../../../services/dashboardCloneProgress';
+import { extractDashboardUidFromMessage } from '../../../services/dashboardMentionParse';
 import { clearActiveCloneIntent } from '../../../services/cloneSessionStorage';
 import { GRAFT_BUILD_NUMBER } from '../../../buildInfo';
 import {
@@ -80,6 +81,15 @@ import {
   formatBulkPeerBandFixReply,
   runProgrammaticBulkPeerBandFix,
 } from '../../../services/programmaticBulkPeerBandFix';
+import {
+  formatAddPeerRfPanelExamplePrompt,
+  parseAddPeerRfPanelRequest,
+  messageMentionsAddPeerRfPanel,
+} from '../../../services/peerRfPanelAddParse';
+import {
+  formatAddPeerRfPanelReply,
+  runProgrammaticAddPeerRfPanel,
+} from '../../../services/programmaticAddPeerRfPanel';
 
 // Local hooks
 import { useRollingPlaceholder, usePluginSettings, useAutoScroll } from './hooks';
@@ -695,7 +705,8 @@ export const ChatInterface = () => {
         prior &&
         (parseSinglePanelCopyRequest(prior) ||
           isExplicitSinglePanelCopyRequest(prior) ||
-          parseBulkPeerBandFixRequest(prior))
+          parseBulkPeerBandFixRequest(prior) ||
+          parseAddPeerRfPanelRequest(prior))
       ) {
         content = prior;
       } else {
@@ -896,6 +907,71 @@ export const ChatInterface = () => {
         }
         return;
       }
+      const addPeerRfRequest = parseAddPeerRfPanelRequest(content);
+      if (messageMentionsAddPeerRfPanel(content) && !addPeerRfRequest) {
+        finalContent =
+          `### Need clarification\n\n` +
+          formatAddPeerRfPanelExamplePrompt(extractDashboardUidFromMessage(content) ?? '6gawrgawrgragg');
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = { role: 'assistant', content: finalContent };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+      if (addPeerRfRequest) {
+        errorPathTag = 'add-peer-rf-panel';
+        if (!mcpClient) {
+          finalContent =
+            '### Could not add peer-RF panel\n\nGrafana MCP tools are not connected.';
+        } else {
+          const addResult = await runProgrammaticAddPeerRfPanel(mcpClient, addPeerRfRequest);
+          finalContent = formatAddPeerRfPanelReply(addResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = addResult.toolExecutions;
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions:
+                finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
       if (bulkPeerBandRequest) {
         if (!mcpClient) {
           finalContent =

@@ -1,4 +1,5 @@
 import { userWantsBulkPeerBandFix, messageMentionsPeerBandPanelsButNotBulkFix } from './bulkPeerBandFixParse';
+import { messageMentionsAddPeerRfPanel, parseAddPeerRfPanelRequest } from './peerRfPanelAddParse';
 import { userWantsDashboardClone, userWantsDashboardPanelFix } from './dashboardCloneProgress';
 import {
     messageDescribesDashboardRename,
@@ -31,6 +32,8 @@ export function messageHasProgrammaticHandler(message: string): boolean {
         userWantsSinglePanelCopy(text) ||
         messageMentionsSinglePanelCopyIntent(text) ||
         userWantsBulkPeerBandFix(text) ||
+        parseAddPeerRfPanelRequest(text) != null ||
+        messageMentionsAddPeerRfPanel(text) ||
         messageMentionsPeerBandPanelsButNotBulkFix(text) ||
         userWantsDashboardClone(text) ||
         userWantsDashboardPanelFix(text) ||
