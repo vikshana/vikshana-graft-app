@@ -125,7 +125,13 @@ export function asksUserToChooseWithoutSave(
     if (saved) {
         return false;
     }
-    return /\b(Would you like|Which would you prefer|option 1|option 2)\b/i.test(content);
+    return (
+        /\b(Would you like|Which would you prefer|Should I also|Do you want me to|Please choose|Let me know which|option 1|option 2)\b/i.test(
+            content
+        ) ||
+        /\b(Could you please provide|I need more context|need more context|clarify what items)\b/i.test(content) ||
+        (/\b(keep them at the end|RandomForest panels)\b/i.test(content) && /\b(Should I|Would you)\b/i.test(content))
+    );
 }
 
 export function appendSaveVerificationWarning(

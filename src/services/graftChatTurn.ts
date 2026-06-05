@@ -6,6 +6,10 @@ import {
 } from './appendToolReferences';
 import { isSimpleConversationalMessage } from './programmaticChatIntents';
 import { truncateMessages } from './truncation';
+import {
+    formatPendingTaskContextBlock,
+    recordPendingTaskAfterAssistantTurn,
+} from './dashboardPendingTask';
 
 export interface GraftChatTurnResult {
     displayContent: string;
@@ -44,10 +48,11 @@ export async function runGraftChatTurn(params: GraftChatTurnParams): Promise<Gra
     let thinkingStartTime: number | null = null;
 
     const truncatedMessages = truncateMessages(conversationMessages, 10);
+    const enrichedContext = `${context}${formatPendingTaskContextBlock()}`;
 
     await llmService.chat(
         truncatedMessages,
-        context,
+        enrichedContext,
         (fullContent, toolExecutions) => {
             finalContent = fullContent;
             finalToolExecutions = toolExecutions || [];
@@ -93,6 +98,12 @@ export async function runGraftChatTurn(params: GraftChatTurnParams): Promise<Gra
             fallbackUserMessage
         );
     }
+
+    recordPendingTaskAfterAssistantTurn(
+        fallbackUserMessage,
+        finalContent,
+        finalToolExecutions
+    );
 
     return {
         displayContent,

@@ -14,6 +14,11 @@ import {
 } from './cloneSessionStorage';
 import { assessCloneTask } from './dashboardTaskStatus';
 import {
+    assistantAskedPendingQuestion,
+    buildContinuationFromPendingTask,
+    getPendingDashboardTask,
+} from './dashboardPendingTask';
+import {
     appendRateLimitWaitNotice,
     isRateLimitError,
     stripLeakedToolCallMarkup,
@@ -98,6 +103,11 @@ export function buildContinuationUserMessage(
     toolExecutions: ToolExecution[] = [],
     recentUserMessages: string[] = []
 ): string {
+    const fromPending = buildContinuationFromPendingTask('Continue');
+    if (fromPending) {
+        return fromPending;
+    }
+
     const scoped =
         parseScopedPanelFixRequest(userContent) ??
         parseScopedPanelFixRequest(
@@ -180,6 +190,14 @@ export function needsDashboardContinueNudge(
     const saved = toolExecutions.some((t) => t.name === 'update_dashboard' && t.status === 'success');
     if (saved && !assistantPromisesMorePanels(assistantContent)) {
         return false;
+    }
+
+    if (
+        getPendingDashboardTask() &&
+        assistantAskedPendingQuestion(assistantContent) &&
+        !saved
+    ) {
+        return true;
     }
 
     const planningStop =

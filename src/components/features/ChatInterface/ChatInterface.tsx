@@ -100,6 +100,11 @@ import {
   runProgrammaticModulePanelReorder,
   formatModulePanelReorderReply,
 } from '../../../services/programmaticModulePanelReorder';
+import { buildPowerTechOperatorGuide } from '../../../services/graftPowerTechGuide';
+import {
+  clearPendingDashboardTask,
+  resolveEffectiveUserMessage,
+} from '../../../services/dashboardPendingTask';
 
 // Local hooks
 import { useRollingPlaceholder, usePluginSettings, useAutoScroll } from './hooks';
@@ -267,6 +272,20 @@ const formatContext = (dashboard: DashboardContext, user: UserContext, dataSourc
   );
   lines.push(
     '- History Comparison (live): PromQL machine_metrics + last_over_time(machine_metric_*[6m]). Older ranges: Flux actual + ml_predictions in Influx; use dashboard time picker only (no panel timeFrom/timeTo).'
+  );
+
+  lines.push('');
+  lines.push(buildPowerTechOperatorGuide());
+  lines.push('');
+  lines.push('Hybrid workflow (LLM + programmatic tools):');
+  lines.push(
+    '- Repeatable layout/fixes may run without you; for novel edits you must still call get_dashboard_by_uid then update_dashboard.'
+  );
+  lines.push(
+    '- If you asked the user a yes/no or layout question and they confirm with a short reply (yes, in order, including all, Continue), execute the full original request immediately — do not ask what to order again.'
+  );
+  lines.push(
+    '- Never answer with generic "need more context" when the prior turn already listed panels and asked one confirmation question.'
   );
 
   return lines.join('\n');
@@ -708,11 +727,20 @@ export const ChatInterface = () => {
       }
     }
 
+    const lastAssistantBeforeSend =
+      [...messages].reverse().find((m) => m.role === 'assistant')?.content ?? '';
+    const priorUserMessages = messages.filter((m) => m.role === 'user').map((m) => m.content);
+
     if (/^continue\.?$/i.test(content.trim())) {
-      const priorUsers = messages.filter((m) => m.role === 'user').map((m) => m.content);
-      const prior = latestNonContinueUserMessage(priorUsers);
-      const assistantBeforeContinue = [...messages].reverse().find((m) => m.role === 'assistant')?.content;
-      if (
+      const prior = latestNonContinueUserMessage(priorUserMessages);
+      const assistantBeforeContinue = lastAssistantBeforeSend;
+      const pendingResolved = resolveEffectiveUserMessage('Continue', {
+        priorUserMessages,
+        lastAssistantMessage: assistantBeforeContinue,
+      });
+      if (pendingResolved.replaced) {
+        content = pendingResolved.effective;
+      } else if (
         prior &&
         (parseSinglePanelCopyRequest(prior) ||
           isExplicitSinglePanelCopyRequest(prior) ||
@@ -730,9 +758,21 @@ export const ChatInterface = () => {
           'Continue the previous task. Use tools immediately to finish any remaining dashboard or panel updates. ' +
           'Call get_dashboard_by_uid for the latest version, then update_dashboard. Do not repeat earlier searches unless needed.';
       }
+    } else {
+      const resolved = resolveEffectiveUserMessage(content, {
+        priorUserMessages,
+        lastAssistantMessage: lastAssistantBeforeSend,
+      });
+      if (resolved.replaced) {
+        content = resolved.effective;
+      }
     }
 
-    const userMessage: Message = { role: 'user', content, attachments: attachments.length > 0 ? attachments : undefined };
+    const userMessage: Message = {
+      role: 'user',
+      content: messageText.trim(),
+      attachments: attachments.length > 0 ? attachments : undefined,
+    };
     const newMessages = [...messages, userMessage];
 
     messagesRef.current = newMessages;
@@ -768,6 +808,11 @@ export const ChatInterface = () => {
       // Track final content for saving to history
       let finalContent = '';
       let finalToolExecutions: ToolExecution[] = [];
+      const clearPendingOnProgrammaticSuccess = (ok: boolean) => {
+        if (ok) {
+          clearPendingDashboardTask();
+        }
+      };
 
       if (isSimpleConversationalMessage(content)) {
         usedSimpleChatPath = true;
@@ -856,6 +901,7 @@ export const ChatInterface = () => {
           const copyResult = await runProgrammaticSinglePanelCopy(mcpClient, panelCopyRequest);
           finalContent = formatSinglePanelCopyReply(copyResult, GRAFT_BUILD_NUMBER);
           finalToolExecutions = copyResult.toolExecutions;
+          clearPendingOnProgrammaticSuccess(copyResult.ok);
           if (!copyResult.ok) {
             recordGraftFailure({
               buildNumber: GRAFT_BUILD_NUMBER,
@@ -896,9 +942,6 @@ export const ChatInterface = () => {
         return;
       }
 
-      const lastAssistantBeforeSend =
-        [...messages].reverse().find((m) => m.role === 'assistant')?.content ?? '';
-      const priorUserMessages = messages.filter((m) => m.role === 'user').map((m) => m.content);
       const moduleReorderRequest = parseModulePanelReorderRequest(content, {
         priorUserMessage: latestNonContinueUserMessage(priorUserMessages),
         priorAssistantMessage: lastAssistantBeforeSend,
@@ -940,6 +983,7 @@ export const ChatInterface = () => {
           const reorderResult = await runProgrammaticModulePanelReorder(mcpClient, moduleReorderRequest);
           finalContent = formatModulePanelReorderReply(reorderResult, GRAFT_BUILD_NUMBER);
           finalToolExecutions = reorderResult.toolExecutions;
+          clearPendingOnProgrammaticSuccess(reorderResult.ok);
         }
         setMessages((prev) => {
           const updated = [...prev];
@@ -1031,6 +1075,7 @@ export const ChatInterface = () => {
           const addResult = await runProgrammaticAddPeerRfPanel(mcpClient, addPeerRfRequest);
           finalContent = formatAddPeerRfPanelReply(addResult, GRAFT_BUILD_NUMBER);
           finalToolExecutions = addResult.toolExecutions;
+          clearPendingOnProgrammaticSuccess(addResult.ok);
         }
         setMessages((prev) => {
           const updated = [...prev];
@@ -1070,6 +1115,7 @@ export const ChatInterface = () => {
           const bulkResult = await runProgrammaticBulkPeerBandFix(mcpClient, bulkPeerBandRequest);
           finalContent = formatBulkPeerBandFixReply(bulkResult, GRAFT_BUILD_NUMBER);
           finalToolExecutions = bulkResult.toolExecutions;
+          clearPendingOnProgrammaticSuccess(bulkResult.ok);
           if (!bulkResult.ok) {
             recordGraftFailure({
               buildNumber: GRAFT_BUILD_NUMBER,
@@ -1115,6 +1161,7 @@ export const ChatInterface = () => {
         const repairResult = await runProgrammaticInfluxPanelRepair(mcpClient, influxPanelRepairRequest);
         finalContent = formatInfluxPanelRepairReply(repairResult, GRAFT_BUILD_NUMBER);
         finalToolExecutions = repairResult.toolExecutions;
+        clearPendingOnProgrammaticSuccess(repairResult.ok);
         if (!repairResult.ok) {
           recordGraftFailure({
             buildNumber: GRAFT_BUILD_NUMBER,
@@ -1187,6 +1234,7 @@ export const ChatInterface = () => {
           const dupResult = await runProgrammaticPanelJsonDuplicate(mcpClient, panelJsonDuplicateRequest);
           finalContent = formatPanelJsonDuplicateReply(dupResult, GRAFT_BUILD_NUMBER);
           finalToolExecutions = dupResult.toolExecutions;
+          clearPendingOnProgrammaticSuccess(dupResult.ok);
           if (!dupResult.ok) {
             recordGraftFailure({
               buildNumber: GRAFT_BUILD_NUMBER,
