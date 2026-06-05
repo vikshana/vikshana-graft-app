@@ -146,7 +146,7 @@ export function buildConfirmedIntent(task: PendingDashboardTask, userReply: stri
             : task.dashboardUid
               ? `Dashboard uid: ${task.dashboardUid}.`
               : '';
-    const assistant bit = task.assistantPrompt
+    const assistantBit = task.assistantPrompt
         ? `You previously asked: ${task.assistantPrompt.slice(0, 400)}`
         : '';
     return (
