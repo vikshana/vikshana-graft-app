@@ -256,7 +256,7 @@ const formatContext = (dashboard: DashboardContext, user: UserContext, dataSourc
     '- Putting Flux in expr/rawQuery on a Prometheus datasource causes: parse error unexpected identifier "v". Copy datasource from a working Flux panel; use query + rawQuery strings (not rawQuery: true); do not set panel timeFrom/timeTo.'
   );
   lines.push(
-    '- History Comparison (live): PromQL machine_metrics + last_over_time(machine_metric_*[6m]). Historical incident windows: Flux actual + ml_predictions in Influx.'
+    '- History Comparison (live): PromQL machine_metrics + last_over_time(machine_metric_*[6m]). Older ranges: Flux actual + ml_predictions in Influx; use dashboard time picker only (no panel timeFrom/timeTo).'
   );
 
   return lines.join('\n');

@@ -2,9 +2,10 @@
   "id": null,
   "type": "timeseries",
   "title": "Module 5 Current — History Comparison (historical / Influx)",
-  "description": "COMPARISON 1 · 30-day ML bands for dates **before Prometheus scrape** (~May 20 onward).\n\nYour live **History Comparison** panels use PromQL (`machine_metrics`, `last_over_time(machine_metric_*[6m])`). That only works while Prometheus has samples. For May 11–12 use **this panel** (or paste these four Flux queries into a copy of the History Comparison panel).\n\n| Target | Source |\n|--------|--------|\n| A Actual | Influx `r.machine` + `r._field` (not `machine_metrics` measurement) |\n| B–D ML bands | Influx `ml_predictions` from backfill (`field` tag = module name) |\n\n**Recent data (~last 35d):** keep the existing PromQL History Comparison panel.\n\n**Module N:** change `Module5_Current_A` and title in all four queries.\n\n**No ML lines?** Re-run backfill; bands are sparse (~3h steps). Actual (A) should still plot if Influx has raw data.\n\nDatasource: same Influx/Flux UID as your working peer-band panel.",
+  "description": "Legacy alias — prefer `panel-module5-randomforest-ml-influx.json` for new panels.\n\n30-day RandomForest bands for dates **before Prometheus scrape** (~35d from scrape start). Live **History Comparison** uses PromQL (`machine_metrics`, `last_over_time(machine_metric_*[6m])`); older ranges need Influx `ml_predictions` from backfill.\n\nUse the **dashboard** time picker only — do not set panel-level timeFrom/timeTo.\n\n| Target | Source |\n|--------|--------|\n| A Actual | Influx `r.machine` + `r._field` |\n| B–D ML bands | Influx `ml_predictions` (`upper`, `lower`, `expected`) |\n\nDatasource: same Influx/Flux UID as your working peer-band panel.",
   "timezone": "browser",
   "datasource": {
+    "type": "influxdb",
     "uid": "ffmk2neut49vkf"
   },
   "gridPos": {
@@ -71,10 +72,7 @@
           {
             "id": "custom.lineStyle",
             "value": {
-              "dash": [
-                6,
-                6
-              ],
+              "dash": [6, 6],
               "fill": "dash"
             }
           },
@@ -104,10 +102,7 @@
           {
             "id": "custom.lineStyle",
             "value": {
-              "dash": [
-                6,
-                6
-              ],
+              "dash": [6, 6],
               "fill": "dash"
             }
           }
@@ -129,10 +124,7 @@
           {
             "id": "custom.lineStyle",
             "value": {
-              "dash": [
-                10,
-                10
-              ],
+              "dash": [10, 10],
               "fill": "dash"
             }
           },
@@ -160,42 +152,42 @@
     {
       "refId": "A",
       "datasource": {
+        "type": "influxdb",
         "uid": "ffmk2neut49vkf"
       },
       "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) =>\n    r.machine == \"2406-176021\" and\n    r._field == \"Module5_Current_A\"\n  )\n  |> group()\n  |> keep(columns: [\"_time\", \"_value\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> set(key: \"_field\", value: \"Module 5 (Actual)\")",
-      "rawQuery": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) =>\n    r.machine == \"2406-176021\" and\n    r._field == \"Module5_Current_A\"\n  )\n  |> group()\n  |> keep(columns: [\"_time\", \"_value\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> set(key: \"_field\", value: \"Module 5 (Actual)\")",
-      "editorMode": "code",
-      "expr": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) =>\n    r.machine == \"2406-176021\" and\n    r._field == \"Module5_Current_A\"\n  )\n  |> group()\n  |> keep(columns: [\"_time\", \"_value\"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> set(key: \"_field\", value: \"Module 5 (Actual)\")"
+      "rawQuery": true,
+      "editorMode": "code"
     },
     {
       "refId": "B",
       "datasource": {
+        "type": "influxdb",
         "uid": "ffmk2neut49vkf"
       },
       "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ml_predictions\")\n  |> filter(fn: (r) => r.machine == \"2406-176021\" and r.field == \"Module5_Current_A\")\n  |> filter(fn: (r) => r._field == \"upper\")\n  |> group()\n  |> keep(columns: [\"_time\", \"_value\"])\n  |> aggregateWindow(every: 5m, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n  |> set(key: \"_field\", value: \"Upper Bound\")",
-      "rawQuery": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ml_predictions\")\n  |> filter(fn: (r) => r.machine == \"2406-176021\" and r.field == \"Module5_Current_A\")\n  |> filter(fn: (r) => r._field == \"upper\")\n  |> group()\n  |> keep(columns: [\"_time\", \"_value\"])\n  |> aggregateWindow(every: 5m, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n  |> set(key: \"_field\", value: \"Upper Bound\")",
-      "editorMode": "code",
-      "expr": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ml_predictions\")\n  |> filter(fn: (r) => r.machine == \"2406-176021\" and r.field == \"Module5_Current_A\")\n  |> filter(fn: (r) => r._field == \"upper\")\n  |> group()\n  |> keep(columns: [\"_time\", \"_value\"])\n  |> aggregateWindow(every: 5m, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n  |> set(key: \"_field\", value: \"Upper Bound\")"
+      "rawQuery": true,
+      "editorMode": "code"
     },
     {
       "refId": "C",
       "datasource": {
+        "type": "influxdb",
         "uid": "ffmk2neut49vkf"
       },
       "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ml_predictions\")\n  |> filter(fn: (r) => r.machine == \"2406-176021\" and r.field == \"Module5_Current_A\")\n  |> filter(fn: (r) => r._field == \"lower\")\n  |> group()\n  |> keep(columns: [\"_time\", \"_value\"])\n  |> aggregateWindow(every: 5m, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n  |> set(key: \"_field\", value: \"Lower Bound\")",
-      "rawQuery": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ml_predictions\")\n  |> filter(fn: (r) => r.machine == \"2406-176021\" and r.field == \"Module5_Current_A\")\n  |> filter(fn: (r) => r._field == \"lower\")\n  |> group()\n  |> keep(columns: [\"_time\", \"_value\"])\n  |> aggregateWindow(every: 5m, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n  |> set(key: \"_field\", value: \"Lower Bound\")",
-      "editorMode": "code",
-      "expr": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ml_predictions\")\n  |> filter(fn: (r) => r.machine == \"2406-176021\" and r.field == \"Module5_Current_A\")\n  |> filter(fn: (r) => r._field == \"lower\")\n  |> group()\n  |> keep(columns: [\"_time\", \"_value\"])\n  |> aggregateWindow(every: 5m, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n  |> set(key: \"_field\", value: \"Lower Bound\")"
+      "rawQuery": true,
+      "editorMode": "code"
     },
     {
       "refId": "D",
       "datasource": {
+        "type": "influxdb",
         "uid": "ffmk2neut49vkf"
       },
       "query": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ml_predictions\")\n  |> filter(fn: (r) => r.machine == \"2406-176021\" and r.field == \"Module5_Current_A\")\n  |> filter(fn: (r) => r._field == \"expected\")\n  |> group()\n  |> keep(columns: [\"_time\", \"_value\"])\n  |> aggregateWindow(every: 5m, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n  |> set(key: \"_field\", value: \"Expected (ML)\")",
-      "rawQuery": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ml_predictions\")\n  |> filter(fn: (r) => r.machine == \"2406-176021\" and r.field == \"Module5_Current_A\")\n  |> filter(fn: (r) => r._field == \"expected\")\n  |> group()\n  |> keep(columns: [\"_time\", \"_value\"])\n  |> aggregateWindow(every: 5m, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n  |> set(key: \"_field\", value: \"Expected (ML)\")",
-      "editorMode": "code",
-      "expr": "from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"ml_predictions\")\n  |> filter(fn: (r) => r.machine == \"2406-176021\" and r.field == \"Module5_Current_A\")\n  |> filter(fn: (r) => r._field == \"expected\")\n  |> group()\n  |> keep(columns: [\"_time\", \"_value\"])\n  |> aggregateWindow(every: 5m, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n  |> set(key: \"_field\", value: \"Expected (ML)\")"
+      "rawQuery": true,
+      "editorMode": "code"
     }
   ]
 }

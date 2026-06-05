@@ -15,8 +15,8 @@ describe('sanitizeInfluxFluxPanel', () => {
                 'utf8'
             )
         ) as Record<string, unknown>;
-        raw.timeFrom = '2026-05-11T19:00:00Z';
-        raw.timeTo = '2026-05-12T19:00:00Z';
+        raw.timeFrom = '2020-06-01T12:00:00Z';
+        raw.timeTo = '2020-06-02T12:00:00Z';
         const targets = raw.targets as Record<string, unknown>[];
         targets[0].rawQuery = true;
 

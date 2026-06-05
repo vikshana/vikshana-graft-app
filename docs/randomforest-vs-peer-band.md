@@ -29,21 +29,22 @@ last_over_time(machine_metric_lower_bound{machine="2406-176021", field="Module5_
 last_over_time(machine_metric_expected{machine="2406-176021", field="Module5_Current_A"}[6m])
 ```
 
-### Older dates (before Prometheus retention, e.g. May 11–12)
+### Older dates (before Prometheus retention)
 
 Import **`scripts/fixtures/panel-module5-randomforest-ml-influx.json`** (Panel JSON).
 
 - **A:** Influx actual (`r.machine` + `r._field`)
 - **B–D:** Influx `ml_predictions` from **backfill** (`upper`, `lower`, `expected`)
+- Set the range with the **dashboard time picker** only (never panel `timeFrom` / `timeTo`)
 
 Backfill must run for that range; it does **not** populate Prometheus historical TSDB.
 
-## May 11–12 incident checklist
+## Historical Influx panel checklist
 
 1. Add panel from `panel-module5-randomforest-ml-influx.json` (not the peer-band fixture).
-2. Set time range May 11 15:00 ET → May 12 15:00 ET.
-3. Confirm actual (A) in Explore.
-4. If B–D empty, re-run Python backfill so `ml_predictions` exists for `Module5_Current_A`.
+2. Set the incident or analysis window with the **dashboard** time picker.
+3. Confirm actual (A) in Explore for that range.
+4. If B–D are empty, re-run Python backfill so `ml_predictions` exists for the module field.
 
 ## Do not use for RF
 

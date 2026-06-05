@@ -58,7 +58,40 @@ function maxPanelId(entries: DashboardPanelEntry[]): number {
     return max;
 }
 
+function findModule5PeerBandPanel(entries: DashboardPanelEntry[]): DashboardPanelEntry | undefined {
+    return (
+        entries.find((e) => /Module\s*5\b/i.test(e.title) && /vs\.\s*Peer\s*Band/i.test(e.title)) ??
+        entries.find((e) => /Module\s*5\b/i.test(e.title) && /Peer\s*Band/i.test(e.title))
+    );
+}
+
+function gridPosBelowPeerBand(peerEntry: DashboardPanelEntry | undefined, panel: PanelRecord): { x: number; y: number; w: number; h: number } | null {
+    if (!peerEntry?.panel?.gridPos) {
+        return null;
+    }
+    const srcGp = panel.gridPos as { w?: number; h?: number } | undefined;
+    const defaultW = typeof srcGp?.w === 'number' ? srcGp.w : 12;
+    const defaultH = typeof srcGp?.h === 'number' ? srcGp.h : 10;
+    const gp = peerEntry.panel.gridPos as { x?: number; y?: number; w?: number; h?: number };
+    const peerW = typeof gp.w === 'number' ? gp.w : 24;
+    const peerH = typeof gp.h === 'number' ? gp.h : 12;
+    const peerY = typeof gp.y === 'number' ? gp.y : 0;
+    const peerX = typeof gp.x === 'number' ? gp.x : 0;
+    if (peerW >= 24) {
+        return { x: 0, y: peerY + peerH, w: defaultW, h: defaultH };
+    }
+    const x = peerX + peerW;
+    return { x: x >= 24 ? 0 : x, y: peerY, w: defaultW, h: defaultH };
+}
+
 function computeAppendGridPos(entries: DashboardPanelEntry[], panel: PanelRecord): { x: number; y: number; w: number; h: number } {
+    const title = typeof panel.title === 'string' ? panel.title : '';
+    if (/Module\s*5\b/i.test(title) && /RandomForest/i.test(title)) {
+        const below = gridPosBelowPeerBand(findModule5PeerBandPanel(entries), panel);
+        if (below) {
+            return below;
+        }
+    }
     const defaultW = 12;
     const defaultH = 8;
     let maxY = 0;

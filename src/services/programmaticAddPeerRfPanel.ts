@@ -101,6 +101,19 @@ function maxPanelId(entries: DashboardPanelEntry[]): number {
     return max;
 }
 
+function findModule5PeerBandPanel(entries: DashboardPanelEntry[]): DashboardPanelEntry | undefined {
+    const m5 =
+        entries.find((e) => /Module\s*5\b/i.test(e.title) && /vs\.\s*Peer\s*Band/i.test(e.title)) ??
+        entries.find((e) => /Module\s*5\b/i.test(e.title) && /Peer\s*Band/i.test(e.title));
+    if (m5) {
+        return m5;
+    }
+    return (
+        entries.find((e) => /vs\.\s*Peer\s*Band/i.test(e.title)) ??
+        entries.find((e) => /Peer\s*Band/i.test(e.title))
+    );
+}
+
 function gridPosBesidePeerBand(peerEntry: DashboardPanelEntry | undefined, entries: DashboardPanelEntry[]): {
     x: number;
     y: number;
@@ -111,11 +124,16 @@ function gridPosBesidePeerBand(peerEntry: DashboardPanelEntry | undefined, entri
     const defaultH = 10;
     if (peerEntry?.panel?.gridPos) {
         const gp = peerEntry.panel.gridPos as { x?: number; y?: number; w?: number; h?: number };
-        const w = typeof gp.w === 'number' ? gp.w : defaultW;
-        const h = typeof gp.h === 'number' ? gp.h : defaultH;
-        const x = typeof gp.x === 'number' ? gp.x + w : 0;
-        const y = typeof gp.y === 'number' ? gp.y : 0;
-        return { x: x >= 24 ? 0 : x, y, w, h };
+        const peerW = typeof gp.w === 'number' ? gp.w : 24;
+        const peerH = typeof gp.h === 'number' ? gp.h : 12;
+        const peerY = typeof gp.y === 'number' ? gp.y : 0;
+        const peerX = typeof gp.x === 'number' ? gp.x : 0;
+        // Full-width peer band → new row directly below; half-width → tile to the right.
+        if (peerW >= 24) {
+            return { x: 0, y: peerY + peerH, w: defaultW, h: defaultH };
+        }
+        const x = peerX + peerW;
+        return { x: x >= 24 ? 0 : x, y: peerY, w: defaultW, h: defaultH };
     }
     let maxY = 0;
     for (const e of entries) {
@@ -199,9 +217,7 @@ export async function runProgrammaticAddPeerRfPanel(
         };
     }
 
-    const peerRef =
-        findPanelByTitleContains(entries, 'vs. Peer Band') ??
-        findPanelByTitleContains(entries, 'Peer Band');
+    const peerRef = findModule5PeerBandPanel(entries);
 
     const template = buildPeerRfPanelTemplate(machineId);
     const sanitized = sanitizeInfluxFluxPanel(template) as PanelRecord;

@@ -16,7 +16,7 @@ describe('isMachineId', () => {
     it('accepts PowerTech machine ids and rejects ISO date prefixes', () => {
         expect(isMachineId('2406-176021')).toBe(true);
         expect(isMachineId('2026-05')).toBe(false);
-        expect(findMachineIdsInText('timeFrom": "2026-05-11" machine 2406-176021')).toEqual(['2406-176021']);
+        expect(findMachineIdsInText('timeFrom": "2026-06-15" machine 2406-176021')).toEqual(['2406-176021']);
     });
 });
 
