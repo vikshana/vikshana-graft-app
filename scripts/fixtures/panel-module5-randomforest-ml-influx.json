@@ -1,8 +1,8 @@
 {
   "id": null,
   "type": "timeseries",
-  "title": "Module 5 Current — RandomForest ML (Influx)",
-  "description": "Python RandomForest bands (30-day model), **not** peer ±2σ.\n\n| Series | Source |\n|--------|--------|\n| Actual | Influx tag `machine` + `_field` |\n| Upper / Lower / Expected | Influx `ml_predictions` written by the ML exporter **backfill** (`upper`, `lower`, `expected` fields) |\n\nUse the **dashboard** time picker only — do **not** set panel-level timeFrom/timeTo (that clips the chart to one incident window).\n\nReplace `Module5_Current_A` / title for other modules. Datasource UID = same as working Module 5 peer-band Flux panel.",
+  "title": "Module 5 Current — History Comparison (historical / Influx)",
+  "description": "Module vs **its own 30-day history** (same meaning as live **History Comparison**), for dates before Prometheus retention.\n\n| Series | Source |\n|--------|--------|\n| Actual | Influx tag `machine` + `_field` |\n| Upper / Lower / Expected | Influx `ml_predictions` from ML exporter **backfill** (`upper`, `lower`, `expected`) |\n\nNot peer ±2σ and not `model=peer_rf`. Use the **dashboard** time picker only — no panel timeFrom/timeTo.\n\nReplace `Module5_Current_A` / title for other modules. Datasource UID = same as working Module 5 peer-band Flux panel.",
   "timezone": "browser",
   "datasource": {
     "type": "influxdb",

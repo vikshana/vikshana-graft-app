@@ -12,6 +12,11 @@ import {
     MODULE_CURRENT_TITLE_RE,
     parseModuleNumberFromTitle,
 } from './modulePanelReorderParse';
+import {
+    isPeerRandomForestPanel,
+    modulePanelSortKey,
+    normalizeLegacyModulePanelTitle,
+} from './modulePanelTitles';
 
 type PanelRecord = Record<string, unknown>;
 
@@ -42,22 +47,6 @@ function finishTool(step: ToolExecution, outcome: { ok: boolean; error?: string;
     };
 }
 
-function panelSortKey(title: string): number {
-    if (/History Comparison/i.test(title)) {
-        return 0;
-    }
-    if (/vs\.\s*Peer\s*Band/i.test(title) || /\bPeer\s*Band\b/i.test(title)) {
-        return 1;
-    }
-    if (/RandomForest\s+vs\s+Peers/i.test(title)) {
-        return 3;
-    }
-    if (/RandomForest/i.test(title)) {
-        return 2;
-    }
-    return 9;
-}
-
 export function selectModuleCurrentPanels(
     entries: DashboardPanelEntry[],
     includeRandomForest: boolean
@@ -66,7 +55,7 @@ export function selectModuleCurrentPanels(
         if (!MODULE_CURRENT_TITLE_RE.test(e.title)) {
             return false;
         }
-        if (!includeRandomForest && /RandomForest/i.test(e.title)) {
+        if (!includeRandomForest && isPeerRandomForestPanel(e.title)) {
             return false;
         }
         return parseModuleNumberFromTitle(e.title) != null;
@@ -108,7 +97,7 @@ export function computeModulePanelGridPositions(
 
     for (const moduleNum of moduleOrder) {
         const group = (byModule.get(moduleNum) ?? []).sort(
-            (a, b) => panelSortKey(a.title) - panelSortKey(b.title)
+            (a, b) => modulePanelSortKey(a.title) - modulePanelSortKey(b.title)
         );
         for (const entry of group) {
             out.push({
@@ -219,7 +208,13 @@ export async function runProgrammaticModulePanelReorder(
     }
 
     for (const { entry, gridPos } of placements) {
-        (entry.panel as PanelRecord).gridPos = gridPos;
+        const panel = entry.panel as PanelRecord;
+        panel.gridPos = gridPos;
+        const normalizedTitle = normalizeLegacyModulePanelTitle(entry.title);
+        if (normalizedTitle !== entry.title) {
+            panel.title = normalizedTitle;
+            entry.title = normalizedTitle;
+        }
     }
 
     const saveStep = pendingTool('update_dashboard');

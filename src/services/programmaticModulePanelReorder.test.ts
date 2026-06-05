@@ -30,13 +30,34 @@ describe('computeModulePanelGridPositions', () => {
         expect(placements[2].gridPos.y).toBe(124);
     });
 
-    it('excludes RandomForest when requested', () => {
+    it('keeps historical history comparison when peer-RF excluded', () => {
         const entries = [
-            entry(5, 'Module 5 Current — RandomForest ML (Influx)', 300),
-            entry(5, 'Module 5 Current — vs. Peer Band', 280),
+            entry(501, 'Module 5 Current — History Comparison', 280),
+            entry(502, 'Module 5 Current — RandomForest ML (Influx)', 300),
+            entry(503, 'Module 5 Current — vs. Peer Band', 292),
+            entry(504, 'Module 5 Current — RandomForest vs Peers (Influx)', 304),
         ];
         const placements = computeModulePanelGridPositions(entries, false, 280);
-        expect(placements).toHaveLength(1);
-        expect(placements[0].entry.title).toContain('Peer Band');
+        expect(placements.map((p) => p.entry.title)).toEqual([
+            'Module 5 Current — History Comparison',
+            'Module 5 Current — RandomForest ML (Influx)',
+            'Module 5 Current — vs. Peer Band',
+        ]);
+    });
+
+    it('orders Module 5 block: live history → historical → peer band → peer-RF', () => {
+        const entries = [
+            entry(504, 'Module 5 Current — RandomForest vs Peers (Influx)', 320),
+            entry(503, 'Module 5 Current — vs. Peer Band', 308),
+            entry(502, 'Module 5 Current — RandomForest ML (Influx)', 296),
+            entry(501, 'Module 5 Current — History Comparison', 284),
+        ];
+        const placements = computeModulePanelGridPositions(entries, true, 284);
+        expect(placements.map((p) => p.entry.title)).toEqual([
+            'Module 5 Current — History Comparison',
+            'Module 5 Current — RandomForest ML (Influx)',
+            'Module 5 Current — vs. Peer Band',
+            'Module 5 Current — RandomForest vs Peers (Influx)',
+        ]);
     });
 });
