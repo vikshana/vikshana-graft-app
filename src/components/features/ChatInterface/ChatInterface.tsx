@@ -100,6 +100,15 @@ import {
   runProgrammaticModulePanelReorder,
   formatModulePanelReorderReply,
 } from '../../../services/programmaticModulePanelReorder';
+import {
+  parseBulkModulePanelMatchRequest,
+  userWantsBulkModulePanelMatch,
+  formatBulkModulePanelMatchExamplePrompt,
+} from '../../../services/bulkModulePanelMatchParse';
+import {
+  runProgrammaticBulkModulePanelMatch,
+  formatBulkModulePanelMatchReply,
+} from '../../../services/programmaticBulkModulePanelMatch';
 import { buildPowerTechOperatorGuide } from '../../../services/graftPowerTechGuide';
 import {
   clearPendingDashboardTask,
@@ -921,6 +930,72 @@ export const ChatInterface = () => {
               content: finalContent,
               toolExecutions:
                 finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      const bulkModulePanelMatchRequest = parseBulkModulePanelMatchRequest(content);
+      if (userWantsBulkModulePanelMatch(content)) {
+        errorPathTag = 'bulk-module-panel-match';
+      }
+      if (userWantsBulkModulePanelMatch(content) && !bulkModulePanelMatchRequest) {
+        finalContent =
+          `### Need clarification\n\n` +
+          `Say which dashboard and which modules should match Module 5, e.g.:\n\n\`\`\`text\n${formatBulkModulePanelMatchExamplePrompt()}\n\`\`\``;
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = { role: 'assistant', content: finalContent };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+      if (bulkModulePanelMatchRequest) {
+        if (!mcpClient) {
+          finalContent = '### Could not match Module panels\n\nGrafana MCP tools are not connected.';
+        } else {
+          const matchResult = await runProgrammaticBulkModulePanelMatch(mcpClient, bulkModulePanelMatchRequest);
+          finalContent = formatBulkModulePanelMatchReply(matchResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = matchResult.toolExecutions;
+          clearPendingOnProgrammaticSuccess(matchResult.ok);
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
             };
           }
           return updated;
