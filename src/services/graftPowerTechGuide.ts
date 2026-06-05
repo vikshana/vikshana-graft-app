@@ -11,6 +11,7 @@ export function buildPowerTechOperatorGuide(): string {
         '- Historical / incident windows: Influx Flux on the same datasource as working peer-band panels — `r.machine` + `r._field`, ML bands from `ml_predictions` (not Prometheus).',
         '- Peer ±2σ in Grafana: Flux mean/stddev across peer module currents — not the same as RandomForest.',
         '- Peer-RF bands: `ml_predictions` with tag `model=peer_rf`.',
+        '- **History Comparison (historical / Influx)** = module vs its own past (Influx backfill). Legacy title `RandomForest ML (Influx)` means the same — rename and sort it directly under live History Comparison, before Peer Band.',
         '',
         '**Flux panels**',
         '- Use Influx datasource (copy from a working Flux panel). `query` + `rawQuery` as strings; do not use `rawQuery: true` boolean or Prometheus `expr` for Flux.',
