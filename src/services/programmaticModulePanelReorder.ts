@@ -62,6 +62,26 @@ export function selectModuleCurrentPanels(
     });
 }
 
+/** First grid row for the Module N Current block — below all other dashboard panels. */
+export function computeModulePanelSectionStartY(
+    entries: DashboardPanelEntry[],
+    includeRandomForest: boolean
+): number {
+    const matched = selectModuleCurrentPanels(entries, includeRandomForest);
+    const matchedPanels = new Set(matched.map((e) => e.panel));
+    let maxBottom = 0;
+    for (const entry of entries) {
+        if (matchedPanels.has(entry.panel)) {
+            continue;
+        }
+        const gp = entry.panel.gridPos as { y?: number; h?: number } | undefined;
+        const y = typeof gp?.y === 'number' ? gp.y : 0;
+        const h = typeof gp?.h === 'number' ? gp.h : 0;
+        maxBottom = Math.max(maxBottom, y + h);
+    }
+    return maxBottom;
+}
+
 export function computeModulePanelGridPositions(
     entries: DashboardPanelEntry[],
     includeRandomForest: boolean,
@@ -72,14 +92,7 @@ export function computeModulePanelGridPositions(
         return [];
     }
 
-    let y =
-        startY ??
-        Math.min(
-            ...matched.map((e) => {
-                const gp = e.panel.gridPos as { y?: number } | undefined;
-                return typeof gp?.y === 'number' ? gp.y : 0;
-            })
-        );
+    let y = startY ?? computeModulePanelSectionStartY(entries, includeRandomForest);
 
     const byModule = new Map<number, DashboardPanelEntry[]>();
     for (const e of matched) {
@@ -280,7 +293,7 @@ export function formatModulePanelReorderReply(
         `**Panels moved:** ${result.panelsMoved} · **Modules:** ${result.moduleOrder.join(' → ')}`,
         `**Size:** ${MODULE_PANEL_GRID.w}×${MODULE_PANEL_GRID.h} grid units (full width)`,
         '',
-        'Hard-refresh the dashboard (**Cmd+Shift+R**). Scroll to the Module 1–8 section.',
+        'Hard-refresh the dashboard (**Cmd+Shift+R**). Scroll to the Module 1–8 section at the **bottom** (below Pressure/Flow).',
     ];
     if (result.panelTitles.length > 0 && result.panelTitles.length <= 20) {
         lines.push('', '**Order:**');

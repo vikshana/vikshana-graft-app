@@ -102,27 +102,31 @@ describe('sanitizeInfluxFluxPanel', () => {
         expect(fixes.some((f) => f.includes('legend label'))).toBe(true);
     });
 
-    it('replaces legacy _time map and appends keep(_field) for Grafana legend', () => {
+    it('canonicalizes legend suffix without duplicating map/keep lines', () => {
         const panel = {
-            title: 'Module 5 Current — RandomForest ML (Influx)',
+            title: 'Module 4 Current — RandomForest vs Peers (Influx)',
             targets: [
                 {
                     refId: 'A',
                     datasource: { uid: 'influx-uid' },
                     query:
-                        'from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> keep(columns: ["_time", "_value"])\n  |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: "Module 5 (Actual)" }))',
+                        'from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> keep(columns: ["_time", "_value"])\n  |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: "Module 4 (Actual)" }))\n  |> map(fn: (r) => ({ r with _field: "Module 4 (Actual)" }))\n  |> keep(columns: ["_time", "_value", "_field"])\n  |> map(fn: (r) => ({ r with _field: "Module 4 (Actual)" }))\n  |> keep(columns: ["_time", "_value", "_field"])',
                     rawQuery: true,
-                    legendFormat: 'Module 5 (Actual)',
+                    legendFormat: 'Module 4 (Actual)',
                 },
             ],
         };
         const { panel: fixed, changed, fixes } = repairInfluxFluxPanel(panel);
         expect(changed).toBe(true);
         const q = String((fixed.targets as Record<string, unknown>[])[0].query);
-        expect(q).toContain('keep(columns: ["_time", "_value", "_field"])');
+        expect((q.match(/map\(fn:/g) ?? []).length).toBe(2);
+        expect((q.match(/keep\(columns: \["_time", "_value", "_field"\]/g) ?? []).length).toBe(1);
+        expect(q).toContain('_time: r._time');
         expect(q).toContain('r with _field');
-        expect(q).not.toMatch(/_time:\s*r\._time/);
         expect(fixes.some((f) => f.includes('legend label'))).toBe(true);
+
+        const { panel: fixedAgain, changed: changedAgain } = repairInfluxFluxPanel(fixed);
+        expect(changedAgain).toBe(false);
     });
 
     it('adds byFrameRefID displayName overrides for RandomForest panels', () => {

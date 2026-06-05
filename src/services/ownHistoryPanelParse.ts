@@ -1,0 +1,147 @@
+import { extractAllDashboardUids, extractDashboardUidFromMessage } from './dashboardMentionParse';
+import { extractRequestedDashboardTitle, findMachineIdsInText } from './dashboardCloneParse';
+import { extractOnDashboardMachineTitle } from './modulePanelReorderParse';
+import { canonicalOwnHistoryTitle } from './modulePanelTitles';
+
+export interface AddOwnHistoryPanelRequest {
+    dashboardUid?: string;
+    dashboardTitle?: string;
+    machineId?: string;
+    moduleNumber: number;
+}
+
+export interface BulkOwnHistoryPanelCopyRequest {
+    dashboardUid?: string;
+    dashboardTitle?: string;
+    templateModule: number;
+    targetModules: number[];
+}
+
+function normalizeMessageQuotes(text: string): string {
+    return text.replace(/[\u201C\u201D]/g, '"').replace(/[\u2018\u2019]/g, "'");
+}
+
+export function messageMentionsOwnHistoryPanel(message: string): boolean {
+    const text = normalizeMessageQuotes(message.trim());
+    if (!text) {
+        return false;
+    }
+    return (
+        /\bown\s+history\b/i.test(text) ||
+        (/\bvs\.?\s*own\b/i.test(text) && /\b2\s*σ|2\s*sigma|std\s*dev/i.test(text)) ||
+        (/\bstatistical\b/i.test(text) && /\b2\s*σ|std\s*dev/i.test(text) && !/\bpeer\b/i.test(text))
+    );
+}
+
+export function parseAddOwnHistoryPanelRequest(message: string): AddOwnHistoryPanelRequest | null {
+    const text = normalizeMessageQuotes(message.trim());
+    if (!messageMentionsOwnHistoryPanel(text)) {
+        return null;
+    }
+    if (!/\b(add|create|new)\b/i.test(text)) {
+        return null;
+    }
+    if (/\bcopy\b/i.test(text) && /\bmodules?\s+(1|2|3|4|6|7|8)\b/i.test(text)) {
+        return null;
+    }
+    const uids = extractAllDashboardUids(text);
+    const machines = findMachineIdsInText(text);
+    const machineId = machines[0];
+    const dashboardTitle = extractRequestedDashboardTitle(text, machineId) ?? extractOnDashboardMachineTitle(text);
+    const dashboardUid = uids[0] ?? extractDashboardUidFromMessage(text);
+    let moduleNumber = 5;
+    const modMatch = text.match(/\bmodule\s*(\d+)\b/i);
+    if (modMatch?.[1]) {
+        const n = parseInt(modMatch[1], 10);
+        if (Number.isFinite(n) && n >= 1 && n <= 8) {
+            moduleNumber = n;
+        }
+    }
+    if (!dashboardUid && !dashboardTitle && !machineId) {
+        return null;
+    }
+    return { dashboardUid, dashboardTitle, machineId, moduleNumber };
+}
+
+export function userWantsBulkOwnHistoryPanelCopy(message: string): boolean {
+    const text = normalizeMessageQuotes(message.trim());
+    if (!messageMentionsOwnHistoryPanel(text)) {
+        return false;
+    }
+    return (
+        (/\b(copy|match|duplicate)\b/i.test(text) || /\bother\s+modules?\b/i.test(text)) &&
+        /\bmodule\b/i.test(text) &&
+        (/\bmodules?\s+(1|2|3|4|6|7|8)\b/i.test(text) ||
+            /\b1,\s*2,\s*3/i.test(text) ||
+            /\ball\s+modules?\b/i.test(text))
+    );
+}
+
+export function parseBulkOwnHistoryPanelCopyRequest(message: string): BulkOwnHistoryPanelCopyRequest | null {
+    const text = normalizeMessageQuotes(message.trim());
+    if (!userWantsBulkOwnHistoryPanelCopy(text)) {
+        return null;
+    }
+    const uids = extractAllDashboardUids(text);
+    const machines = findMachineIdsInText(text);
+    const dashboardUid = uids[0] ?? extractDashboardUidFromMessage(text);
+    const dashboardTitle = extractOnDashboardMachineTitle(text);
+    let templateModule = 5;
+    const templateMatch = text.match(/\b(?:from|match|like)\s+module\s*(\d+)\b/i);
+    if (templateMatch?.[1]) {
+        const n = parseInt(templateMatch[1], 10);
+        if (Number.isFinite(n)) {
+            templateModule = n;
+        }
+    }
+    let targetModules = [1, 2, 3, 4, 6, 7, 8];
+    const explicit = [...text.matchAll(/\bmodule\s*(\d+)\b/gi)]
+        .map((m) => parseInt(m[1], 10))
+        .filter((n) => Number.isFinite(n) && n >= 1 && n <= 8 && n !== templateModule);
+    if (explicit.length >= 2) {
+        targetModules = [...new Set(explicit)].sort((a, b) => a - b);
+    }
+    if (!dashboardUid && !dashboardTitle && !machines[0]) {
+        return null;
+    }
+    return { dashboardUid, dashboardTitle, templateModule, targetModules };
+}
+
+export function userWantsOwnHistoryCanonicalNaming(message: string): boolean {
+    const text = normalizeMessageQuotes(message.trim());
+    if (!messageMentionsOwnHistoryPanel(text) || /\b(add|create|new|copy)\b/i.test(text)) {
+        return false;
+    }
+    return (
+        (/\bcanonical\b/i.test(text) ||
+            /\bsuggested\s+nam/i.test(text) ||
+            /\brename\b/i.test(text) ||
+            /\buse\s+(the\s+)?suggested\s+title/i.test(text)) &&
+        /\bmodule\b/i.test(text)
+    );
+}
+
+export function parseOwnHistoryNamingRequest(
+    message: string
+): { dashboardUid?: string; dashboardTitle?: string } | null {
+    const text = normalizeMessageQuotes(message.trim());
+    if (!userWantsOwnHistoryCanonicalNaming(text)) {
+        return null;
+    }
+    const uids = extractAllDashboardUids(text);
+    const machines = findMachineIdsInText(text);
+    const dashboardUid = uids[0] ?? extractDashboardUidFromMessage(text);
+    const dashboardTitle = extractOnDashboardMachineTitle(text);
+    if (!dashboardUid && !dashboardTitle && !machines[0]) {
+        return null;
+    }
+    return { dashboardUid, dashboardTitle };
+}
+
+export function formatAddOwnHistoryPanelExamplePrompt(moduleNumber = 5): string {
+    return (
+        `On dashboard "2406-176021 / Exsolve", add panel "${canonicalOwnHistoryTitle(moduleNumber)}": ` +
+        `Module ${moduleNumber} actual vs its own historical mean ± 2σ (Influx Flux, NOT RandomForest, NOT peer modules). ` +
+        `Four targets: Actual, Historical Mean, Upper Bound (±2σ), Lower Bound (±2σ). Save.`
+    );
+}

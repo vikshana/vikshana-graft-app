@@ -109,6 +109,23 @@ import {
   runProgrammaticBulkModulePanelMatch,
   formatBulkModulePanelMatchReply,
 } from '../../../services/programmaticBulkModulePanelMatch';
+import {
+  parseAddOwnHistoryPanelRequest,
+  parseBulkOwnHistoryPanelCopyRequest,
+  parseOwnHistoryNamingRequest,
+  userWantsBulkOwnHistoryPanelCopy,
+  userWantsOwnHistoryCanonicalNaming,
+  messageMentionsOwnHistoryPanel,
+  formatAddOwnHistoryPanelExamplePrompt,
+} from '../../../services/ownHistoryPanelParse';
+import {
+  runProgrammaticAddOwnHistoryPanel,
+  runProgrammaticBulkOwnHistoryPanelCopy,
+  runProgrammaticOwnHistoryCanonicalNaming,
+  formatAddOwnHistoryPanelReply,
+  formatBulkOwnHistoryPanelReply,
+  formatOwnHistoryNamingReply,
+} from '../../../services/programmaticOwnHistoryPanel';
 import { buildPowerTechOperatorGuide } from '../../../services/graftPowerTechGuide';
 import {
   clearPendingDashboardTask,
@@ -939,6 +956,156 @@ export const ChatInterface = () => {
           content: finalContent,
           toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
         };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      const addOwnHistoryRequestEarly = parseAddOwnHistoryPanelRequest(content);
+      if (
+        addOwnHistoryRequestEarly &&
+        !userWantsBulkOwnHistoryPanelCopy(content) &&
+        !userWantsOwnHistoryCanonicalNaming(content)
+      ) {
+        errorPathTag = 'add-own-history-panel';
+        if (!mcpClient) {
+          finalContent = '### Could not add Own History panel\n\nGrafana MCP tools are not connected.';
+        } else {
+          const addResult = await runProgrammaticAddOwnHistoryPanel(mcpClient, addOwnHistoryRequestEarly);
+          finalContent = formatAddOwnHistoryPanelReply(addResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = addResult.toolExecutions;
+          clearPendingOnProgrammaticSuccess(addResult.ok);
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      const ownHistoryNamingRequest = parseOwnHistoryNamingRequest(content);
+      if (userWantsOwnHistoryCanonicalNaming(content) && ownHistoryNamingRequest && mcpClient) {
+        errorPathTag = 'own-history-naming';
+        const uid =
+          ownHistoryNamingRequest.dashboardUid ??
+          (await (async () => {
+            const addReq = parseAddOwnHistoryPanelRequest(content);
+            return addReq?.dashboardUid;
+          })()) ??
+          '6gawrgawrgragg';
+        const namingResult = await runProgrammaticOwnHistoryCanonicalNaming(mcpClient, uid);
+        finalContent = formatOwnHistoryNamingReply(namingResult, GRAFT_BUILD_NUMBER);
+        finalToolExecutions = namingResult.toolExecutions;
+        clearPendingOnProgrammaticSuccess(namingResult.ok);
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      const bulkOwnHistoryCopyRequest = parseBulkOwnHistoryPanelCopyRequest(content);
+      if (userWantsBulkOwnHistoryPanelCopy(content) && bulkOwnHistoryCopyRequest && mcpClient) {
+        errorPathTag = 'bulk-own-history-copy';
+        const copyResult = await runProgrammaticBulkOwnHistoryPanelCopy(
+          mcpClient,
+          bulkOwnHistoryCopyRequest
+        );
+        finalContent = formatBulkOwnHistoryPanelReply(copyResult, GRAFT_BUILD_NUMBER);
+        finalToolExecutions = copyResult.toolExecutions;
+        clearPendingOnProgrammaticSuccess(copyResult.ok);
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      if (messageMentionsOwnHistoryPanel(content) && /\b(add|create|new)\b/i.test(content) && !addOwnHistoryRequestEarly) {
+        finalContent =
+          `### Need clarification\n\n` + formatAddOwnHistoryPanelExamplePrompt();
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = { role: 'assistant', content: finalContent };
         const savedSession = chatHistoryService.saveSession(
           [...newMessages, finalAssistantMessage],
           currentSessionId

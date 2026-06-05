@@ -19,6 +19,15 @@ export function isPeerRandomForestPanel(title: string): boolean {
     return /RandomForest\s+vs\s+Peers/i.test(title);
 }
 
+/** Statistical own-series mean ± 2σ (not ML, not peer band). */
+export function isOwnHistoryPanel(title: string): boolean {
+    return /vs\.\s*Own\s+History/i.test(title) || /\bOwn\s+History\s*\(\s*±\s*2σ\s*\)/i.test(title);
+}
+
+export function canonicalOwnHistoryTitle(moduleNumber: number): string {
+    return `Module ${moduleNumber} Current — vs. Own History (± 2σ)`;
+}
+
 /** Rename legacy "RandomForest ML (Influx)" to operator-facing History Comparison label. */
 export function canonicalHistoricalHistoryComparisonTitle(moduleNumber: number): string {
     return `Module ${moduleNumber} Current — History Comparison (historical / Influx)`;
@@ -47,11 +56,14 @@ export function modulePanelSortKey(title: string): number {
     if (isHistoricalHistoryComparisonPanel(title)) {
         return 1;
     }
-    if (/vs\.\s*Peer\s*Band/i.test(title) || /\bPeer\s*Band\b/i.test(title)) {
+    if (isOwnHistoryPanel(title)) {
         return 2;
     }
-    if (isPeerRandomForestPanel(title)) {
+    if (/vs\.\s*Peer\s*Band/i.test(title) || /\bPeer\s*Band\b/i.test(title)) {
         return 3;
+    }
+    if (isPeerRandomForestPanel(title)) {
+        return 4;
     }
     if (/RandomForest/i.test(title)) {
         return 1;

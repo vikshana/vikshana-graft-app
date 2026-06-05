@@ -1,4 +1,7 @@
-import { computeModulePanelGridPositions } from './programmaticModulePanelReorder';
+import {
+    computeModulePanelGridPositions,
+    computeModulePanelSectionStartY,
+} from './programmaticModulePanelReorder';
 import type { DashboardPanelEntry } from './panelDiscovery';
 
 function entry(id: number, title: string, y: number): DashboardPanelEntry {
@@ -11,6 +14,15 @@ function entry(id: number, title: string, y: number): DashboardPanelEntry {
     };
 }
 
+function otherPanel(id: number, title: string, y: number, h: number): DashboardPanelEntry {
+    return {
+        panelId: id,
+        title,
+        arrayIndex: id,
+        path: [id],
+        panel: { id, title, gridPos: { x: 0, y, w: 12, h } },
+    };
+}
 describe('computeModulePanelGridPositions', () => {
     it('orders modules 1 then 2 with uniform grid', () => {
         const entries = [
@@ -59,5 +71,18 @@ describe('computeModulePanelGridPositions', () => {
             'Module 5 Current — vs. Peer Band',
             'Module 5 Current — RandomForest vs Peers (Influx)',
         ]);
+    });
+
+    it('starts module block below non-module panels when startY omitted', () => {
+        const entries = [
+            otherPanel(115, 'Pressure', 0, 6),
+            otherPanel(128, 'Overview', 27, 14),
+            entry(101, 'Module 1 Current — History Comparison', 0),
+            entry(201, 'Module 2 Current — History Comparison', 120),
+        ];
+        expect(computeModulePanelSectionStartY(entries, true)).toBe(41);
+        const placements = computeModulePanelGridPositions(entries, true);
+        expect(placements[0].gridPos).toEqual({ x: 0, y: 41, w: 24, h: 12 });
+        expect(placements[1].gridPos.y).toBe(53);
     });
 });

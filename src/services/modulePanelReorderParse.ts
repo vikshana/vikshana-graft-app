@@ -86,8 +86,9 @@ export function extractOnDashboardMachineTitle(source: string): string | undefin
 
 export function formatModulePanelReorderExamplePrompt(dashboardTitle = '2406-176021 / Exsolve'): string {
     return (
-        `On dashboard "${dashboardTitle}", rearrange all panels whose titles start with "Module N Current" ` +
-        `to Module 1 through 8 in numeric order, same panel size (full width). Include RandomForest Influx panels in module order.`
+        `On dashboard "${dashboardTitle}" (uid 6gawrgawrgragg), rearrange all panels whose titles start with "Module N Current" ` +
+        `to Module 1 through 8 in numeric order at the **bottom** of the dashboard (below Pressure, Flow, and other non-module panels), ` +
+        `same panel size (full width w=24, h=12). Include History Comparison, Own History, Peer Band, and RandomForest vs Peers panels in each module block.`
     );
 }
 

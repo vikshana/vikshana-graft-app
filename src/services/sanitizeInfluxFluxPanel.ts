@@ -7,6 +7,7 @@ import {
     targetDatasourceType,
     targetQueryText,
 } from './fluxPeerBandFix';
+import { isOwnHistoryPanel } from './modulePanelTitles';
 
 type PanelRecord = Record<string, unknown>;
 type TargetRecord = Record<string, unknown>;
@@ -26,35 +27,37 @@ function escapeFluxString(value: string): string {
     return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
-/** Grafana ignores legendFormat for Flux; collapse to _time/_value/_field so legend is not _value {tags}. */
-function fluxMapFieldLabelLine(label: string): string {
+/** Remove trailing legend map/keep lines so repair is idempotent (no duplicate _field maps). */
+export function stripFluxLegendSuffix(query: string): string {
+    let lines = query.trimEnd().split('\n');
+    while (lines.length > 0) {
+        const line = lines[lines.length - 1].trim();
+        if (
+            /^\|>\s*keep\s*\(\s*columns:\s*\[[^\]]*"_field"/i.test(line) ||
+            /^\|>\s*map\s*\(/i.test(line) ||
+            /^\|>\s*set\s*\(\s*key:\s*"_field"/i.test(line)
+        ) {
+            lines.pop();
+            continue;
+        }
+        break;
+    }
+    return lines.join('\n').trimEnd();
+}
+
+function canonicalFluxLegendSuffix(label: string): string {
     const esc = escapeFluxString(label.trim());
     return (
-        `|> map(fn: (r) => ({ r with _field: "${esc}" }))\n` +
+        `|> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: "${esc}" }))\n` +
+        `  |> map(fn: (r) => ({ r with _field: "${esc}" }))\n` +
         `  |> keep(columns: ["_time", "_value", "_field"])`
     );
 }
 
-function stripFluxLegendMapLines(query: string): string {
-    return query.replace(/\|>\s*map\s*\(\s*fn:\s*\([^)]*\)\s*=>\s*\([^)]*\)\s*\)\s*/gi, '');
-}
-
-const FLUX_FIELD_KEEP = '|> keep(columns: ["_time", "_value", "_field"])';
-
-/** Last keep() in the pipeline must retain _field or Grafana legends stay "_value". */
-function fluxQueryHasFinalFieldKeep(query: string): boolean {
-    const keeps = [...query.matchAll(/\|>\s*keep\s*\(\s*columns:\s*\[([^\]]+)\]/gi)];
-    if (keeps.length === 0) {
-        return false;
-    }
-    return /"_field"/.test(keeps[keeps.length - 1][1]);
-}
-
-function fluxQueryLabelsField(query: string): boolean {
-    return (
-        /\|>\s*set\s*\(\s*key:\s*"_field"/i.test(query) ||
-        /\|>\s*map\s*\([^)]*_field\s*:/i.test(query)
-    );
+function fluxQueryHasCanonicalLegendSuffix(query: string, label: string): boolean {
+    const base = stripFluxLegendSuffix(query);
+    const expected = `${base}\n  ${canonicalFluxLegendSuffix(label)}`;
+    return query.trimEnd() === expected.trimEnd();
 }
 
 function extractFluxMapFieldLabel(query: string): string | undefined {
@@ -67,7 +70,7 @@ function extractFluxSetFieldLabel(query: string): string | undefined {
     return m?.[1]?.trim();
 }
 
-/** Replace set(_field) with map(_field) so legends show names, not _value {_start=...}. */
+/** Normalize Flux legend pipeline so Grafana shows names, not "_value". Idempotent. */
 export function normalizeFluxSeriesLegendInTarget(target: TargetRecord): boolean {
     const q = targetQueryText(target as PanelRecord);
     if (!/\bfrom\s*\(\s*bucket:/i.test(q)) {
@@ -87,39 +90,21 @@ export function normalizeFluxSeriesLegendInTarget(target: TargetRecord): boolean
         return false;
     }
 
-    const mapLine = fluxMapFieldLabelLine(label);
-    let next = q;
-    let changed = false;
-
-    if (/\|>\s*set\s*\(\s*key:\s*"_field"/i.test(next)) {
-        next = next.replace(/\|>\s*set\s*\(\s*key:\s*"_field"\s*,\s*value:\s*"[^"]+"\s*\)\s*/gi, `${mapLine}\n`);
-        changed = true;
-    } else if (/\|>\s*map\s*\(\s*fn:\s*\(\s*r\s*\)\s*=>\s*\(\s*\{\s*_time:/i.test(next)) {
-        next = `${stripFluxLegendMapLines(next).trim()}\n  ${mapLine}`;
-        changed = true;
-    } else if (!/\|>\s*map\s*\([^)]*_field/i.test(next)) {
-        next = `${next.trim()}\n  ${mapLine}`;
-        changed = true;
-    } else if (fluxQueryLabelsField(next) && !fluxQueryHasFinalFieldKeep(next)) {
-        next = `${next.trim()}\n  ${FLUX_FIELD_KEEP}`;
-        changed = true;
+    if (fluxQueryHasCanonicalLegendSuffix(q, label)) {
+        if (!target.legendFormat) {
+            target.legendFormat = label;
+            return true;
+        }
+        return false;
     }
 
-    if (changed || target.query !== next) {
-        target.query = next;
-        target.rawQuery = true;
-        target.editorMode = 'code';
-        delete target.expr;
-        target.legendFormat = label;
-        return true;
-    }
-
-    if (!target.legendFormat) {
-        target.legendFormat = label;
-        return true;
-    }
-
-    return false;
+    const next = `${stripFluxLegendSuffix(q)}\n  ${canonicalFluxLegendSuffix(label)}`;
+    target.query = next;
+    target.rawQuery = true;
+    target.editorMode = 'code';
+    delete target.expr;
+    target.legendFormat = label;
+    return true;
 }
 
 type OverrideRecord = {
@@ -192,6 +177,9 @@ export function ensureFluxTargetLegendOverrides(panel: PanelRecord): boolean {
 export function panelNeedsFluxLegendRepair(panel: PanelRecord): boolean {
     const title = typeof panel.title === 'string' ? panel.title : '';
     if (/randomforest/i.test(title)) {
+        return true;
+    }
+    if (isOwnHistoryPanel(title)) {
         return true;
     }
     return getPanelTargetList(panel).some((t) => /\bml_predictions\b/i.test(targetQueryText(t)));
