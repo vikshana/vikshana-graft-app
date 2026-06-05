@@ -15,6 +15,11 @@ import {
     userWantsSinglePanelCopy,
 } from './singlePanelCopyParse';
 import { isPanelFixVerificationRequest } from './panelFixVerification';
+import {
+    isModuleReorderConfirmation,
+    parseModulePanelReorderRequest,
+    userWantsModulePanelReorder,
+} from './modulePanelReorderParse';
 
 /** True when Graft can handle the message via MCP without calling the LLM. */
 export function messageHasProgrammaticHandler(message: string): boolean {
@@ -32,6 +37,9 @@ export function messageHasProgrammaticHandler(message: string): boolean {
         userWantsSinglePanelCopy(text) ||
         messageMentionsSinglePanelCopyIntent(text) ||
         userWantsBulkPeerBandFix(text) ||
+        userWantsModulePanelReorder(text) ||
+        isModuleReorderConfirmation(text) ||
+        parseModulePanelReorderRequest(text) != null ||
         parseAddPeerRfPanelRequest(text) != null ||
         messageMentionsAddPeerRfPanel(text) ||
         messageMentionsPeerBandPanelsButNotBulkFix(text) ||

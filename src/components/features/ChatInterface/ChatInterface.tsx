@@ -90,6 +90,16 @@ import {
   formatAddPeerRfPanelReply,
   runProgrammaticAddPeerRfPanel,
 } from '../../../services/programmaticAddPeerRfPanel';
+import {
+  parseModulePanelReorderRequest,
+  isModuleReorderConfirmation,
+  userWantsModulePanelReorder,
+  formatModulePanelReorderExamplePrompt,
+} from '../../../services/modulePanelReorderParse';
+import {
+  runProgrammaticModulePanelReorder,
+  formatModulePanelReorderReply,
+} from '../../../services/programmaticModulePanelReorder';
 
 // Local hooks
 import { useRollingPlaceholder, usePluginSettings, useAutoScroll } from './hooks';
@@ -701,12 +711,18 @@ export const ChatInterface = () => {
     if (/^continue\.?$/i.test(content.trim())) {
       const priorUsers = messages.filter((m) => m.role === 'user').map((m) => m.content);
       const prior = latestNonContinueUserMessage(priorUsers);
+      const assistantBeforeContinue = [...messages].reverse().find((m) => m.role === 'assistant')?.content;
       if (
         prior &&
         (parseSinglePanelCopyRequest(prior) ||
           isExplicitSinglePanelCopyRequest(prior) ||
           parseBulkPeerBandFixRequest(prior) ||
-          parseAddPeerRfPanelRequest(prior))
+          parseAddPeerRfPanelRequest(prior) ||
+          userWantsModulePanelReorder(prior) ||
+          parseModulePanelReorderRequest(prior, {
+            priorUserMessage: prior,
+            priorAssistantMessage: assistantBeforeContinue,
+          }))
       ) {
         content = prior;
       } else {
@@ -859,6 +875,80 @@ export const ChatInterface = () => {
               content: finalContent,
               toolExecutions:
                 finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      const lastAssistantBeforeSend =
+        [...messages].reverse().find((m) => m.role === 'assistant')?.content ?? '';
+      const priorUserMessages = messages.filter((m) => m.role === 'user').map((m) => m.content);
+      const moduleReorderRequest = parseModulePanelReorderRequest(content, {
+        priorUserMessage: latestNonContinueUserMessage(priorUserMessages),
+        priorAssistantMessage: lastAssistantBeforeSend,
+      });
+      if (userWantsModulePanelReorder(content) || isModuleReorderConfirmation(content)) {
+        errorPathTag = 'module-panel-reorder';
+      }
+      if (
+        (userWantsModulePanelReorder(content) || isModuleReorderConfirmation(content)) &&
+        !moduleReorderRequest
+      ) {
+        finalContent =
+          `### Need clarification\n\n` +
+          `Say which dashboard to reorder (machine id or title), e.g.:\n\n\`\`\`text\n${formatModulePanelReorderExamplePrompt()}\n\`\`\``;
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = { role: 'assistant', content: finalContent };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+      if (moduleReorderRequest) {
+        if (!mcpClient) {
+          finalContent = '### Could not reorder panels\n\nGrafana MCP tools are not connected.';
+        } else {
+          const reorderResult = await runProgrammaticModulePanelReorder(mcpClient, moduleReorderRequest);
+          finalContent = formatModulePanelReorderReply(reorderResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = reorderResult.toolExecutions;
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
             };
           }
           return updated;
