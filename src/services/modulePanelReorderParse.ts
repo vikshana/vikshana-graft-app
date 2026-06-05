@@ -75,6 +75,15 @@ export function isModuleReorderConfirmation(message: string): boolean {
     );
 }
 
+/** "on dashboard 2406-176021 / Exsolve …" → title stops at first word after slash (not the rest of the sentence). */
+export function extractOnDashboardMachineTitle(source: string): string | undefined {
+    const m = source.match(/\bon\s+dashboard\s+([0-9]{4}-[0-9]+)\s*\/\s*([A-Za-z][\w-]*)/i);
+    if (!m?.[1] || !m[2]) {
+        return undefined;
+    }
+    return `${m[1]} / ${m[2]}`;
+}
+
 export function formatModulePanelReorderExamplePrompt(dashboardTitle = '2406-176021 / Exsolve'): string {
     return (
         `On dashboard "${dashboardTitle}", rearrange all panels whose titles start with "Module N Current" ` +
@@ -114,19 +123,17 @@ export function parseModulePanelReorderRequest(
     const machines = findMachineIdsInText(source);
     const machineId = machines[0];
     const dashboardUid = uids[0] ?? extractDashboardUidFromMessage(source);
-    let dashboardTitle = extractRequestedDashboardTitle(source, machineId);
+    let dashboardTitle =
+        extractOnDashboardMachineTitle(source) ?? extractRequestedDashboardTitle(source, machineId);
     if (!dashboardTitle && machineId) {
         const slash = source.match(
-            new RegExp(`\\b${machineId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\/\\s*[^.,\\n"]+`, 'i')
+            new RegExp(
+                `\\b${machineId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\/\\s*([A-Za-z][\\w-]*)`,
+                'i'
+            )
         );
-        if (slash?.[0]) {
-            dashboardTitle = slash[0].trim();
-        }
-    }
-    if (!dashboardTitle && /\bon\s+dashboard\s+([0-9]{4}-[0-9]+)\s*\/\s*(\S+)/i.test(source)) {
-        const m = source.match(/\bon\s+dashboard\s+([0-9]{4}-[0-9]+)\s*\/\s*(\S+)/i);
-        if (m) {
-            dashboardTitle = `${m[1]} / ${m[2]}`;
+        if (slash?.[1] && slash[2]) {
+            dashboardTitle = `${slash[1]} / ${slash[2]}`;
         }
     }
 

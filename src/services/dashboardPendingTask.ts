@@ -1,5 +1,6 @@
 import { extractDashboardUidFromMessage } from './dashboardMentionParse';
 import { extractRequestedDashboardTitle, findMachineIdsInText } from './dashboardCloneParse';
+import { extractOnDashboardMachineTitle } from './modulePanelReorderParse';
 import {
     latestNonContinueUserMessage,
     userWantsDashboardClone,
@@ -83,19 +84,18 @@ export function inferDashboardIdentity(message: string): {
 } {
     const machines = findMachineIdsInText(message);
     const uid = extractDashboardUidFromMessage(message);
-    let dashboardTitle = extractRequestedDashboardTitle(message, machines[0]);
+    let dashboardTitle =
+        extractOnDashboardMachineTitle(message) ??
+        extractRequestedDashboardTitle(message, machines[0]);
     if (!dashboardTitle && machines[0]) {
         const slash = message.match(
-            new RegExp(`\\b${machines[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\/\\s*[^.,\\n"]+`, 'i')
+            new RegExp(
+                `\\b${machines[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\/\\s*([A-Za-z][\\w-]*)`,
+                'i'
+            )
         );
-        if (slash?.[0]) {
-            dashboardTitle = slash[0].trim();
-        }
-    }
-    if (!dashboardTitle) {
-        const onDash = message.match(/\bon\s+dashboard\s+([0-9]{4}-[0-9]+\s*\/\s*\S+)/i);
-        if (onDash?.[1]) {
-            dashboardTitle = onDash[1].trim();
+        if (slash?.[1] && slash[2]) {
+            dashboardTitle = `${slash[1]} / ${slash[2]}`;
         }
     }
     return { dashboardUid: uid, dashboardTitle };

@@ -12,7 +12,7 @@ describe('modulePanelReorderParse', () => {
             'on dashboard 2406-176021 / Exsolve can re arrange the panels starting "Module" + number + "Current" to ordered by number and the same size';
         expect(userWantsModulePanelReorder(msg)).toBe(true);
         const req = parseModulePanelReorderRequest(msg);
-        expect(req?.dashboardTitle).toContain('2406-176021');
+        expect(req?.dashboardTitle).toBe('2406-176021 / Exsolve');
         expect(req?.includeRandomForest).toBe(true);
     });
 
