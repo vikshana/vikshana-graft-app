@@ -1,8 +1,11 @@
-import { parseJsonFromMcpText } from './mcpToolClient';
-import { callMcpTool } from './mcpToolClient';
+import type { ToolExecution } from '../types/llm.types';
 import type { McpClient } from './dashboardChunkedUpdate';
 import { listDashboardPanels, type DashboardPanelEntry } from './panelDiscovery';
 import { inferMachineIdFromDashboardTitle } from './programmaticDashboardResolve';
+import {
+    discoverPrometheusMetricNamesForMachine,
+    resolvePrometheusDatasourceUid,
+} from './prometheusDiscovery';
 
 export interface DiscoveredMetric {
     key: string;
@@ -22,28 +25,6 @@ function humanizeMetricName(name: string): string {
         .replace(/\bC\b$/, ' °C')
         .replace(/\s+/g, ' ')
         .trim();
-}
-
-function parseStringListFromMcpText(text: string): string[] {
-    const parsed = parseJsonFromMcpText(text);
-    if (Array.isArray(parsed)) {
-        return parsed.filter((x): x is string => typeof x === 'string');
-    }
-    const jsonArray = text.match(/\[[\s\S]*\]/);
-    if (jsonArray) {
-        try {
-            const arr = JSON.parse(jsonArray[0]) as unknown;
-            if (Array.isArray(arr)) {
-                return arr.filter((x): x is string => typeof x === 'string');
-            }
-        } catch {
-            /* ignore */
-        }
-    }
-    return text
-        .split('\n')
-        .map((l) => l.trim().replace(/^["']|["'],?$/g, ''))
-        .filter((l) => l.length > 0 && !l.startsWith('{'));
 }
 
 function extractPrometheusDatasource(panel: Record<string, unknown>): { uid?: string; type: string } {
@@ -122,7 +103,10 @@ export function extractMetricsFromPanels(
             const expr = typeof target.expr === 'string' ? target.expr : '';
             if (expr) {
                 const direct = expr.match(
-                    new RegExp(`([a-zA-Z_:][a-zA-Z0-9_:]*)\\{[^}]*machine="${machineId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`, 'i')
+                    new RegExp(
+                        `([a-zA-Z_:][a-zA-Z0-9_:]*)\\{[^}]*(?:machine|topic)="${escapeRegex(machineId)}"`,
+                        'i'
+                    )
                 );
                 if (direct?.[1] && !SKIP_METRIC_RE.test(direct[1])) {
                     const key = `prom:${direct[1]}`;
@@ -155,14 +139,20 @@ export function extractMetricsFromPanels(
 
             const query = typeof target.query === 'string' ? target.query : '';
             const fluxField = query.match(/r\._field\s*==\s*"([^"]+)"/)?.[1];
-            if (fluxField && query.includes(`r.machine == "${machineId}"`)) {
+            if (fluxField && !SKIP_METRIC_RE.test(fluxField)) {
+                const usesMachine =
+                    query.includes(`r.machine == "${machineId}"`) ||
+                    query.includes(`r.machine == \"${machineId}\"`);
                 const key = `flux:${fluxField}`;
                 if (!seen.has(key)) {
                     seen.add(key);
+                    const fluxFilter = usesMachine
+                        ? `r.machine == "${machineId}" and r._field == "${fluxField}"`
+                        : `r._field == "${fluxField}"`;
                     out.push({
                         key,
                         title: humanizeMetricName(fluxField),
-                        expr: query,
+                        expr: `from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => ${fluxFilter})\n  |> last()`,
                         datasourceType: 'influx',
                         datasourceUid: ds.uid,
                     });
@@ -172,6 +162,10 @@ export function extractMetricsFromPanels(
     }
 
     return out;
+}
+
+function escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function shouldSkipPrometheusMetric(name: string): boolean {
@@ -187,28 +181,17 @@ function shouldSkipPrometheusMetric(name: string): boolean {
 export async function discoverPrometheusMetricsForMachine(
     mcpClient: McpClient,
     machineId: string,
-    datasourceUid?: string
+    datasourceUid?: string,
+    toolExecutions?: ToolExecution[]
 ): Promise<string[]> {
-    const matchers = [`{machine="${machineId}"}`];
-    const argVariants: Record<string, unknown>[] = [
-        { datasourceUid, labelName: '__name__', labelMatchers: matchers },
-        { datasourceUid, labelName: '__name__', matches: matchers },
-        { datasourceUid, labelName: '__name__', match: matchers[0] },
-        { labelName: '__name__', labelMatchers: matchers },
-    ];
-
-    for (const args of argVariants) {
-        const cleaned = Object.fromEntries(Object.entries(args).filter(([, v]) => v != null));
-        const result = await callMcpTool(mcpClient, 'list_prometheus_label_values', cleaned);
-        if (!result.ok) {
-            continue;
-        }
-        const names = parseStringListFromMcpText(result.text).filter((n) => !shouldSkipPrometheusMetric(n));
-        if (names.length > 0) {
-            return [...new Set(names)].sort((a, b) => a.localeCompare(b));
-        }
+    const uid =
+        datasourceUid ??
+        (await resolvePrometheusDatasourceUid(mcpClient, [], toolExecutions));
+    if (!uid) {
+        return [];
     }
-    return [];
+    const names = await discoverPrometheusMetricNamesForMachine(mcpClient, machineId, uid, 500);
+    return names.filter((n) => !shouldSkipPrometheusMetric(n));
 }
 
 export async function discoverInstrumentationMetrics(
@@ -219,17 +202,31 @@ export async function discoverInstrumentationMetrics(
         machineId?: string;
         prometheusDatasourceUid?: string;
         maxMetrics?: number;
+        toolExecutions?: ToolExecution[];
     }
-): Promise<{ metrics: DiscoveredMetric[]; machineId: string; prometheusNames: number }> {
+): Promise<{
+    metrics: DiscoveredMetric[];
+    machineId: string;
+    prometheusNames: number;
+    prometheusDatasourceUid?: string;
+    discoveryError?: string;
+}> {
     const machineId =
         opts.machineId ?? inferMachineIdFromDashboardTitle(opts.dashboardTitle) ?? '2505-200033';
 
+    const promUid =
+        opts.prometheusDatasourceUid ??
+        (await resolvePrometheusDatasourceUid(mcpClient, opts.panels, opts.toolExecutions));
+
     const fromPanels = extractMetricsFromPanels(opts.panels, machineId);
-    const promNames = await discoverPrometheusMetricsForMachine(
-        mcpClient,
-        machineId,
-        opts.prometheusDatasourceUid
-    );
+    const promNames = promUid
+        ? await discoverPrometheusMetricsForMachine(
+              mcpClient,
+              machineId,
+              promUid,
+              opts.toolExecutions
+          )
+        : [];
 
     const merged = new Map<string, DiscoveredMetric>();
     for (const m of fromPanels) {
@@ -243,7 +240,7 @@ export async function discoverInstrumentationMetrics(
                 title: humanizeMetricName(name),
                 expr: `${name}{machine="${machineId}"}`,
                 datasourceType: 'prometheus',
-                datasourceUid: opts.prometheusDatasourceUid,
+                datasourceUid: promUid,
             });
         }
     }
@@ -253,7 +250,24 @@ export async function discoverInstrumentationMetrics(
         metrics = metrics.slice(0, opts.maxMetrics);
     }
 
-    return { metrics, machineId, prometheusNames: promNames.length };
+    let discoveryError: string | undefined;
+    if (metrics.length === 0) {
+        if (!promUid) {
+            discoveryError =
+                'No Prometheus datasource UID found (check dashboard panels or Grafana datasources).';
+        } else if (promNames.length === 0 && fromPanels.length === 0) {
+            discoveryError =
+                `No metrics discovered for machine **${machineId}** via Prometheus (\`list_prometheus_label_values\` / instant query).`;
+        }
+    }
+
+    return {
+        metrics,
+        machineId,
+        prometheusNames: promNames.length,
+        prometheusDatasourceUid: promUid,
+        discoveryError,
+    };
 }
 
 export function findPrometheusTemplatePanel(entries: DashboardPanelEntry[]): DashboardPanelEntry | undefined {

@@ -55,11 +55,9 @@ function normalizeExpr(expr: string): string {
 
 function panelAlreadyShowsMetric(entries: DashboardPanelEntry[], metric: DiscoveredMetric): boolean {
     const want = normalizeExpr(metric.expr);
+    const metricName = metric.key.replace(/^(prom|flux|field):/, '');
+
     for (const entry of entries) {
-        const title = entry.title.toLowerCase();
-        if (title && metric.title.toLowerCase().includes(title.replace(/\s+/g, ''))) {
-            return true;
-        }
         const targets = entry.panel.targets;
         if (!Array.isArray(targets)) {
             continue;
@@ -70,15 +68,67 @@ function panelAlreadyShowsMetric(entries: DashboardPanelEntry[], metric: Discove
             }
             const target = t as Record<string, unknown>;
             const expr = typeof target.expr === 'string' ? normalizeExpr(target.expr) : '';
-            if (expr && (expr === want || expr.includes(metric.key.replace(/^prom:/, '')))) {
+            const query = typeof target.query === 'string' ? normalizeExpr(target.query) : '';
+            if (expr && expr === want) {
                 return true;
+            }
+            if (query && query === want) {
+                return true;
+            }
+            if (metric.datasourceType === 'prometheus' && expr) {
+                if (new RegExp(`\\b${metricName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(expr)) {
+                    return true;
+                }
+            }
+            if (metric.datasourceType === 'influx' && query) {
+                if (query.includes(`r._field == "${metricName}"`)) {
+                    return true;
+                }
             }
         }
     }
     return false;
 }
 
-function buildStatPanel(
+function buildMetricPanel(
+    id: number,
+    metric: DiscoveredMetric,
+    template: PanelRecord | undefined,
+    gridPos: { x: number; y: number; w: number; h: number }
+): PanelRecord {
+    if (metric.datasourceType === 'influx') {
+        const dsUid = metric.datasourceUid ?? (template?.datasource as { uid?: string } | undefined)?.uid;
+        const datasource = dsUid ? { type: 'influxdb', uid: dsUid } : { type: 'influxdb' };
+        return {
+            id,
+            type: 'stat',
+            title: metric.title,
+            gridPos,
+            datasource,
+            fieldConfig: {
+                defaults: {
+                    color: { mode: 'thresholds' },
+                    unit: inferUnitForMetric(metric.title),
+                    thresholds: { mode: 'absolute', steps: [{ color: 'green', value: null }] },
+                },
+                overrides: [],
+            },
+            options: { reduceOptions: { values: false, calcs: ['lastNotNull'] } },
+            targets: [
+                {
+                    refId: 'A',
+                    datasource,
+                    query: metric.expr,
+                    rawQuery: true,
+                },
+            ],
+        };
+    }
+
+    return buildPrometheusStatPanel(id, metric, template, gridPos);
+}
+
+function buildPrometheusStatPanel(
     id: number,
     metric: DiscoveredMetric,
     template: PanelRecord | undefined,
@@ -169,34 +219,20 @@ export async function runProgrammaticDashboardMetricPanels(
     const templateEntry = findPrometheusTemplatePanel(entries);
     const template = templateEntry?.panel;
 
-    let promDsUid: string | undefined;
-    if (template?.datasource && typeof template.datasource === 'object') {
-        promDsUid = (template.datasource as { uid?: string }).uid;
-    }
-    if (!promDsUid && Array.isArray(template?.targets)) {
-        for (const t of template.targets as Record<string, unknown>[]) {
-            const ds = t.datasource;
-            if (ds && typeof ds === 'object' && typeof (ds as { uid?: string }).uid === 'string') {
-                promDsUid = (ds as { uid: string }).uid;
-                break;
-            }
-        }
-    }
-
     const discovery = await discoverInstrumentationMetrics(mcpClient, {
         panels: topLevel,
         dashboardTitle,
         machineId: request.machineId,
-        prometheusDatasourceUid: promDsUid,
         maxMetrics: request.maxPanels ?? 50,
+        toolExecutions,
     });
 
     if (discovery.metrics.length === 0) {
         return {
             ok: false,
             error:
-                `No Prometheus metrics found for machine **${discovery.machineId}**. ` +
-                `Check that metrics exist with \`machine="${discovery.machineId}"\` label.`,
+                discovery.discoveryError ??
+                `No metrics discovered for machine **${discovery.machineId}** on dashboard \`${resolved.uid}\`.`,
             toolExecutions,
             dashboardUid: resolved.uid,
             dashboardTitle,
@@ -213,14 +249,7 @@ export async function runProgrammaticDashboardMetricPanels(
             skipped++;
             continue;
         }
-        newPanels.push(
-            buildStatPanel(
-                nextId++,
-                metric,
-                template,
-                { x: 0, y: 0, w: 4, h: 6 }
-            )
-        );
+        newPanels.push(buildMetricPanel(nextId++, metric, template, { x: 0, y: 0, w: 4, h: 6 }));
     }
 
     if (newPanels.length === 0) {
@@ -294,10 +323,11 @@ export function formatDashboardMetricPanelsReply(
     }
     if ((result.panelsAdded ?? 0) === 0) {
         return (
-            `### Metric panels — already covered (build ${buildNumber})\n\n` +
+            `### Metric panels — no new panels (build ${buildNumber})\n\n` +
             `- Dashboard: \`${result.dashboardUid}\`\n` +
             `- Machine: **${result.machineId ?? '?'}**\n` +
-            `- Discovered **${result.metricsDiscovered ?? 0}** metric(s); all already have panels (${result.panelsSkipped ?? 0} skipped).\n\n` +
+            `- Discovered **${result.metricsDiscovered ?? 0}** metric(s); existing panels already cover them (${result.panelsSkipped ?? 0} skipped).\n` +
+            `- If you expected more metrics, verify Prometheus has series with \`machine="${result.machineId ?? '2505-200033'}"\`.\n\n` +
             `Hard-refresh the dashboard (**Cmd+Shift+R**).`
         );
     }
@@ -305,7 +335,7 @@ export function formatDashboardMetricPanelsReply(
         `### Metric panels — saved (build ${buildNumber})\n\n` +
         `- Dashboard: \`${result.dashboardUid}\` · version **${result.version ?? '?'}**\n` +
         `- Machine: **${result.machineId ?? '?'}**\n` +
-        `- Discovered **${result.metricsDiscovered ?? 0}** Prometheus metric(s)\n` +
+        `- Discovered **${result.metricsDiscovered ?? 0}** metric(s) from Prometheus/panel queries\n` +
         `- Added **${result.panelsAdded ?? 0}** stat panel(s)` +
         `${result.panelsSkipped ? ` (${result.panelsSkipped} already present)` : ''}\n` +
         `- Layout: title row → KPI stat grid → trends/overview (PowerTech instrumentation)\n\n` +

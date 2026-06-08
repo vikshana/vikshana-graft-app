@@ -1,6 +1,6 @@
 {
   "name": "graft",
-  "version": "0.1.2-electramet.146",
+  "version": "0.1.2-electramet.147",
   "scripts": {
     "bump:deploy": "node scripts/bump-deploy.mjs",
     "deploy": "bash scripts/deploy-electramet.sh",

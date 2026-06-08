@@ -180,16 +180,16 @@ export async function tryProgrammaticFallbackAfterLlm(
             return null;
         }
         const result = await runProgrammaticDashboardMetricPanels(mcpClient, request);
-        if (!result.ok) {
-            return null;
-        }
         return {
             applied: true,
             kind: plan.kind,
             reason: plan.reason,
             content:
-                `### Programmatic repair — ${plan.kind} (build ${buildNumber})\n\n` +
-                `_${plan.reason}_\n\n` +
+                (result.ok
+                    ? `### Programmatic repair — ${plan.kind} (build ${buildNumber})\n\n` +
+                      `_${plan.reason}_\n\n`
+                    : `### Programmatic repair attempted — ${plan.kind} (build ${buildNumber})\n\n` +
+                      `_${plan.reason}_\n\n`) +
                 formatDashboardMetricPanelsReply(result, buildNumber).replace(/^###[^\n]+\n\n/, ''),
             toolExecutions: [...ctx.toolExecutions, ...result.toolExecutions],
         };
