@@ -57,6 +57,26 @@ describe('instrumentationMetricDiscovery', () => {
         expect(metrics.map((m) => m.key)).toEqual(['prom:Pressure1_psi', 'prom:Temperature_C']);
         expect(metrics[0].expr).toBe('Pressure1_psi{machine="2505-200033"}');
     });
+
+    it('extracts machine_metrics field from panel expr', () => {
+        const panels = [
+            {
+                id: 12,
+                type: 'timeseries',
+                title: 'Flow 1',
+                datasource: { type: 'prometheus', uid: 'prom-1' },
+                targets: [
+                    {
+                        refId: 'A',
+                        expr: 'machine_metrics{machine="2505-200033", field="Flow1_gpm"}',
+                    },
+                ],
+            },
+        ];
+        const metrics = extractMetricsFromPanels(panels, '2505-200033');
+        expect(metrics.map((m) => m.key)).toEqual(['field:Flow1_gpm']);
+        expect(metrics[0].expr).toBe('machine_metrics{machine="2505-200033", field="Flow1_gpm"}');
+    });
 });
 
 describe('programmaticDashboardResolve', () => {

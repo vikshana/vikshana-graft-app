@@ -29,6 +29,9 @@ export interface DashboardMetricPanelsResult {
     panelsAdded?: number;
     panelsSkipped?: number;
     machineId?: string;
+    prometheusNames?: number;
+    prometheusFields?: number;
+    prometheusDatasourceUid?: string;
 }
 
 function pendingTool(name: string): ToolExecution {
@@ -58,6 +61,7 @@ function panelAlreadyShowsMetric(entries: DashboardPanelEntry[], metric: Discove
     const metricName = metric.key.replace(/^(prom|flux|field):/, '');
 
     for (const entry of entries) {
+        const panelType = String(entry.panel.type ?? '');
         const targets = entry.panel.targets;
         if (!Array.isArray(targets)) {
             continue;
@@ -74,6 +78,9 @@ function panelAlreadyShowsMetric(entries: DashboardPanelEntry[], metric: Discove
             }
             if (query && query === want) {
                 return true;
+            }
+            if (panelType !== 'stat' && panelType !== 'gauge') {
+                continue;
             }
             if (metric.datasourceType === 'prometheus' && expr) {
                 if (new RegExp(`\\b${metricName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(expr)) {
@@ -262,6 +269,9 @@ export async function runProgrammaticDashboardMetricPanels(
             panelsAdded: 0,
             panelsSkipped: skipped,
             machineId: discovery.machineId,
+            prometheusNames: discovery.prometheusNames,
+            prometheusFields: discovery.prometheusFields,
+            prometheusDatasourceUid: discovery.prometheusDatasourceUid,
             error: undefined,
         };
     }
@@ -307,7 +317,26 @@ export async function runProgrammaticDashboardMetricPanels(
         panelsAdded: newPanels.length,
         panelsSkipped: skipped,
         machineId: discovery.machineId,
+        prometheusNames: discovery.prometheusNames,
+        prometheusFields: discovery.prometheusFields,
+        prometheusDatasourceUid: discovery.prometheusDatasourceUid,
     };
+}
+
+function formatPrometheusDiscoveryLine(result: DashboardMetricPanelsResult): string {
+    const names = result.prometheusNames ?? 0;
+    const fields = result.prometheusFields ?? 0;
+    const parts: string[] = [];
+    if (fields > 0) {
+        parts.push(`${fields} \`machine_metrics\` field(s)`);
+    }
+    if (names > 0) {
+        parts.push(`${names} metric name(s)`);
+    }
+    if (parts.length === 0) {
+        return '0 from Prometheus API';
+    }
+    return parts.join(', ') + ' from Prometheus API';
 }
 
 export function formatDashboardMetricPanelsReply(
@@ -326,7 +355,8 @@ export function formatDashboardMetricPanelsReply(
             `### Metric panels — no new panels (build ${buildNumber})\n\n` +
             `- Dashboard: \`${result.dashboardUid}\`\n` +
             `- Machine: **${result.machineId ?? '?'}**\n` +
-            `- Discovered **${result.metricsDiscovered ?? 0}** metric(s); existing panels already cover them (${result.panelsSkipped ?? 0} skipped).\n` +
+            `- Prometheus datasource: \`${result.prometheusDatasourceUid ?? '?'}\`\n` +
+            `- Discovered **${result.metricsDiscovered ?? 0}** metric(s) (${formatPrometheusDiscoveryLine(result)}); existing stat/gauge panels already cover them (${result.panelsSkipped ?? 0} skipped).\n` +
             `- If you expected more metrics, verify Prometheus has series with \`machine="${result.machineId ?? '2505-200033'}"\`.\n\n` +
             `Hard-refresh the dashboard (**Cmd+Shift+R**).`
         );
@@ -335,7 +365,8 @@ export function formatDashboardMetricPanelsReply(
         `### Metric panels — saved (build ${buildNumber})\n\n` +
         `- Dashboard: \`${result.dashboardUid}\` · version **${result.version ?? '?'}**\n` +
         `- Machine: **${result.machineId ?? '?'}**\n` +
-        `- Discovered **${result.metricsDiscovered ?? 0}** metric(s) from Prometheus/panel queries\n` +
+        `- Prometheus datasource: \`${result.prometheusDatasourceUid ?? '?'}\`\n` +
+        `- Discovered **${result.metricsDiscovered ?? 0}** metric(s) (${formatPrometheusDiscoveryLine(result)})\n` +
         `- Added **${result.panelsAdded ?? 0}** stat panel(s)` +
         `${result.panelsSkipped ? ` (${result.panelsSkipped} already present)` : ''}\n` +
         `- Layout: title row → KPI stat grid → trends/overview (PowerTech instrumentation)\n\n` +

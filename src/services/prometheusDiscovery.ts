@@ -2,7 +2,6 @@ import type { ToolExecution } from '../types/llm.types';
 import { callMcpTool, parseJsonFromMcpText } from './mcpToolClient';
 import type { McpClient } from './dashboardChunkedUpdate';
 import { listDashboardPanels } from './panelDiscovery';
-import { findPrometheusTemplatePanel } from './instrumentationMetricDiscovery';
 
 export interface PrometheusLabelMatcher {
     name: string;
@@ -21,6 +20,15 @@ export function machinePrometheusSelectors(machineId: string): PrometheusSelecto
     ];
 }
 
+/** Selectors for `machine_metrics` series (PowerTech ML exporter uses `field` label). */
+export function machineMetricsFieldSelectors(machineId: string): PrometheusSelector[] {
+    const base = { name: '__name__', value: 'machine_metrics', type: '=' as const };
+    return [
+        { filters: [base, { name: 'machine', value: machineId, type: '=' }] },
+        { filters: [base, { name: 'topic', value: machineId, type: '=' }] },
+    ];
+}
+
 function parseDatasourceList(text: string): Array<{ uid?: string; type?: string; name?: string }> {
     const parsed = parseJsonFromMcpText(text);
     if (Array.isArray(parsed)) {
@@ -30,7 +38,53 @@ function parseDatasourceList(text: string): Array<{ uid?: string; type?: string;
             name?: string;
         }>;
     }
+    if (parsed && typeof parsed === 'object') {
+        const obj = parsed as Record<string, unknown>;
+        for (const key of ['datasources', 'data', 'items', 'results']) {
+            const nested = obj[key];
+            if (Array.isArray(nested)) {
+                return nested.filter((x) => x && typeof x === 'object') as Array<{
+                    uid?: string;
+                    type?: string;
+                    name?: string;
+                }>;
+            }
+        }
+        if (typeof obj.uid === 'string' && typeof obj.type === 'string') {
+            return [obj as { uid?: string; type?: string; name?: string }];
+        }
+    }
     return [];
+}
+
+async function tryDatasourceByName(
+    mcpClient: McpClient,
+    name: string,
+    toolExecutions?: ToolExecution[]
+): Promise<string | undefined> {
+    const step: ToolExecution = { name: 'get_datasource_by_name', status: 'pending' };
+    toolExecutions?.push(step);
+    const result = await callMcpTool(mcpClient, 'get_datasource_by_name', { name });
+    if (toolExecutions?.length) {
+        toolExecutions[toolExecutions.length - 1] = {
+            ...step,
+            status: result.ok ? 'success' : 'error',
+            error: result.error,
+            summary: result.summary,
+        };
+    }
+    if (!result.ok) {
+        return undefined;
+    }
+    const parsed = parseJsonFromMcpText(result.text);
+    if (parsed && typeof parsed === 'object') {
+        const uid = (parsed as { uid?: string }).uid;
+        if (uid) {
+            return uid;
+        }
+    }
+    const uidMatch = result.text.match(/"uid"\s*:\s*"([^"]+)"/);
+    return uidMatch?.[1];
 }
 
 function prometheusUidFromPanelBlob(panel: Record<string, unknown>): string | undefined {
@@ -83,34 +137,35 @@ export async function resolvePrometheusDatasourceUid(
         }
     }
 
-    const template = findPrometheusTemplatePanel(entries);
-    if (template) {
-        const uid = prometheusUidFromPanelBlob(template.panel);
-        if (uid) {
-            return uid;
-        }
-    }
-
-    const step: ToolExecution = { name: 'list_datasources', status: 'pending' };
-    toolExecutions?.push(step);
+    const listStep: ToolExecution = { name: 'list_datasources', status: 'pending' };
+    toolExecutions?.push(listStep);
     const list = await callMcpTool(mcpClient, 'list_datasources', {});
     if (toolExecutions?.length) {
         toolExecutions[toolExecutions.length - 1] = {
-            ...step,
+            ...listStep,
             status: list.ok ? 'success' : 'error',
             error: list.error,
             summary: list.summary,
         };
     }
-    if (!list.ok) {
-        return undefined;
+    if (list.ok) {
+        const hits = parseDatasourceList(list.text);
+        const preferred =
+            hits.find((d) => d.type === 'prometheus' && /prometheus/i.test(d.name ?? '')) ??
+            hits.find((d) => d.type === 'prometheus');
+        if (preferred?.uid) {
+            return preferred.uid;
+        }
     }
 
-    const hits = parseDatasourceList(list.text);
-    const preferred =
-        hits.find((d) => d.type === 'prometheus' && /prometheus/i.test(d.name ?? '')) ??
-        hits.find((d) => d.type === 'prometheus');
-    return preferred?.uid;
+    for (const name of ['Prometheus', 'prometheus', 'VictoriaMetrics', 'Mimir']) {
+        const uid = await tryDatasourceByName(mcpClient, name, toolExecutions);
+        if (uid) {
+            return uid;
+        }
+    }
+
+    return undefined;
 }
 
 export function extractMetricNamesFromPrometheusQueryText(text: string): string[] {
@@ -150,12 +205,16 @@ export async function discoverPrometheusMetricNamesForMachine(
         }
     }
 
-    if (names.size === 0) {
+    const instantQueries = [
+        `{machine="${machineId}"}`,
+        `{topic="${machineId}"}`,
+        `{machine="${machineId}",topic="${machineId}"}`,
+    ];
+    for (const expr of instantQueries) {
         const queryResult = await callMcpTool(mcpClient, 'query_prometheus', {
             datasourceUid,
-            expr: `{machine="${machineId}"}`,
+            expr,
             queryType: 'instant',
-            startTime: 'now-24h',
             endTime: 'now',
         });
         if (queryResult.ok) {
@@ -166,16 +225,80 @@ export async function discoverPrometheusMetricNamesForMachine(
     }
 
     if (names.size === 0) {
-        const topicQuery = await callMcpTool(mcpClient, 'query_prometheus', {
+        const metricNames = await callMcpTool(mcpClient, 'list_prometheus_metric_names', {
             datasourceUid,
-            expr: `{topic="${machineId}"}`,
+            regex: '.*',
+            limit: Math.min(limit, 200),
+        });
+        if (metricNames.ok) {
+            let probed = 0;
+            for (const candidate of parseStringListFromMcpText(metricNames.text)) {
+                if (names.size >= limit || probed >= 80) {
+                    break;
+                }
+                probed++;
+                const probe = await callMcpTool(mcpClient, 'query_prometheus', {
+                    datasourceUid,
+                    expr: `${candidate}{machine="${machineId}"}`,
+                    queryType: 'instant',
+                    endTime: 'now',
+                });
+                if (probe.ok && extractMetricNamesFromPrometheusQueryText(probe.text).includes(candidate)) {
+                    names.add(candidate);
+                }
+            }
+        }
+    }
+
+    return [...names].sort((a, b) => a.localeCompare(b));
+}
+
+function shouldSkipMachineMetricField(name: string): boolean {
+    if (!name || SKIP_MACHINE_FIELD_RE.test(name)) {
+        return true;
+    }
+    return false;
+}
+
+const SKIP_MACHINE_FIELD_RE =
+    /^(machine_metric_(?:upper|lower|expected)_bound|ALERTS|go_|prometheus_|grafana_)/i;
+
+export async function discoverPrometheusFieldNamesForMachine(
+    mcpClient: McpClient,
+    machineId: string,
+    datasourceUid: string,
+    limit = 500
+): Promise<string[]> {
+    const names = new Set<string>();
+
+    for (const selector of machineMetricsFieldSelectors(machineId)) {
+        const labelResult = await callMcpTool(mcpClient, 'list_prometheus_label_values', {
+            datasourceUid,
+            labelName: 'field',
+            matches: [selector],
+            limit,
+        });
+        if (labelResult.ok) {
+            for (const n of parseStringListFromMcpText(labelResult.text)) {
+                if (!shouldSkipMachineMetricField(n)) {
+                    names.add(n);
+                }
+            }
+        }
+    }
+
+    if (names.size === 0) {
+        const queryResult = await callMcpTool(mcpClient, 'query_prometheus', {
+            datasourceUid,
+            expr: `machine_metrics{machine="${machineId}"}`,
             queryType: 'instant',
-            startTime: 'now-24h',
             endTime: 'now',
         });
-        if (topicQuery.ok) {
-            for (const n of extractMetricNamesFromPrometheusQueryText(topicQuery.text)) {
-                names.add(n);
+        if (queryResult.ok) {
+            for (const m of queryResult.text.matchAll(/"field"\s*:\s*"([^"]+)"/g)) {
+                if (m[1] && !shouldSkipMachineMetricField(m[1])) {
+                    names.add(m[1]);
+                }
             }
         }
     }

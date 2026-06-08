@@ -3,6 +3,7 @@ import type { McpClient } from './dashboardChunkedUpdate';
 import { listDashboardPanels, type DashboardPanelEntry } from './panelDiscovery';
 import { inferMachineIdFromDashboardTitle } from './programmaticDashboardResolve';
 import {
+    discoverPrometheusFieldNamesForMachine,
     discoverPrometheusMetricNamesForMachine,
     resolvePrometheusDatasourceUid,
 } from './prometheusDiscovery';
@@ -208,6 +209,7 @@ export async function discoverInstrumentationMetrics(
     metrics: DiscoveredMetric[];
     machineId: string;
     prometheusNames: number;
+    prometheusFields: number;
     prometheusDatasourceUid?: string;
     discoveryError?: string;
 }> {
@@ -227,6 +229,9 @@ export async function discoverInstrumentationMetrics(
               opts.toolExecutions
           )
         : [];
+    const promFields = promUid
+        ? await discoverPrometheusFieldNamesForMachine(mcpClient, machineId, promUid, 500)
+        : [];
 
     const merged = new Map<string, DiscoveredMetric>();
     for (const m of fromPanels) {
@@ -244,6 +249,18 @@ export async function discoverInstrumentationMetrics(
             });
         }
     }
+    for (const field of promFields) {
+        const key = `field:${field}`;
+        if (!merged.has(key)) {
+            merged.set(key, {
+                key,
+                title: humanizeMetricName(field),
+                expr: `machine_metrics{machine="${machineId}", field="${field}"}`,
+                datasourceType: 'prometheus',
+                datasourceUid: promUid,
+            });
+        }
+    }
 
     let metrics = [...merged.values()].sort((a, b) => a.title.localeCompare(b.title));
     if (opts.maxMetrics != null && opts.maxMetrics > 0) {
@@ -255,7 +272,7 @@ export async function discoverInstrumentationMetrics(
         if (!promUid) {
             discoveryError =
                 'No Prometheus datasource UID found (check dashboard panels or Grafana datasources).';
-        } else if (promNames.length === 0 && fromPanels.length === 0) {
+        } else if (promNames.length === 0 && promFields.length === 0 && fromPanels.length === 0) {
             discoveryError =
                 `No metrics discovered for machine **${machineId}** via Prometheus (\`list_prometheus_label_values\` / instant query).`;
         }
@@ -265,6 +282,7 @@ export async function discoverInstrumentationMetrics(
         metrics,
         machineId,
         prometheusNames: promNames.length,
+        prometheusFields: promFields.length,
         prometheusDatasourceUid: promUid,
         discoveryError,
     };

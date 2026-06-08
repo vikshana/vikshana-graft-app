@@ -1,5 +1,6 @@
 import {
     extractMetricNamesFromPrometheusQueryText,
+    machineMetricsFieldSelectors,
     machinePrometheusSelectors,
 } from './prometheusDiscovery';
 
@@ -8,6 +9,23 @@ describe('prometheusDiscovery', () => {
         expect(machinePrometheusSelectors('2505-200033')).toEqual([
             { filters: [{ name: 'machine', value: '2505-200033', type: '=' }] },
             { filters: [{ name: 'topic', value: '2505-200033', type: '=' }] },
+        ]);
+    });
+
+    it('builds machine_metrics field selectors for PowerTech exporter', () => {
+        expect(machineMetricsFieldSelectors('2505-200033')).toEqual([
+            {
+                filters: [
+                    { name: '__name__', value: 'machine_metrics', type: '=' },
+                    { name: 'machine', value: '2505-200033', type: '=' },
+                ],
+            },
+            {
+                filters: [
+                    { name: '__name__', value: 'machine_metrics', type: '=' },
+                    { name: 'topic', value: '2505-200033', type: '=' },
+                ],
+            },
         ]);
     });
 
