@@ -11,9 +11,16 @@ describe('programmaticChatIntents', () => {
         'Rename the dashboard for the 2505-200033 machine to be NewMachine instead of Keysight';
     const panelCopy =
         'Create a new panel on the 2505-200033 dashboard that is the same as the "Pressure" panel on 2210-177097 but with data for 2505-200033';
+    const panelRename =
+        'Rename the "Pressure Gauge" panel to "System Pressure" on dashboard UID = cfo0wckufbdhce.';
 
     it('detects rename prompts', () => {
         expect(messageHasProgrammaticHandler(rename)).toBe(true);
+    });
+
+    it('detects panel rename prompts', () => {
+        expect(messageHasProgrammaticHandler(panelRename)).toBe(true);
+        expect(canSendWithoutLlm(panelRename, true)).toBe(true);
     });
 
     it('detects single panel copy prompts', () => {

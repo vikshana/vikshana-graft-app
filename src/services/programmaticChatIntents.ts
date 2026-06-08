@@ -6,6 +6,11 @@ import {
     userWantsDashboardRename,
 } from './dashboardRenameParse';
 import {
+    messageDescribesPanelRename,
+    parsePanelRenameRequest,
+    userWantsPanelRename,
+} from './panelRenameParse';
+import {
     messageMentionsPeerBandPanelCopyIntent,
     userWantsPeerBandPanelCopy,
 } from './peerBandPanelCopyParse';
@@ -41,6 +46,9 @@ export function messageHasProgrammaticHandler(message: string): boolean {
     }
 
     return (
+        userWantsPanelRename(text) ||
+        messageDescribesPanelRename(text) ||
+        parsePanelRenameRequest(text) != null ||
         userWantsDashboardRename(text) ||
         messageDescribesDashboardRename(text) ||
         userWantsPeerBandPanelCopy(text) ||

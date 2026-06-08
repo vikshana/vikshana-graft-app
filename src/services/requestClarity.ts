@@ -29,6 +29,11 @@ import {
     messageDescribesDashboardRename,
     parseDashboardRenameRequest,
 } from './dashboardRenameParse';
+import {
+    formatPanelRenameClarification,
+    messageDescribesPanelRename,
+    parsePanelRenameRequest,
+} from './panelRenameParse';
 
 /** Enough to identify a dashboard for panel fix (uid, machine id, or title). */
 export function hasDashboardIdentityForPanelFix(message: string): boolean {
@@ -92,6 +97,13 @@ export function formatClarificationIfNeeded(userMessage: string): string | null 
 
     if (messageMentionsSinglePanelCopyIntent(text) && !parseSinglePanelCopyRequest(text)) {
         return formatSinglePanelCopyClarification(text);
+    }
+
+    if (messageDescribesPanelRename(text)) {
+        if (parsePanelRenameRequest(text)) {
+            return null;
+        }
+        return formatPanelRenameClarification(text);
     }
 
     if (messageDescribesDashboardRename(text)) {

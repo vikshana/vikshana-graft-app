@@ -1,5 +1,6 @@
 import { extractAllDashboardUids } from './dashboardMentionParse';
 import { findMachineIdsInText, isMachineId, MACHINE_ID_PATTERN } from './dashboardCloneParse';
+import { messageDescribesPanelRename } from './panelRenameParse';
 
 export interface DashboardRenameRequest {
     machineId?: string;
@@ -17,6 +18,9 @@ function normalizeMessageQuotes(text: string): string {
 
 export function messageDescribesDashboardRename(message: string): boolean {
     const text = normalizeMessageQuotes(message.trim());
+    if (messageDescribesPanelRename(text)) {
+        return false;
+    }
     return /\brename\b/i.test(text) && /\bdashboard\b/i.test(text);
 }
 
@@ -94,7 +98,7 @@ export function computeRenamedDashboardTitle(
 
 export function parseDashboardRenameRequest(message: string): DashboardRenameRequest | null {
     const text = normalizeMessageQuotes(message.trim());
-    if (!messageDescribesDashboardRename(text)) {
+    if (messageDescribesPanelRename(text) || !messageDescribesDashboardRename(text)) {
         return null;
     }
 

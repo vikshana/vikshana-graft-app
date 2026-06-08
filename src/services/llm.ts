@@ -50,6 +50,7 @@ import { normalizeUpdateDashboardArgs } from './updateDashboardArgs';
 import { resolvePanelForScopedFix } from './panelDiscovery';
 import { tryInterceptRenameBeforeLlm } from './renameLlmGuard';
 import { messageDescribesDashboardRename } from './dashboardRenameParse';
+import { messageDescribesPanelRename } from './panelRenameParse';
 import { isSimpleConversationalMessage } from './programmaticChatIntents';
 import { contentHasLeakedToolCalls, executeLeakedToolCalls } from './leakedToolCallRecovery';
 import { isExplicitSinglePanelCopyRequest } from './singlePanelCopyParse';
@@ -90,7 +91,7 @@ const DISCOVERY_TOOLS = new Set([
 
 /** User asked to change or create dashboard/panel content. */
 export function userWantsDashboardWork(userContent: string): boolean {
-    if (messageDescribesDashboardRename(userContent)) {
+    if (messageDescribesPanelRename(userContent) || messageDescribesDashboardRename(userContent)) {
         return false;
     }
     return (
