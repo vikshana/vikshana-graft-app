@@ -7,7 +7,7 @@ import {
     userWantsDashboardRebuild,
 } from './dashboardRebuildParse';
 import { panelLooksLikeDashboardTitleRow } from './dashboardTitleRowLayout';
-import { parseLeakedToolCalls } from './leakedToolCallRecovery';
+import { parseLeakedToolCalls, executeLeakedToolCalls } from './leakedToolCallRecovery';
 
 describe('dashboardRebuildParse', () => {
     it('parses rebuild from scratch prompt', () => {
@@ -70,6 +70,19 @@ describe('leakedToolCallRecovery', () => {
             'fetching\n<function_calls>\n<invoke name="get_dashboard_by_uid">\n<parameter name="uid">cfo0wckufbdhce</parameter>\n</invoke>'
         );
         expect(calls).toEqual([{ name: 'get_dashboard_by_uid', args: { uid: 'cfo0wckufbdhce' } }]);
+    });
+
+    it('skips truncated update_dashboard JSON in executeLeakedToolCalls', async () => {
+        const mcpClient = {
+            callTool: jest.fn(),
+        };
+        const result = await executeLeakedToolCalls(
+            mcpClient,
+            '<invoke name="update_dashboard"><parameter name="dashboard">{"panels": [{"id": 1'
+        );
+        expect(mcpClient.callTool).not.toHaveBeenCalled();
+        expect(result.toolExecutions[0].status).toBe('error');
+        expect(result.toolExecutions[0].error).toContain('truncated');
     });
 });
 

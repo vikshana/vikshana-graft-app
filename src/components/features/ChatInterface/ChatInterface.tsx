@@ -114,9 +114,17 @@ import {
   userWantsDashboardRebuild,
 } from '../../../services/dashboardRebuildParse';
 import {
+  parseDashboardMetricPanelsRequest,
+  userWantsDashboardMetricPanels,
+} from '../../../services/dashboardMetricPanelsParse';
+import {
   runProgrammaticDashboardRebuild,
   formatDashboardRebuildReply,
 } from '../../../services/programmaticDashboardLayoutRebuild';
+import {
+  runProgrammaticDashboardMetricPanels,
+  formatDashboardMetricPanelsReply,
+} from '../../../services/programmaticDashboardMetricPanels';
 import { formatChatErrorForUser, extractErrorMessage } from '../../../services/chatError';
 import { contentHasLeakedToolCalls } from '../../../services/leakedToolCallRecovery';
 import { tryProgrammaticFallbackAfterLlm } from '../../../services/programmaticLlmFallback';
@@ -1010,6 +1018,55 @@ export const ChatInterface = () => {
               intent: 'dashboard-title-row',
               userMessagePreview: content,
               error: titleRowResult.error ?? 'Unknown error',
+            });
+          }
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      const dashboardMetricPanelsRequest = parseDashboardMetricPanelsRequest(content);
+      if (userWantsDashboardMetricPanels(content) && dashboardMetricPanelsRequest) {
+        errorPathTag = 'dashboard-metric-panels';
+        if (!mcpClient) {
+          finalContent = '### Could not add metric panels\n\nGrafana MCP tools are not connected.';
+        } else {
+          const metricResult = await runProgrammaticDashboardMetricPanels(mcpClient, dashboardMetricPanelsRequest);
+          finalContent = formatDashboardMetricPanelsReply(metricResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = metricResult.toolExecutions;
+          clearPendingOnProgrammaticSuccess(metricResult.ok);
+          if (!metricResult.ok) {
+            recordGraftFailure({
+              buildNumber: GRAFT_BUILD_NUMBER,
+              intent: 'dashboard-metric-panels',
+              userMessagePreview: content,
+              error: metricResult.error ?? 'Unknown error',
+              dashboardTitle: metricResult.dashboardTitle,
             });
           }
         }

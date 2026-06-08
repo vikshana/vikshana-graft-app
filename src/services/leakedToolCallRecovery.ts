@@ -51,6 +51,24 @@ export async function executeLeakedToolCalls(
     for (const call of calls) {
         const step: ToolExecution = { name: call.name, status: 'pending' };
         toolExecutions.push(step);
+
+        if (call.name === 'update_dashboard' && typeof call.args.dashboard === 'string') {
+            const raw = call.args.dashboard.trim();
+            if (raw.startsWith('{')) {
+                try {
+                    call.args.dashboard = JSON.parse(raw);
+                } catch {
+                    step.status = 'error';
+                    step.error = 'Leaked update_dashboard JSON was truncated or invalid — use programmatic handler instead.';
+                    parts.push(
+                        `[${call.name}] error: dashboard JSON could not be parsed (${raw.length} chars). ` +
+                            'Retry with native tool_calls or the metric-panels programmatic path.'
+                    );
+                    continue;
+                }
+            }
+        }
+
         const outcome = await callMcpTool(mcpClient, call.name, call.args);
         step.status = outcome.ok ? 'success' : 'error';
         step.error = outcome.error;

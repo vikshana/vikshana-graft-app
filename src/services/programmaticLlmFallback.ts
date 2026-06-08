@@ -31,6 +31,14 @@ import {
     runProgrammaticModulePanelReorder,
     formatModulePanelReorderReply,
 } from './programmaticModulePanelReorder';
+import {
+    parseDashboardMetricPanelsRequest,
+    userWantsDashboardMetricPanels,
+} from './dashboardMetricPanelsParse';
+import {
+    runProgrammaticDashboardMetricPanels,
+    formatDashboardMetricPanelsReply,
+} from './programmaticDashboardMetricPanels';
 
 export interface LlmTurnContext {
     userMessage: string;
@@ -38,7 +46,11 @@ export interface LlmTurnContext {
     toolExecutions: ToolExecution[];
 }
 
-export type ProgrammaticFallbackKind = 'dashboard_rebuild' | 'dashboard_title_row' | 'module_panel_reorder';
+export type ProgrammaticFallbackKind =
+    | 'dashboard_rebuild'
+    | 'dashboard_title_row'
+    | 'module_panel_reorder'
+    | 'dashboard_metric_panels';
 
 export interface ProgrammaticFallbackPlan {
     kind: ProgrammaticFallbackKind;
@@ -70,6 +82,12 @@ export function planProgrammaticFallback(ctx: LlmTurnContext): ProgrammaticFallb
         /\b(Would you like|Should I|Please provide|What metrics|What panels)\b/i.test(ctx.assistantContent);
 
     if (llmStalled || llmAskedDespiteUid) {
+        if (userWantsDashboardMetricPanels(text) && parseDashboardMetricPanelsRequest(text)) {
+            return {
+                kind: 'dashboard_metric_panels',
+                reason: 'LLM leaked tool markup or stalled before saving metric panels; building panels programmatically from Prometheus.',
+            };
+        }
         if (userWantsDashboardRebuild(text) && parseDashboardRebuildRequest(text)) {
             return { kind: 'dashboard_rebuild', reason: 'LLM did not reorganize the dashboard; applying PowerTech layout programmatically.' };
         }
@@ -156,6 +174,27 @@ export async function tryProgrammaticFallbackAfterLlm(
         return null;
     }
 
+    if (plan.kind === 'dashboard_metric_panels') {
+        const request = parseDashboardMetricPanelsRequest(ctx.userMessage);
+        if (!request) {
+            return null;
+        }
+        const result = await runProgrammaticDashboardMetricPanels(mcpClient, request);
+        if (!result.ok) {
+            return null;
+        }
+        return {
+            applied: true,
+            kind: plan.kind,
+            reason: plan.reason,
+            content:
+                `### Programmatic repair — ${plan.kind} (build ${buildNumber})\n\n` +
+                `_${plan.reason}_\n\n` +
+                formatDashboardMetricPanelsReply(result, buildNumber).replace(/^###[^\n]+\n\n/, ''),
+            toolExecutions: [...ctx.toolExecutions, ...result.toolExecutions],
+        };
+    }
+
     if (plan.kind === 'dashboard_rebuild') {
         const request = parseDashboardRebuildRequest(ctx.userMessage);
         if (!request) {
@@ -228,6 +267,11 @@ export const PROGRAMMATIC_FALLBACK_REGISTRY: Array<{
     triggers: string;
     handler: string;
 }> = [
+    {
+        kind: 'dashboard_metric_panels',
+        triggers: 'create N panels / every available metric / cover all metrics on instrumentation dashboard',
+        handler: 'discoverPrometheusMetricsForMachine + stat panel grid',
+    },
     {
         kind: 'dashboard_rebuild',
         triggers: 'rebuild / best practices / PowerTech conventions; grid overlap after LLM save',

@@ -28,6 +28,10 @@ import {
     parseDashboardRebuildRequest,
     userWantsDashboardRebuild,
 } from './dashboardRebuildParse';
+import {
+    parseDashboardMetricPanelsRequest,
+    userWantsDashboardMetricPanels,
+} from './dashboardMetricPanelsParse';
 
 /** True when Graft can handle the message via MCP without calling the LLM. */
 export function messageHasProgrammaticHandler(message: string): boolean {
@@ -50,6 +54,8 @@ export function messageHasProgrammaticHandler(message: string): boolean {
         parseModulePanelReorderRequest(text) != null ||
         userWantsDashboardTitleRow(text) ||
         parseDashboardTitleRowRequest(text) != null ||
+        userWantsDashboardMetricPanels(text) ||
+        parseDashboardMetricPanelsRequest(text) != null ||
         userWantsDashboardRebuild(text) ||
         parseDashboardRebuildRequest(text) != null ||
         parseAddPeerRfPanelRequest(text) != null ||

@@ -1,6 +1,7 @@
 import type { GraftFailureEntry } from './graftOperatorFailureLog';
 import { PROGRAMMATIC_FALLBACK_REGISTRY, type ProgrammaticFallbackKind } from './programmaticLlmFallback';
 import { userWantsDashboardRebuild } from './dashboardRebuildParse';
+import { userWantsDashboardMetricPanels } from './dashboardMetricPanelsParse';
 import { userWantsDashboardTitleRow } from './dashboardTitleRowParse';
 import { userWantsModulePanelReorder } from './modulePanelReorderParse';
 import { userWantsBulkPeerBandFix } from './bulkPeerBandFixParse';
@@ -20,6 +21,8 @@ export interface SuggestedRegistryRow {
 
 const FAST_PATH_INTENTS = new Set([
     'dashboard_rebuild',
+    'dashboard-metric-panels',
+    'dashboard_metric_panels',
     'dashboard-title-row',
     'dashboard-title_row',
     'module_panel_reorder',
@@ -62,6 +65,23 @@ function suggestFromText(text: string, intent: string): SuggestedRegistryRow | n
             implementIn: ['dashboardTitleRowParse.ts', 'programmaticDashboardTitleRow.ts', 'ChatInterface.tsx'],
             status: wireStatus('dashboard_title_row', intent),
             matchedBecause: 'Prompt mentions title row / heading at top',
+        };
+    }
+
+    if (userWantsDashboardMetricPanels(msg)) {
+        const row = registryRow('dashboard_metric_panels' as ProgrammaticFallbackKind);
+        return {
+            kind: 'dashboard_metric_panels',
+            triggers: row?.triggers ?? 'create N panels / every available metric on instrumentation dashboard',
+            handler: row?.handler ?? 'discoverPrometheusMetricsForMachine + stat panel grid',
+            implementIn: [
+                'dashboardMetricPanelsParse.ts',
+                'instrumentationMetricDiscovery.ts',
+                'programmaticDashboardMetricPanels.ts',
+                'ChatInterface.tsx',
+            ],
+            status: wireStatus('dashboard_metric_panels', intent),
+            matchedBecause: 'Prompt asks to create panels for every available metric',
         };
     }
 

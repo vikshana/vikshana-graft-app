@@ -13,6 +13,17 @@ describe('dashboardLayoutValidate', () => {
 });
 
 describe('planProgrammaticFallback', () => {
+    it('plans metric panels when LLM leaks truncated update_dashboard', () => {
+        const plan = planProgrammaticFallback({
+            userMessage:
+                'Create 50 panels covering every available metric on the dashboard with UID = cfo0wckufbdhce',
+            assistantContent:
+                'Rebuilding\n<function_calls>\n<invoke name="update_dashboard">\n<parameter name="dashboard">{"panels": [',
+            toolExecutions: [],
+        });
+        expect(plan?.kind).toBe('dashboard_metric_panels');
+    });
+
     it('plans rebuild when LLM asks questions despite uid', () => {
         const plan = planProgrammaticFallback({
             userMessage: 'Rebuild the dashboard of UID = cfo0wckufbdhce from scratch using best practices.',

@@ -4,10 +4,10 @@ import { callMcpTool } from './mcpToolClient';
 import type { McpClient } from './dashboardChunkedUpdate';
 import { stampDashboardForOverwrite } from './fluxQueryFix';
 import { normalizeUpdateDashboardArgs } from './updateDashboardArgs';
-import { parseSearchHitsFromMcpText } from './dashboardSearchParse';
 import type { DashboardRebuildRequest } from './dashboardRebuildParse';
 import { formatDashboardRebuildExamplePrompt } from './dashboardRebuildParse';
 import { applyBestPracticeDashboardLayout } from './dashboardLayoutBestPractices';
+import { resolveDashboardUid } from './programmaticDashboardResolve';
 
 type PanelRecord = Record<string, unknown>;
 
@@ -35,32 +35,7 @@ async function resolveDashboard(
     request: DashboardRebuildRequest,
     toolExecutions: ToolExecution[]
 ): Promise<{ uid?: string; title?: string; error?: string }> {
-    if (request.dashboardUid) {
-        return { uid: request.dashboardUid };
-    }
-    const searchTitle = request.dashboardTitle;
-    const searchQuery =
-        searchTitle ??
-        (request.titleLabel ? `${request.titleLabel}` : undefined);
-    if (!searchQuery) {
-        return { error: 'Need dashboard uid or title.' };
-    }
-    const searchStep = pendingTool('search_dashboards');
-    toolExecutions.push(searchStep);
-    const searchResult = await callMcpTool(mcpClient, 'search_dashboards', { query: searchQuery });
-    toolExecutions[toolExecutions.length - 1] = finishTool(searchStep, searchResult);
-    if (!searchResult.ok) {
-        return { error: searchResult.error ?? 'Dashboard search failed' };
-    }
-    const hits = parseSearchHitsFromMcpText(searchResult.text);
-    const match =
-        hits.find((h) => searchTitle && h.title?.includes(searchTitle)) ??
-        hits.find((h) => request.titleLabel && h.title?.toLowerCase().includes(request.titleLabel.toLowerCase())) ??
-        hits[0];
-    if (!match?.uid) {
-        return { error: `No dashboard found for "${searchQuery}".` };
-    }
-    return { uid: match.uid, title: match.title };
+    return resolveDashboardUid(mcpClient, request, toolExecutions);
 }
 
 export async function runProgrammaticDashboardRebuild(
