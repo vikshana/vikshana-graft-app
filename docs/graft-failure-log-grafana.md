@@ -1,42 +1,38 @@
-# Graft failure log → Grafana
+# Graft failure export (operator workflow)
 
-When a programmatic Graft action fails (panel JSON paste, cross-dashboard panel copy, etc.), the app appends a row to **local browser storage** (`graft-operator-failures`).
+When Graft hits a known failure pattern, it appends a row to **browser localStorage** (`graft-operator-failures`).
 
-## Export from the browser (today)
+## Export from the Graft UI (build 145+)
 
-1. Open Grafana with Graft, reproduce the failure.
-2. Open DevTools → **Console**.
-3. Run:
+1. Open **Graft AI Assistant** in Grafana.
+2. Reproduce or review a failure (programmatic error, LLM stall, `[full-llm]` error).
+3. Click **Export failures (N)** in the chat header (highlights when N > 0).
+4. **Copy markdown** or **Download .md / .json** and paste into Cursor.
+
+The report includes:
+
+- Timestamp, build, intent path, error text, user message preview
+- **Suggested programmatic registry rows** — deduped stubs for `PROGRAMMATIC_FALLBACK_REGISTRY` with:
+  - `kind`, triggers, handler
+  - Files to implement (`*Parse.ts`, `programmatic*.ts`, `programmaticLlmFallback.ts`)
+  - Status: `wired (fast path)`, `wired (LLM fallback)`, or **missing — add handler**
+
+## When failures are logged
+
+- Programmatic path errors (panel copy, rebuild, peer-band fix, etc.)
+- LLM stall after auto-continue (clarifying questions, leaked `<function_calls>`, no save)
+- Uncaught `[full-llm]` errors (rate limits show actionable text in chat)
+
+Successful **programmatic repair** after an LLM stall is not logged as a failure.
+
+## DevTools fallback
 
 ```javascript
 copy(localStorage.getItem('graft-operator-failures') || '[]')
 ```
 
-4. Paste into a file `graft-failures.json` for debugging in the repo or with Cursor.
-
-For Markdown:
-
-```javascript
-// After deploying build with exportGraftFailuresAsMarkdown wired in UI, or:
-JSON.parse(localStorage.getItem('graft-operator-failures')||'[]').forEach(e => console.log(e.at, e.intent, e.error))
-```
-
-## Grafana “page” (recommended next step)
-
-Grafana needs a **datasource** for failures. Options:
-
-| Approach | Effort | Notes |
-|----------|--------|-------|
-| **Infinity + JSON URL** | Low | Host `graft-failures.json` on S3/nginx; table panel |
-| **Influx `graft_operator_failures`** | Medium | Small POST from Graft plugin on failure |
-| **Loki** | Medium | Ship JSON lines from a sidecar |
-
-Until a server sink exists, use **chat history** (Graft already saves sessions) plus the localStorage export above when fixing parsers (e.g. `2026-05` date vs machine id).
-
-## What we log
-
-- Timestamp, build number, intent (`panel_json_duplicate`, `single_panel_copy`, …)
-- Error text, dashboard/panel titles when known
-- First 2000 chars of the user message (includes pasted panel JSON)
-
 Do not commit exported logs if they contain tokens or secrets.
+
+## Grafana datasource (future)
+
+See prior notes: Infinity JSON URL, Influx POST, or Loki sidecar if you want a server-side failure dashboard.

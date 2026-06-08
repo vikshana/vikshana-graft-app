@@ -20,6 +20,14 @@ import {
     parseModulePanelReorderRequest,
     userWantsModulePanelReorder,
 } from './modulePanelReorderParse';
+import {
+    parseDashboardTitleRowRequest,
+    userWantsDashboardTitleRow,
+} from './dashboardTitleRowParse';
+import {
+    parseDashboardRebuildRequest,
+    userWantsDashboardRebuild,
+} from './dashboardRebuildParse';
 
 /** True when Graft can handle the message via MCP without calling the LLM. */
 export function messageHasProgrammaticHandler(message: string): boolean {
@@ -40,6 +48,10 @@ export function messageHasProgrammaticHandler(message: string): boolean {
         userWantsModulePanelReorder(text) ||
         isModuleReorderConfirmation(text) ||
         parseModulePanelReorderRequest(text) != null ||
+        userWantsDashboardTitleRow(text) ||
+        parseDashboardTitleRowRequest(text) != null ||
+        userWantsDashboardRebuild(text) ||
+        parseDashboardRebuildRequest(text) != null ||
         parseAddPeerRfPanelRequest(text) != null ||
         messageMentionsAddPeerRfPanel(text) ||
         messageMentionsPeerBandPanelsButNotBulkFix(text) ||

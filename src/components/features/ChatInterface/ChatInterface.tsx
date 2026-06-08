@@ -64,6 +64,7 @@ import {
   runProgrammaticPanelJsonDuplicate,
 } from '../../../services/programmaticPanelJsonDuplicate';
 import { recordGraftFailure } from '../../../services/graftOperatorFailureLog';
+import { OperatorFailureExport } from './components/OperatorFailureExport';
 import {
   messageMentionsInfluxPanelRepair,
   parseInfluxPanelRepairRequest,
@@ -100,6 +101,25 @@ import {
   runProgrammaticModulePanelReorder,
   formatModulePanelReorderReply,
 } from '../../../services/programmaticModulePanelReorder';
+import {
+  parseDashboardTitleRowRequest,
+  userWantsDashboardTitleRow,
+} from '../../../services/dashboardTitleRowParse';
+import {
+  runProgrammaticDashboardTitleRow,
+  formatDashboardTitleRowReply,
+} from '../../../services/programmaticDashboardTitleRow';
+import {
+  parseDashboardRebuildRequest,
+  userWantsDashboardRebuild,
+} from '../../../services/dashboardRebuildParse';
+import {
+  runProgrammaticDashboardRebuild,
+  formatDashboardRebuildReply,
+} from '../../../services/programmaticDashboardLayoutRebuild';
+import { formatChatErrorForUser, extractErrorMessage } from '../../../services/chatError';
+import { contentHasLeakedToolCalls } from '../../../services/leakedToolCallRecovery';
+import { tryProgrammaticFallbackAfterLlm } from '../../../services/programmaticLlmFallback';
 import {
   parseBulkModulePanelMatchRequest,
   userWantsBulkModulePanelMatch,
@@ -305,13 +325,19 @@ const formatContext = (dashboard: DashboardContext, user: UserContext, dataSourc
   lines.push('');
   lines.push('Hybrid workflow (LLM + programmatic tools):');
   lines.push(
-    '- Repeatable layout/fixes may run without you; for novel edits you must still call get_dashboard_by_uid then update_dashboard.'
+    '- **LLM first** for novel edits: get_dashboard_by_uid → update_dashboard in the same turn when you have enough detail.'
+  );
+  lines.push(
+    '- **Programmatic repair** runs automatically when the LLM stalls (clarifying questions despite a uid, leaked <function_calls>, Continue loops) or when a save leaves known layout defects (grid overlap, title row, module block position).'
+  );
+  lines.push(
+    '- Repeatable layout/fixes may also run immediately when the user prompt matches a known handler — you still must not claim a save without update_dashboard success.'
   );
   lines.push(
     '- If you asked the user a yes/no or layout question and they confirm with a short reply (yes, in order, including all, Continue), execute the full original request immediately — do not ask what to order again.'
   );
   lines.push(
-    '- Never answer with generic "need more context" when the prior turn already listed panels and asked one confirmation question.'
+    '- Never answer with generic "need more context" when the prior turn already listed panels and asked one confirmation question, or when the user gave dashboard uid + rebuild/best-practices wording.'
   );
 
   return lines.join('\n');
@@ -968,6 +994,103 @@ export const ChatInterface = () => {
         return;
       }
 
+      const dashboardTitleRowRequest = parseDashboardTitleRowRequest(content);
+      if (userWantsDashboardTitleRow(content) && dashboardTitleRowRequest) {
+        errorPathTag = 'dashboard-title-row';
+        if (!mcpClient) {
+          finalContent = '### Could not add dashboard title row\n\nGrafana MCP tools are not connected.';
+        } else {
+          const titleRowResult = await runProgrammaticDashboardTitleRow(mcpClient, dashboardTitleRowRequest);
+          finalContent = formatDashboardTitleRowReply(titleRowResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = titleRowResult.toolExecutions;
+          clearPendingOnProgrammaticSuccess(titleRowResult.ok);
+          if (!titleRowResult.ok) {
+            recordGraftFailure({
+              buildNumber: GRAFT_BUILD_NUMBER,
+              intent: 'dashboard-title-row',
+              userMessagePreview: content,
+              error: titleRowResult.error ?? 'Unknown error',
+            });
+          }
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      const dashboardRebuildRequest = parseDashboardRebuildRequest(content);
+      if (userWantsDashboardRebuild(content) && dashboardRebuildRequest) {
+        errorPathTag = 'dashboard-rebuild';
+        if (!mcpClient) {
+          finalContent = '### Could not rebuild dashboard\n\nGrafana MCP tools are not connected.';
+        } else {
+          const rebuildResult = await runProgrammaticDashboardRebuild(mcpClient, dashboardRebuildRequest);
+          finalContent = formatDashboardRebuildReply(rebuildResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = rebuildResult.toolExecutions;
+          clearPendingOnProgrammaticSuccess(rebuildResult.ok);
+          if (!rebuildResult.ok) {
+            recordGraftFailure({
+              buildNumber: GRAFT_BUILD_NUMBER,
+              intent: 'dashboard-rebuild',
+              userMessagePreview: content,
+              error: rebuildResult.error ?? 'Unknown error',
+              dashboardTitle: rebuildResult.dashboardTitle,
+            });
+          }
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
       const addOwnHistoryRequestEarly = parseAddOwnHistoryPanelRequest(content);
       if (
         addOwnHistoryRequestEarly &&
@@ -1226,6 +1349,14 @@ export const ChatInterface = () => {
           finalContent = formatModulePanelReorderReply(reorderResult, GRAFT_BUILD_NUMBER);
           finalToolExecutions = reorderResult.toolExecutions;
           clearPendingOnProgrammaticSuccess(reorderResult.ok);
+          if (!reorderResult.ok) {
+            recordGraftFailure({
+              buildNumber: GRAFT_BUILD_NUMBER,
+              intent: 'module-panel-reorder',
+              userMessagePreview: content,
+              error: reorderResult.error ?? 'Unknown error',
+            });
+          }
         }
         setMessages((prev) => {
           const updated = [...prev];
@@ -1627,6 +1758,46 @@ export const ChatInterface = () => {
         setAutoContinuing(false);
       }
 
+      if (mcpClient && !isSimpleConversationalMessage(originalUserContent)) {
+        const fallback = await tryProgrammaticFallbackAfterLlm(
+          mcpClient,
+          {
+            userMessage: originalUserContent,
+            assistantContent: displayContent,
+            toolExecutions: finalToolExecutions,
+          },
+          GRAFT_BUILD_NUMBER
+        );
+        if (fallback?.applied) {
+          displayContent = fallback.content;
+          finalToolExecutions = fallback.toolExecutions;
+          const repairedMessage: Message = {
+            role: 'assistant',
+            content: displayContent,
+            thinkingSeconds: thinkingDuration,
+            toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+          };
+          messagesForContinue = [...messagesForContinue.slice(0, -1), repairedMessage];
+          messagesRef.current = messagesForContinue;
+          setMessages(messagesForContinue);
+          if (fallback.kind) {
+            clearPendingDashboardTask();
+          }
+        } else if (
+          !hasSuccessfulDashboardSave(finalToolExecutions) &&
+          (responseNeedsContinueAction(displayContent) ||
+            contentHasLeakedToolCalls(displayContent) ||
+            /\b(Would you like|What metrics|Which dashboard|Need clarification)\b/i.test(displayContent))
+        ) {
+          recordGraftFailure({
+            buildNumber: GRAFT_BUILD_NUMBER,
+            intent: errorPathTag,
+            userMessagePreview: originalUserContent,
+            error: displayContent.slice(0, 500) || 'LLM stalled without dashboard save',
+          });
+        }
+      }
+
       // Save chat to history after completion
       const finalAssistantMessage: Message = {
         role: 'assistant',
@@ -1645,8 +1816,56 @@ export const ChatInterface = () => {
         persistActiveSession();
         return;
       }
+      if (mcpClient && !usedSimpleChatPath) {
+        const originalUserContent =
+          latestNonContinueUserMessage(newMessages.filter((m) => m.role === 'user').map((m) => m.content)) ??
+          content;
+        const fallback = await tryProgrammaticFallbackAfterLlm(
+          mcpClient,
+          {
+            userMessage: originalUserContent,
+            assistantContent: '',
+            toolExecutions: finalToolExecutions,
+          },
+          GRAFT_BUILD_NUMBER
+        );
+        if (fallback?.applied) {
+          const repairedMessage: Message = {
+            role: 'assistant',
+            content: fallback.content,
+            toolExecutions: fallback.toolExecutions.length > 0 ? fallback.toolExecutions : undefined,
+          };
+          setMessages((prev) => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            if (last?.role === 'assistant') {
+              updated[updated.length - 1] = repairedMessage;
+            } else {
+              updated.push(repairedMessage);
+            }
+            return updated;
+          });
+          const savedSession = chatHistoryService.saveSession(
+            [...newMessages, repairedMessage],
+            currentSessionId
+          );
+          if (savedSession) {
+            setCurrentSessionId(savedSession.id);
+            replaceChatSessionInUrl(savedSession.id);
+          }
+          return;
+        }
+      }
+      recordGraftFailure({
+        buildNumber: GRAFT_BUILD_NUMBER,
+        intent: errorPathTag,
+        userMessagePreview:
+          latestNonContinueUserMessage(newMessages.filter((m) => m.role === 'user').map((m) => m.content)) ??
+          content,
+        error: extractErrorMessage(error),
+      });
       const pathTag = usedSimpleChatPath ? '[simple-chat] ' : `[${errorPathTag}] `;
-      const errorMessage = `Sorry, I encountered an error: ${pathTag}${error.message || 'Unknown error'} `;
+      const errorMessage = `${formatChatErrorForUser(error)}\n\n_${pathTag.trim()}_`;
 
       // Create the error assistant message
       const errorAssistantMessage: Message = {
@@ -2031,6 +2250,7 @@ ${input} `
               <BuildBadge />
             </div>
             <div className={styles.headerRight}>
+              <OperatorFailureExport />
               <Button variant="secondary" fill="outline" onClick={() => navigate('history')} data-testid="history-button">
                 Previous Conversations
                 <Icon name="arrow-right" style={{ marginLeft: '8px' }} />

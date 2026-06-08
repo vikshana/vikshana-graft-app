@@ -22,5 +22,8 @@ export function buildPowerTechOperatorGuide(): string {
         '- If the user asked for a change and you have enough detail: `get_dashboard_by_uid` then `update_dashboard` in this turn.',
         '- Do not stop after analysis or a clarifying question if the user already confirmed — save first, explain after.',
         '- For layout/reorder: preserve panel queries; only change `gridPos` (and title if needed). Module N Current blocks: order 1→8 at the **bottom** of the dashboard (below non-module panels), uniform size (w=24, h=12) unless asked otherwise.',
+        '- **Dashboard title row**: full-width text panel (w=24, h=2, markdown `# Title`) at **array index 0** and y=0; shift **all** other panels down by 2 — setting y=0 alone is not enough when other panels share row 0. Re-running add/change with a new label updates the existing title text panel without shifting again.',
+        '- **Rebuild / best practices**: when uid is given, call get_dashboard_by_uid first — do not ask what metrics to display. Instrumentation dashboards (Keysight: pressure/temperature/cartridge) reorganize existing panels only; do NOT add Module N RF/peer/own-history blocks. Module dashboards (Exsolve): keep module blocks 1→8 at the bottom.',
+        '- **Hybrid repair**: if your turn fails or leaves overlapping gridPos, Graft may auto-apply programmatic layout (title row, rebuild, module reorder) — prefer correct gridPos in your first save.',
     ].join('\n');
 }

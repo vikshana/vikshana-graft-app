@@ -51,6 +51,7 @@ import { resolvePanelForScopedFix } from './panelDiscovery';
 import { tryInterceptRenameBeforeLlm } from './renameLlmGuard';
 import { messageDescribesDashboardRename } from './dashboardRenameParse';
 import { isSimpleConversationalMessage } from './programmaticChatIntents';
+import { contentHasLeakedToolCalls, executeLeakedToolCalls } from './leakedToolCallRecovery';
 import { isExplicitSinglePanelCopyRequest } from './singlePanelCopyParse';
 
 // Re-export types for backward compatibility
@@ -572,6 +573,32 @@ export const llmService = {
 
             if (fullContent) {
                 trackedUpdate(fullContent, toolExecutions);
+            }
+
+            if (
+                mcpClient &&
+                (!toolCalls || toolCalls.length === 0) &&
+                contentHasLeakedToolCalls(fullContent)
+            ) {
+                const recovered = await executeLeakedToolCalls(mcpClient, fullContent);
+                if (recovered.executed > 0) {
+                    toolExecutions.push(...recovered.toolExecutions);
+                    fullContent = stripLeakedToolCallMarkup(fullContent);
+                    trackedUpdate(fullContent, toolExecutions);
+                    llmMessages.push({
+                        role: 'user',
+                        content:
+                            'Your previous message used XML tool markup instead of native tool_calls. ' +
+                            'Those tools were executed on your behalf. Continue the task using tool results:\n\n' +
+                            recovered.resultText,
+                    });
+                    const retry = await callLlm();
+                    if (retry.choices?.length) {
+                        fullContent = retry.choices[0].message?.content || fullContent;
+                        toolCalls = retry.choices[0].message?.tool_calls || [];
+                        trackedUpdate(fullContent, toolExecutions);
+                    }
+                }
             }
 
             if (simpleTurn) {
