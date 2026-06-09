@@ -1,9 +1,11 @@
 import {
     findFluxBrokenPanels,
     findPanelByStrictTitle,
+    findPanelForRemoval,
     listDashboardPanels,
     normalizePanelTitleForMatch,
     panelHasBrokenFluxSyntax,
+    removePanelAtPath,
     resolvePanelForScopedFix,
 } from './panelDiscovery';
 
@@ -33,6 +35,29 @@ describe('findPanelByStrictTitle', () => {
     it('strips surrounding quotes when matching', () => {
         expect(normalizePanelTitleForMatch('"Pressure Gauge"')).toBe('pressure gauge');
         expect(findPanelByStrictTitle(entries, '"Pressure Gauge"')?.panelId).toBe(2);
+    });
+});
+
+describe('findPanelForRemoval', () => {
+    it('maps shortened remove query to full panel title', () => {
+        const entries = listDashboardPanels([
+            { id: 1, title: 'Cartridge Happiness Score', type: 'gauge' },
+        ]);
+        expect(findPanelForRemoval(entries, 'Cartridge Happiness Panel')?.title).toBe(
+            'Cartridge Happiness Score'
+        );
+    });
+});
+
+describe('removePanelAtPath', () => {
+    it('splices top-level panel', () => {
+        const panels = [
+            { id: 1, title: 'A' },
+            { id: 2, title: 'B' },
+        ];
+        expect(removePanelAtPath(panels, [0])).toBe(true);
+        expect(panels).toHaveLength(1);
+        expect((panels[0] as { title: string }).title).toBe('B');
     });
 });
 

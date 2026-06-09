@@ -11,6 +11,11 @@ import {
     userWantsPanelRename,
 } from './panelRenameParse';
 import {
+    messageDescribesPanelRemove,
+    parsePanelRemoveRequest,
+    userWantsPanelRemove,
+} from './panelRemoveParse';
+import {
     messageMentionsPeerBandPanelCopyIntent,
     userWantsPeerBandPanelCopy,
 } from './peerBandPanelCopyParse';
@@ -49,6 +54,9 @@ export function messageHasProgrammaticHandler(message: string): boolean {
         userWantsPanelRename(text) ||
         messageDescribesPanelRename(text) ||
         parsePanelRenameRequest(text) != null ||
+        userWantsPanelRemove(text) ||
+        messageDescribesPanelRemove(text) ||
+        parsePanelRemoveRequest(text) != null ||
         userWantsDashboardRename(text) ||
         messageDescribesDashboardRename(text) ||
         userWantsPeerBandPanelCopy(text) ||

@@ -88,6 +88,66 @@ export function findPanelByStrictTitle(
     return entries.find((e) => normalizePanelTitleForMatch(e.title) === want);
 }
 
+function stripPanelWordSuffix(title: string): string {
+    return title.replace(/\s+panel\s*$/i, '').trim();
+}
+
+/**
+ * Panel lookup for remove/delete — exact match first, then prefix match when the user
+ * omits words (e.g. "Cartridge Happiness Panel" → "Cartridge Happiness Score").
+ */
+export function findPanelForRemoval(
+    entries: DashboardPanelEntry[],
+    title: string
+): DashboardPanelEntry | undefined {
+    const strict = findPanelByStrictTitle(entries, title);
+    if (strict) {
+        return strict;
+    }
+
+    const core = normalizePanelTitleForMatch(stripPanelWordSuffix(title));
+    if (!core) {
+        return undefined;
+    }
+
+    const candidates = entries.filter((e) => {
+        const have = normalizePanelTitleForMatch(e.title);
+        return have === core || have.startsWith(`${core} `) || have.startsWith(core);
+    });
+
+    if (candidates.length === 1) {
+        return candidates[0];
+    }
+    if (candidates.length > 1) {
+        return [...candidates].sort(
+            (a, b) =>
+                Math.abs(a.title.length - title.length) - Math.abs(b.title.length - title.length)
+        )[0];
+    }
+    return undefined;
+}
+
+/** Remove a panel from dashboard.panels tree by listDashboardPanels path indices. */
+export function removePanelAtPath(rootPanels: unknown[], path: number[]): boolean {
+    if (!Array.isArray(rootPanels) || path.length === 0) {
+        return false;
+    }
+    let current: unknown[] = rootPanels;
+    for (let i = 0; i < path.length - 1; i++) {
+        const node = current[path[i]] as PanelRecord | undefined;
+        if (!node?.panels || !Array.isArray(node.panels)) {
+            return false;
+        }
+        current = node.panels;
+    }
+    const index = path[path.length - 1];
+    if (index < 0 || index >= current.length) {
+        return false;
+    }
+    current.splice(index, 1);
+    return true;
+}
+
 function titleMatches(want: string, have: string): boolean {
     const w = normalizeTitle(want);
     const h = normalizeTitle(have);

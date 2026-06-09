@@ -111,6 +111,15 @@ import {
   formatPanelRenameReply,
 } from '../../../services/programmaticPanelRename';
 import {
+  messageDescribesPanelRemove,
+  parsePanelRemoveRequest,
+  formatPanelRemoveClarification,
+} from '../../../services/panelRemoveParse';
+import {
+  runProgrammaticPanelRemove,
+  formatPanelRemoveReply,
+} from '../../../services/programmaticPanelRemove';
+import {
   messageDescribesDashboardRename,
   parseDashboardRenameRequest,
   formatDashboardRenameClarification,
@@ -1060,6 +1069,60 @@ export const ChatInterface = () => {
               content: finalContent,
               toolExecutions:
                 finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      if (messageDescribesPanelRemove(content)) {
+        errorPathTag = 'panel-remove';
+        const contextUid = contextService.getDashboardUid() ?? undefined;
+        const panelRemoveRequest = parsePanelRemoveRequest(content, { contextDashboardUid: contextUid });
+        if (!panelRemoveRequest) {
+          finalContent = formatPanelRemoveClarification(content);
+        } else if (!mcpClient) {
+          finalContent =
+            '### Could not remove panel\n\nGrafana MCP tools are not connected. Open **Grafana LLM / MCP settings**, enable MCP for Graft, hard-refresh, then try again.';
+        } else {
+          const panelRemoveResult = await runProgrammaticPanelRemove(mcpClient, panelRemoveRequest, {
+            contextDashboardUid: contextUid,
+          });
+          finalContent = formatPanelRemoveReply(panelRemoveResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = panelRemoveResult.toolExecutions;
+          clearPendingOnProgrammaticSuccess(panelRemoveResult.ok);
+          if (!panelRemoveResult.ok) {
+            recordGraftFailure({
+              buildNumber: GRAFT_BUILD_NUMBER,
+              intent: 'panel-remove',
+              userMessagePreview: content,
+              error: panelRemoveResult.error ?? 'Unknown error',
+            });
+          }
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
             };
           }
           return updated;

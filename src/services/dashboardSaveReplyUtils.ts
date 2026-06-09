@@ -1,6 +1,7 @@
 import type { ToolExecution } from '../types/llm.types';
 import { extractDashboardUidFromMessage } from './dashboardMentionParse';
 import { messageDescribesPanelRename, userWantsPanelRename } from './panelRenameParse';
+import { messageDescribesPanelRemove, userWantsPanelRemove } from './panelRemoveParse';
 import { parseSearchHitsFromToolExecutions } from './dashboardSearchParse';
 import { stripPanelIndexTables } from './dashboardTaskStatus';
 
@@ -86,6 +87,9 @@ export function extractSuccessLineFromModel(text: string): string | undefined {
 export function describeDefaultSaveOutcome(userMessage: string): string {
     if (userWantsPanelRename(userMessage) || messageDescribesPanelRename(userMessage)) {
         return 'Panel renamed and saved';
+    }
+    if (userWantsPanelRemove(userMessage) || messageDescribesPanelRemove(userMessage)) {
+        return 'Panel removed and saved';
     }
     if (/\b(rename|retitle)\b/i.test(userMessage) && /\bdashboard\b/i.test(userMessage)) {
         return 'Dashboard renamed and saved';
