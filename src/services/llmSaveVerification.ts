@@ -5,8 +5,10 @@ import { extractDashboardFromGetByUid } from './programmaticDashboardClone';
 import { extractDashboardUidFromMessage } from './dashboardMentionParse';
 import { findPanelForRemoval, listDashboardPanels } from './panelDiscovery';
 import { getTurnDashboardBaseline } from './llmDashboardSnapshot';
+import { parsePanelCreateRequest } from './panelCreateParse';
 import { parsePanelRemoveRequest } from './panelRemoveParse';
 import { parsePanelRenameRequest } from './panelRenameParse';
+import { findPanelByStrictTitle } from './panelDiscovery';
 import { savedUidFromTools, savedVersionFromTools } from './dashboardSaveReplyUtils';
 import { hasSuccessfulDashboardSave } from './continueAction';
 
@@ -77,6 +79,34 @@ export async function verifyLlmDashboardSave(
             ? extracted.dashboard.version
             : parseInt(savedVersionFromTools(toolExecutions) ?? '', 10) || undefined;
     const baseline = getTurnDashboardBaseline();
+
+    const createReq = parsePanelCreateRequest(userMessage, { contextDashboardUid: contextDashboardUid ?? uid });
+    if (createReq) {
+        const created = findPanelByStrictTitle(
+            listDashboardPanels(extracted.dashboard.panels),
+            createReq.panelTitle
+        );
+        if (!created) {
+            return {
+                verified: false,
+                skipped: false,
+                uid,
+                version,
+                baselinePanelCount: baseline?.panelCount,
+                currentPanelCount: currentCount,
+                detail: `Panel **${createReq.panelTitle}** was not found after save.`,
+            };
+        }
+        return {
+            verified: true,
+            skipped: false,
+            uid,
+            version,
+            baselinePanelCount: baseline?.panelCount,
+            currentPanelCount: currentCount,
+            detail: `Panel **${createReq.panelTitle}** created (verified, id ${created.panelId ?? '?'}).`,
+        };
+    }
 
     const removeReq = parsePanelRemoveRequest(userMessage, { contextDashboardUid: contextDashboardUid ?? uid });
     if (removeReq) {

@@ -1,6 +1,7 @@
 import { isDashboardDataInvestigationQuestion } from './dashboardInvestigation';
 import { userWantsDashboardReviewOnly } from './dashboardReviewParse';
 import { isSimpleConversationalMessage, messageHasProgrammaticHandler } from './programmaticChatIntents';
+import { messageDescribesPanelCreate } from './panelCreateParse';
 import { messageDescribesPanelRemove, userWantsPanelRemove } from './panelRemoveParse';
 import { messageDescribesPanelRename, userWantsPanelRename } from './panelRenameParse';
 
@@ -26,6 +27,9 @@ export function classifyLlmIntent(userMessage: string, contextDashboardUid?: str
         (READ_ONLY_VERB.test(text) && !MUTATING_VERB.test(text))
     ) {
         return 'read_only';
+    }
+    if (messageDescribesPanelCreate(text)) {
+        return 'programmatic';
     }
     if (userWantsPanelRemove(text, contextDashboardUid) || messageDescribesPanelRemove(text)) {
         return 'programmatic';

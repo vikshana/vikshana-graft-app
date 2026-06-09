@@ -20,6 +20,7 @@ import { isDashboardDataInvestigationQuestion } from './dashboardInvestigation';
 import { formatClarificationIfNeeded } from './requestClarity';
 import { isExplicitSinglePanelCopyRequest } from './singlePanelCopyParse';
 import { messageDescribesPanelRename, userWantsPanelRename } from './panelRenameParse';
+import { userWantsPanelCreate } from './dashboardPanelCreateReply';
 import { appendSuggestedQueryHint } from './suggestedQueryHint';
 import { stripPanelIndexTables } from './dashboardTaskStatus';
 import { formatCompactLookupHint } from './dashboardSaveReplyUtils';
@@ -68,6 +69,20 @@ export function appendDashboardReferencesToReply(
 
     if (clarification && !savedThisTurn && !panelFixTurn) {
         return clarification;
+    }
+
+    if (
+        savedThisTurn &&
+        userWantsPanelCreate(latestUser) &&
+        !userWantsPanelRename(latestUser) &&
+        !messageDescribesPanelRename(latestUser)
+    ) {
+        return applyOperatorFriendlyDashboardSaveReply(
+            content,
+            toolExecutions,
+            recentUserMessages,
+            fallbackUserMessage
+        );
     }
 
     if (

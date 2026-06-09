@@ -17,6 +17,7 @@ import { appendSuggestedQueryHint } from './suggestedQueryHint';
 import { formatContinueActionBlock } from './continueAction';
 import { stripPanelIndexTables } from './dashboardTaskStatus';
 import { userWantsBulkPeerBandFix } from './bulkPeerBandFixParse';
+import { userWantsPanelCreate } from './dashboardPanelCreateReply';
 
 export function extractDashboardTitleFromFixRequest(message: string): string | undefined {
     const named = message.match(/\bnamed\s+"([^"]+)"/i);
@@ -144,6 +145,9 @@ export function shouldUseConcisePanelReply(
         return true;
     }
     const latest = latestNonContinueUserMessage(recentUserMessages) ?? fallbackUserMessage.trim();
+    if (userWantsPanelCreate(latest) || userWantsPanelCreate(fallbackUserMessage)) {
+        return false;
+    }
     if (!latest || /\b(visual copy|clone|copy of|new dashboard)\b/i.test(latest)) {
         return false;
     }

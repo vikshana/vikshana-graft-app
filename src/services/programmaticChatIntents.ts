@@ -43,6 +43,11 @@ import {
     userWantsDashboardMetricPanels,
 } from './dashboardMetricPanelsParse';
 import { userWantsDashboardReviewOnly } from './dashboardReviewParse';
+import {
+    messageDescribesPanelCreate,
+    parsePanelCreateRequest,
+    userWantsPanelCreateProgrammatic,
+} from './panelCreateParse';
 
 /** True when Graft can handle the message via MCP without calling the LLM. */
 export function messageHasProgrammaticHandler(message: string): boolean {
@@ -52,6 +57,9 @@ export function messageHasProgrammaticHandler(message: string): boolean {
     }
 
     return (
+        userWantsPanelCreateProgrammatic(text) ||
+        messageDescribesPanelCreate(text) ||
+        parsePanelCreateRequest(text) != null ||
         userWantsPanelRename(text) ||
         messageDescribesPanelRename(text) ||
         parsePanelRenameRequest(text) != null ||
