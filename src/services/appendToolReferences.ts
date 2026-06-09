@@ -19,6 +19,7 @@ import { applyOperatorFriendlyDashboardReply } from './dashboardTaskStatus';
 import { isDashboardDataInvestigationQuestion } from './dashboardInvestigation';
 import { formatClarificationIfNeeded } from './requestClarity';
 import { isExplicitSinglePanelCopyRequest } from './singlePanelCopyParse';
+import { messageDescribesPanelRename, userWantsPanelRename } from './panelRenameParse';
 import { appendSuggestedQueryHint } from './suggestedQueryHint';
 import { stripPanelIndexTables } from './dashboardTaskStatus';
 import { formatCompactLookupHint } from './dashboardSaveReplyUtils';
@@ -92,6 +93,14 @@ export function appendDashboardReferencesToReply(
     }
 
     if (savedThisTurn) {
+        if (userWantsPanelRename(latestUser) || messageDescribesPanelRename(latestUser)) {
+            return (
+                `### Panel rename should be programmatic\n\n` +
+                `This turn saved via the LLM instead of the panel-rename handler. ` +
+                `Hard-refresh (**Cmd+Shift+R**) so the chat badge shows the latest build, then send the same prompt again. ` +
+                `You should see **Panel renamed**, not **Done (dashboard saved)**.`
+            );
+        }
         return applyOperatorFriendlyDashboardSaveReply(
             content,
             toolExecutions,

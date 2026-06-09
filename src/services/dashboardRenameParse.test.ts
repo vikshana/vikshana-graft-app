@@ -1,6 +1,7 @@
 import {
     computeRenamedDashboardTitle,
     formatDashboardRenameNotFoundClarification,
+    messageDescribesDashboardRename,
     parseDashboardRenameRequest,
     userWantsDashboardRename,
 } from './dashboardRenameParse';
@@ -8,6 +9,14 @@ import {
 describe('dashboardRenameParse', () => {
     const employee =
         'Rename the dashboard for the 2505-200033 machine to be NewMachine instead of Keysight';
+    const panelRename =
+        'Rename the "Pressure Gauge" panel to "System Pressure" on dashboard UID = cfo0wckufbdhce.';
+
+    it('rejects panel rename prompt', () => {
+        expect(messageDescribesDashboardRename(panelRename)).toBe(false);
+        expect(parseDashboardRenameRequest(panelRename)).toBeNull();
+        expect(userWantsDashboardRename(panelRename)).toBe(false);
+    });
 
     it('parses machine rename phrasing', () => {
         const req = parseDashboardRenameRequest(employee);

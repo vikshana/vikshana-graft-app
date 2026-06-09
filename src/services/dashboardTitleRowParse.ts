@@ -1,6 +1,7 @@
 import { extractAllDashboardUids, extractDashboardUidFromMessage } from './dashboardMentionParse';
 import { extractOnDashboardMachineTitle } from './modulePanelReorderParse';
 import { extractRequestedDashboardTitle, findMachineIdsInText } from './dashboardCloneParse';
+import { messageDescribesPanelRename } from './panelRenameParse';
 
 export interface DashboardTitleRowRequest {
     dashboardUid?: string;
@@ -41,7 +42,7 @@ function wantsTitleRowAction(text: string): boolean {
 
 export function userWantsDashboardTitleRow(message: string): boolean {
     const text = normalizeMessageQuotes(message.trim());
-    if (!text) {
+    if (!text || messageDescribesPanelRename(text)) {
         return false;
     }
     const wantsTitle = wantsTitleRowAction(text);
@@ -53,6 +54,9 @@ export function userWantsDashboardTitleRow(message: string): boolean {
 
 export function parseDashboardTitleRowRequest(message: string): DashboardTitleRowRequest | null {
     const text = normalizeMessageQuotes(message.trim());
+    if (messageDescribesPanelRename(text)) {
+        return null;
+    }
     const titleLabel = extractTitleLabel(text);
     if (!titleLabel) {
         return null;

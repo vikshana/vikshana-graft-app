@@ -23,6 +23,22 @@ describe('appendToolReferences', () => {
         expect(out).toContain('See Panel index below');
     });
 
+    it('blocks misleading dashboard saved reply for panel rename prompts', () => {
+        const user =
+            'Rename the "Pressure Gauge" panel to "System Pressure" on dashboard UID = cfo0wckufbdhce.';
+        const tools: ToolExecution[] = [
+            {
+                name: 'update_dashboard',
+                status: 'success' as const,
+                summary: 'Saved dashboard uid=cfo0wckufbdhce, version=76',
+            },
+        ];
+        const out = appendDashboardReferencesToReply('Done.', tools, [user], user);
+        expect(out).toContain('Panel rename should be programmatic');
+        expect(out).not.toContain('### Done (dashboard saved)');
+        expect(out).not.toContain('Dashboard renamed and saved');
+    });
+
     it('uses concise dashboard saved reply for any successful update_dashboard', () => {
         const user = 'Change the overview panel title on 2505-200033 / Keysight';
         const modelText = 'Updated the overview panel.\n\n' + panelTable;

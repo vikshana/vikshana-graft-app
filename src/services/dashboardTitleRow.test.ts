@@ -61,6 +61,13 @@ describe('dashboardTitleRowParse', () => {
     it('formats example prompt', () => {
         expect(formatDashboardTitleRowExamplePrompt()).toContain('cfo0wckufbdhce');
     });
+
+    it('rejects panel rename prompts', () => {
+        const panelRename =
+            'Rename the "Pressure Gauge" panel to "System Pressure" on dashboard UID = cfo0wckufbdhce.';
+        expect(userWantsDashboardTitleRow(panelRename)).toBe(false);
+        expect(parseDashboardTitleRowRequest(panelRename)).toBeNull();
+    });
 });
 
 describe('dashboardTitleRowLayout', () => {

@@ -39,6 +39,7 @@ import {
     runProgrammaticDashboardMetricPanels,
     formatDashboardMetricPanelsReply,
 } from './programmaticDashboardMetricPanels';
+import { messageDescribesPanelRename, userWantsPanelRename } from './panelRenameParse';
 
 export interface LlmTurnContext {
     userMessage: string;
@@ -60,7 +61,7 @@ export interface ProgrammaticFallbackPlan {
 /** LLM stalled, asked unnecessary questions, leaked tools, or saved a layout that still fails validation. */
 export function planProgrammaticFallback(ctx: LlmTurnContext): ProgrammaticFallbackPlan | null {
     const text = ctx.userMessage.trim();
-    if (!text) {
+    if (!text || userWantsPanelRename(text) || messageDescribesPanelRename(text)) {
         return null;
     }
 
@@ -154,7 +155,12 @@ export async function tryProgrammaticFallbackAfterLlm(
     let plan = planProgrammaticFallback(ctx);
     const uid = extractDashboardUidFromMessage(ctx.userMessage);
 
-    if (hasSuccessfulDashboardSave(ctx.toolExecutions) && uid) {
+    if (
+        hasSuccessfulDashboardSave(ctx.toolExecutions) &&
+        uid &&
+        !userWantsPanelRename(ctx.userMessage) &&
+        !messageDescribesPanelRename(ctx.userMessage)
+    ) {
         const toolExecutions = [...ctx.toolExecutions];
         const { issues, error } = await fetchLayoutIssues(mcpClient, uid, toolExecutions);
         if (!error && layoutNeedsProgrammaticRepair(issues)) {
