@@ -36,7 +36,6 @@ async function isGraftLoading(page: Page): Promise<boolean> {
 export async function openFreshGraftChat(page: Page): Promise<void> {
     await page.goto('/a/vikshana-graft-app');
 
-    // Wait for server-side history hydration before resetting — otherwise restore races Back.
     await page
         .waitForResponse(
             (response) =>
@@ -45,12 +44,21 @@ export async function openFreshGraftChat(page: Page): Promise<void> {
         )
         .catch(() => undefined);
 
-    const backButton = page.getByTestId('back-button');
-    if (await backButton.isVisible().catch(() => false)) {
-        await backButton.click();
+    await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 20_000 });
+
+    // Restored sessions open in chat view — try Back, but chat input works in either mode.
+    for (let attempt = 0; attempt < 2; attempt++) {
+        if (await page.getByTestId('landing-title').isVisible().catch(() => false)) {
+            break;
+        }
+        const backButton = page.getByTestId('back-button');
+        if (await backButton.isVisible().catch(() => false)) {
+            await backButton.click();
+            await page.waitForTimeout(400);
+        }
     }
 
-    await expect(page.getByTestId('landing-title')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('chat-input')).toBeVisible();
 
     const minBuild = process.env.GRAFANA_MIN_BUILD?.trim();
     if (minBuild) {
@@ -64,7 +72,7 @@ export async function openFreshGraftChat(page: Page): Promise<void> {
 }
 
 export async function sendGraftPrompt(page: Page, prompt: string): Promise<number> {
-    const startCopyCount = await page.getByTitle('Copy message').count();
+    const startHeadingCount = await page.locator('main h3').count();
 
     const input = page.getByTestId('chat-input');
     await input.fill(prompt);
@@ -73,23 +81,34 @@ export async function sendGraftPrompt(page: Page, prompt: string): Promise<numbe
     if (await landingSend.isVisible().catch(() => false)) {
         await landingSend.click();
         await expect(page.getByTestId('landing-title')).not.toBeVisible();
-        return startCopyCount;
+        return startHeadingCount;
     }
 
     await input.press('Enter');
-    return startCopyCount;
+    return startHeadingCount;
 }
 
 export async function waitForAssistantReply(
     page: Page,
-    { timeoutMs, startCopyCount }: { timeoutMs: number; startCopyCount: number }
+    { timeoutMs, startCopyCount: startHeadingCount }: { timeoutMs: number; startCopyCount: number }
 ): Promise<string> {
     await expect
         .poll(
             async () => {
-                const copyCount = await page.getByTitle('Copy message').count();
                 const loading = await isGraftLoading(page);
-                return copyCount > startCopyCount && !loading;
+                return loading;
+            },
+            { timeout: 10_000, intervals: [200, 500, 1000] }
+        )
+        .toBe(true)
+        .catch(() => undefined);
+
+    await expect
+        .poll(
+            async () => {
+                const headingCount = await page.locator('main h3').count();
+                const loading = await isGraftLoading(page);
+                return headingCount > startHeadingCount && !loading;
             },
             { timeout: timeoutMs, intervals: [500, 1000, 2000] }
         )
@@ -99,10 +118,13 @@ export async function waitForAssistantReply(
 }
 
 export async function getLastAssistantMessageText(page: Page): Promise<string> {
-    const copyButton = page.getByTitle('Copy message').last();
-    await expect(copyButton).toBeVisible();
-    const content = copyButton.locator('xpath=preceding-sibling::*[1]');
-    return ((await content.innerText()) ?? '').trim();
+    const heading = page.locator('main h3').last();
+    await expect(heading).toBeVisible();
+    const container = heading.locator('xpath=ancestor::div[contains(@class, "message")][1]');
+    if ((await container.count()) > 0) {
+        return ((await container.innerText()) ?? '').trim();
+    }
+    return ((await heading.locator('..').innerText()) ?? '').trim();
 }
 
 export function assertReplyExpectations(
