@@ -4,12 +4,27 @@ import {
     appendDashboardReferencesToReply,
     appendSaveVerificationWarning,
 } from './appendToolReferences';
+import { hasSuccessfulDashboardSave } from './continueAction';
 import { isSimpleConversationalMessage } from './programmaticChatIntents';
 import { truncateMessages } from './truncation';
 import {
     formatPendingTaskContextBlock,
     recordPendingTaskAfterAssistantTurn,
 } from './dashboardPendingTask';
+import { buildIntentAwareLlmContext, getLlmIntentForMessage } from './llmContextBuilder';
+import { buildDashboardDiscoveryContextBlock } from './llmDashboardDiscovery';
+import { resetTurnDashboardBaseline } from './llmDashboardSnapshot';
+import { isReadOnlyLlmIntent } from './llmIntentRouter';
+import { verifyLlmDashboardSave } from './llmSaveVerification';
+import { applyLlmVerifiedSaveReply } from './llmVerifiedSaveReply';
+import { filterToolsForReadOnlyIntent } from './toolFilter';
+import { extractDashboardUidFromMessage } from './dashboardMentionParse';
+import { parsePanelRemoveRequest } from './panelRemoveParse';
+import {
+    formatPanelRemoveReply,
+    runProgrammaticPanelRemove,
+} from './programmaticPanelRemove';
+import type { DashboardContext, DataSourceContext } from '../types/context.types';
 
 export interface GraftChatTurnResult {
     displayContent: string;
@@ -26,6 +41,10 @@ export interface GraftChatTurnParams {
     signal?: AbortSignal;
     mcpClient: unknown;
     mcpTools: unknown[];
+    buildNumber: string | number;
+    dashboard?: DashboardContext;
+    dataSources?: DataSourceContext[];
+    contextDashboardUid?: string;
     onStream?: (content: string, toolExecutions?: ToolExecution[], thinkingSeconds?: number) => void;
 }
 
@@ -39,6 +58,10 @@ export async function runGraftChatTurn(params: GraftChatTurnParams): Promise<Gra
         signal,
         mcpClient,
         mcpTools,
+        buildNumber,
+        dashboard,
+        dataSources = [],
+        contextDashboardUid,
         onStream,
     } = params;
 
@@ -47,8 +70,37 @@ export async function runGraftChatTurn(params: GraftChatTurnParams): Promise<Gra
     let thinkingDuration: number | undefined;
     let thinkingStartTime: number | null = null;
 
+    resetTurnDashboardBaseline();
+
     const truncatedMessages = truncateMessages(conversationMessages, 10);
-    const enrichedContext = `${context}${formatPendingTaskContextBlock()}`;
+    const intent = getLlmIntentForMessage(fallbackUserMessage, contextDashboardUid);
+
+    let enrichedContext = context;
+    if (dashboard) {
+        enrichedContext = buildIntentAwareLlmContext(context, fallbackUserMessage, dashboard, dataSources);
+    }
+    enrichedContext += formatPendingTaskContextBlock();
+
+    const uidForDiscovery =
+        extractDashboardUidFromMessage(fallbackUserMessage) ?? contextDashboardUid ?? dashboard?.uid;
+    if (
+        mcpClient &&
+        uidForDiscovery &&
+        !isSimpleConversationalMessage(fallbackUserMessage) &&
+        intent !== 'programmatic'
+    ) {
+        const discovery = await buildDashboardDiscoveryContextBlock(
+            mcpClient as Parameters<typeof buildDashboardDiscoveryContextBlock>[0],
+            uidForDiscovery
+        );
+        if (discovery) {
+            enrichedContext += `\n\n${discovery}`;
+        }
+    }
+
+    const effectiveTools = isReadOnlyLlmIntent(intent)
+        ? filterToolsForReadOnlyIntent(mcpTools as Parameters<typeof filterToolsForReadOnlyIntent>[0])
+        : mcpTools;
 
     await llmService.chat(
         truncatedMessages,
@@ -74,7 +126,7 @@ export async function runGraftChatTurn(params: GraftChatTurnParams): Promise<Gra
         modelType,
         signal,
         mcpClient,
-        mcpTools
+        effectiveTools
     );
 
     const recentUserTexts = conversationMessages
@@ -87,16 +139,53 @@ export async function runGraftChatTurn(params: GraftChatTurnParams): Promise<Gra
               finalContent,
               finalToolExecutions,
               recentUserTexts,
-              fallbackUserMessage
+              fallbackUserMessage,
+              { skipGenericSaveReply: hasSuccessfulDashboardSave(finalToolExecutions) }
           );
 
     if (!isSimpleConversationalMessage(fallbackUserMessage)) {
-        displayContent = appendSaveVerificationWarning(
-            displayContent,
-            finalToolExecutions,
-            recentUserTexts,
-            fallbackUserMessage
-        );
+        if (hasSuccessfulDashboardSave(finalToolExecutions) && mcpClient) {
+            let verification = await verifyLlmDashboardSave(
+                mcpClient as Parameters<typeof verifyLlmDashboardSave>[0],
+                fallbackUserMessage,
+                finalToolExecutions,
+                contextDashboardUid ?? uidForDiscovery
+            );
+            if (!verification.verified && !verification.skipped) {
+                const removeReq = parsePanelRemoveRequest(fallbackUserMessage, {
+                    contextDashboardUid: contextDashboardUid ?? uidForDiscovery,
+                });
+                if (removeReq) {
+                    const repaired = await runProgrammaticPanelRemove(
+                        mcpClient as Parameters<typeof runProgrammaticPanelRemove>[0],
+                        removeReq,
+                        { contextDashboardUid: contextDashboardUid ?? uidForDiscovery }
+                    );
+                    if (repaired.ok) {
+                        displayContent = formatPanelRemoveReply(repaired, Number(buildNumber));
+                        finalToolExecutions = [...finalToolExecutions, ...repaired.toolExecutions];
+                        verification = { verified: true, skipped: false, detail: 'Repaired via programmatic panel remove.' };
+                    }
+                }
+            }
+            if (!verification.skipped) {
+                displayContent = applyLlmVerifiedSaveReply(
+                    displayContent,
+                    verification,
+                    finalToolExecutions,
+                    recentUserTexts,
+                    fallbackUserMessage,
+                    buildNumber
+                );
+            }
+        } else {
+            displayContent = appendSaveVerificationWarning(
+                displayContent,
+                finalToolExecutions,
+                recentUserTexts,
+                fallbackUserMessage
+            );
+        }
     }
 
     recordPendingTaskAfterAssistantTurn(

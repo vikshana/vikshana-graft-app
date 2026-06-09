@@ -44,7 +44,7 @@ export function appendDashboardReferencesToReply(
     toolExecutions: ToolExecution[],
     recentUserMessages: string[] = [],
     fallbackUserMessage = '',
-    options?: { finalize?: boolean }
+    options?: { finalize?: boolean; skipGenericSaveReply?: boolean }
 ): string {
     const latestUser =
         latestNonContinueUserMessage(recentUserMessages) ?? fallbackUserMessage.trim();
@@ -93,6 +93,9 @@ export function appendDashboardReferencesToReply(
     }
 
     if (savedThisTurn) {
+        if (options?.skipGenericSaveReply) {
+            return stripPanelIndexTables(content);
+        }
         if (userWantsPanelRename(latestUser) || messageDescribesPanelRename(latestUser)) {
             return (
                 `### Panel rename should be programmatic\n\n` +

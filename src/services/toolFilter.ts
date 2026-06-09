@@ -33,10 +33,17 @@ const ALLOWED_TOOLS = new Set([
     'get_datasource_by_uid',
 ]);
 
+const MUTATING_ONLY_TOOLS = new Set(['update_dashboard']);
+
 /**
  * Filters MCP tools to only those in the allowed set.
  * Reduces tool token usage from ~14,800 to ~5,300 tokens per API call.
  */
 export function filterTools(tools: any[]): any[] {
-    return tools.filter(t => ALLOWED_TOOLS.has(t.function?.name));
+    return tools.filter((t) => ALLOWED_TOOLS.has(t.function?.name));
+}
+
+/** Remove update_dashboard for read-only LLM intents (review/suggest/investigate). */
+export function filterToolsForReadOnlyIntent(tools: any[]): any[] {
+    return filterTools(tools).filter((t) => !MUTATING_ONLY_TOOLS.has(t.function?.name ?? ''));
 }

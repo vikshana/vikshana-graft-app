@@ -25,6 +25,8 @@ import {
     stripRateLimitWaitNotice,
     waitForRateLimitCooldown,
 } from './chatError';
+import { recordDashboardFetchFromMcpText } from './llmDashboardSnapshot';
+import { classifyLlmIntent } from './llmIntentRouter';
 import {
     executeChunkedUpdateDashboard,
     formatChunkedUpdateForLlm,
@@ -158,6 +160,19 @@ export function needsDashboardContinueNudge(
 
     if (userWantsDashboardReviewOnly(intent) || userWantsDashboardReviewOnly(userContent)) {
         return false;
+    }
+
+    if (classifyLlmIntent(intent) === 'read_only') {
+        const hadDiscovery = toolExecutions.some(
+            (t) => DISCOVERY_TOOLS.has(t.name) && t.status === 'success'
+        );
+        const numberedSuggestions = /^\s*\d+[\).\]]\s+/m.test(assistantContent);
+        const offersToApply = /\b(Would you like me to apply|Should I apply|want me to apply)\b/i.test(
+            assistantContent
+        );
+        if (hadDiscovery && (numberedSuggestions || offersToApply)) {
+            return false;
+        }
     }
 
     const scoped = parseScopedPanelFixRequest(intent);
@@ -504,6 +519,9 @@ export const llmService = {
                         if (evaluated.ok) {
                             if (toolName === 'get_dashboard_by_uid') {
                                 const uid = typeof args.uid === 'string' ? args.uid : '';
+                                if (uid) {
+                                    recordDashboardFetchFromMcpText(uid, evaluated.text);
+                                }
                                 const extracted = extractDashboardFromGetByUid(evaluated.text);
                                 if (extracted?.dashboard && uid) {
                                     const title =

@@ -40,6 +40,12 @@ import {
     formatDashboardMetricPanelsReply,
 } from './programmaticDashboardMetricPanels';
 import { messageDescribesPanelRename, userWantsPanelRename } from './panelRenameParse';
+import {
+    messageDescribesPanelRemove,
+    parsePanelRemoveRequest,
+    userWantsPanelRemove,
+} from './panelRemoveParse';
+import { formatPanelRemoveReply, runProgrammaticPanelRemove } from './programmaticPanelRemove';
 
 export interface LlmTurnContext {
     userMessage: string;
@@ -51,7 +57,8 @@ export type ProgrammaticFallbackKind =
     | 'dashboard_rebuild'
     | 'dashboard_title_row'
     | 'module_panel_reorder'
-    | 'dashboard_metric_panels';
+    | 'dashboard_metric_panels'
+    | 'panel_remove';
 
 export interface ProgrammaticFallbackPlan {
     kind: ProgrammaticFallbackKind;
@@ -61,7 +68,28 @@ export interface ProgrammaticFallbackPlan {
 /** LLM stalled, asked unnecessary questions, leaked tools, or saved a layout that still fails validation. */
 export function planProgrammaticFallback(ctx: LlmTurnContext): ProgrammaticFallbackPlan | null {
     const text = ctx.userMessage.trim();
-    if (!text || userWantsPanelRename(text) || messageDescribesPanelRename(text)) {
+    if (!text) {
+        return null;
+    }
+    if (userWantsPanelRename(text) || messageDescribesPanelRename(text)) {
+        return null;
+    }
+    if (userWantsPanelRemove(text) || messageDescribesPanelRemove(text)) {
+        const removeReq = parsePanelRemoveRequest(text);
+        const saved = hasSuccessfulDashboardSave(ctx.toolExecutions);
+        const llmStalled =
+            !saved &&
+            (responseNeedsContinueAction(ctx.assistantContent) ||
+                assistantAskedPendingQuestion(ctx.assistantContent) ||
+                contentHasLeakedToolCalls(ctx.assistantContent));
+        if (removeReq && (llmStalled || saved)) {
+            return {
+                kind: 'panel_remove',
+                reason: saved
+                    ? 'LLM saved but panel may still be present; removing programmatically with verification.'
+                    : 'LLM stalled before removing the panel; applying programmatic panel remove.',
+            };
+        }
         return null;
     }
 
@@ -159,7 +187,9 @@ export async function tryProgrammaticFallbackAfterLlm(
         hasSuccessfulDashboardSave(ctx.toolExecutions) &&
         uid &&
         !userWantsPanelRename(ctx.userMessage) &&
-        !messageDescribesPanelRename(ctx.userMessage)
+        !messageDescribesPanelRename(ctx.userMessage) &&
+        !userWantsPanelRemove(ctx.userMessage) &&
+        !messageDescribesPanelRemove(ctx.userMessage)
     ) {
         const toolExecutions = [...ctx.toolExecutions];
         const { issues, error } = await fetchLayoutIssues(mcpClient, uid, toolExecutions);
@@ -264,6 +294,27 @@ export async function tryProgrammaticFallbackAfterLlm(
         };
     }
 
+    if (plan.kind === 'panel_remove') {
+        const request = parsePanelRemoveRequest(ctx.userMessage);
+        if (!request) {
+            return null;
+        }
+        const result = await runProgrammaticPanelRemove(mcpClient, request);
+        return {
+            applied: result.ok,
+            kind: plan.kind,
+            reason: plan.reason,
+            content:
+                (result.ok
+                    ? `### Programmatic repair — ${plan.kind} (build ${buildNumber})\n\n` +
+                      `_${plan.reason}_\n\n`
+                    : `### Programmatic repair attempted — ${plan.kind} (build ${buildNumber})\n\n` +
+                      `_${plan.reason}_\n\n`) +
+                formatPanelRemoveReply(result, Number(buildNumber)).replace(/^###[^\n]+\n\n/, ''),
+            toolExecutions: [...ctx.toolExecutions, ...result.toolExecutions],
+        };
+    }
+
     return null;
 }
 
@@ -292,5 +343,10 @@ export const PROGRAMMATIC_FALLBACK_REGISTRY: Array<{
         kind: 'module_panel_reorder',
         triggers: 'Module N Current block interspersed or above non-module panels',
         handler: 'computeModulePanelSectionStartY + reorder',
+    },
+    {
+        kind: 'panel_remove',
+        triggers: 'remove/delete panel; LLM stalled or save did not remove panel',
+        handler: 'runProgrammaticPanelRemove + post-save verification',
     },
 ];

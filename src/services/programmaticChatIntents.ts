@@ -42,6 +42,7 @@ import {
     parseDashboardMetricPanelsRequest,
     userWantsDashboardMetricPanels,
 } from './dashboardMetricPanelsParse';
+import { userWantsDashboardReviewOnly } from './dashboardReviewParse';
 
 /** True when Graft can handle the message via MCP without calling the LLM. */
 export function messageHasProgrammaticHandler(message: string): boolean {
@@ -72,6 +73,7 @@ export function messageHasProgrammaticHandler(message: string): boolean {
         parseDashboardTitleRowRequest(text) != null ||
         userWantsDashboardMetricPanels(text) ||
         parseDashboardMetricPanelsRequest(text) != null ||
+        userWantsDashboardReviewOnly(text) ||
         userWantsDashboardRebuild(text) ||
         parseDashboardRebuildRequest(text) != null ||
         parseAddPeerRfPanelRequest(text) != null ||

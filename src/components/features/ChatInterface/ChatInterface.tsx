@@ -2011,6 +2011,8 @@ export const ChatInterface = () => {
         setMessages(messagesForContinue);
       };
 
+      const contextDashboardUid = contextService.getDashboardUid() ?? undefined;
+
       const firstTurn = await runGraftChatTurn({
         conversationMessages: newMessages,
         fallbackUserMessage: content,
@@ -2019,6 +2021,10 @@ export const ChatInterface = () => {
         signal: controller.signal,
         mcpClient,
         mcpTools,
+        buildNumber: GRAFT_BUILD_NUMBER,
+        dashboard,
+        dataSources,
+        contextDashboardUid,
         onStream: streamAssistant,
       });
       applyTurnResult(firstTurn, newMessages);
@@ -2053,6 +2059,10 @@ export const ChatInterface = () => {
                 signal: controller.signal,
                 mcpClient,
                 mcpTools,
+                buildNumber: GRAFT_BUILD_NUMBER,
+                dashboard,
+                dataSources,
+                contextDashboardUid,
                 onStream: streamAssistant,
             });
             applyTurnResult(nextTurn, withContinue);
