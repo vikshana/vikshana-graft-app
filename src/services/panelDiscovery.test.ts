@@ -1,9 +1,40 @@
 import {
     findFluxBrokenPanels,
+    findPanelByStrictTitle,
     listDashboardPanels,
+    normalizePanelTitleForMatch,
     panelHasBrokenFluxSyntax,
     resolvePanelForScopedFix,
 } from './panelDiscovery';
+
+describe('findPanelByStrictTitle', () => {
+    const entries = listDashboardPanels([
+        { id: 1, title: 'Pressure', type: 'gauge' },
+        { id: 2, title: 'Pressure Gauge', type: 'gauge' },
+        { id: 3, title: 'Pressure Monitoring', type: 'timeseries' },
+    ]);
+
+    it('matches exact title case-insensitively', () => {
+        const hit = findPanelByStrictTitle(entries, 'pressure gauge');
+        expect(hit?.panelId).toBe(2);
+        expect(hit?.title).toBe('Pressure Gauge');
+    });
+
+    it('does not match shorter title when query is longer', () => {
+        expect(findPanelByStrictTitle(entries, 'Pressure Gauge')?.panelId).toBe(2);
+        expect(findPanelByStrictTitle(entries, 'Pressure')?.panelId).toBe(1);
+    });
+
+    it('does not fuzzy-match Pressure Monitoring for Pressure Gauge', () => {
+        expect(findPanelByStrictTitle(entries, 'Pressure Gauge')?.title).toBe('Pressure Gauge');
+        expect(findPanelByStrictTitle(entries, 'Pressure Monitoring')?.panelId).toBe(3);
+    });
+
+    it('strips surrounding quotes when matching', () => {
+        expect(normalizePanelTitleForMatch('"Pressure Gauge"')).toBe('pressure gauge');
+        expect(findPanelByStrictTitle(entries, '"Pressure Gauge"')?.panelId).toBe(2);
+    });
+});
 
 describe('resolvePanelForScopedFix', () => {
     const dashboard = {

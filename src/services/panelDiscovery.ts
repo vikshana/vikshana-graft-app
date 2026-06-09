@@ -67,6 +67,27 @@ function normalizeTitle(title: string): string {
     return title.trim().toLowerCase();
 }
 
+/** Normalize panel titles for rename / exact lookup (trim quotes, collapse whitespace). */
+export function normalizePanelTitleForMatch(title: string): string {
+    return title
+        .trim()
+        .replace(/^["']|["']$/g, '')
+        .replace(/\s+/g, ' ')
+        .toLowerCase();
+}
+
+/** Exact title match only — avoids renaming "Pressure" when user asked for "Pressure Gauge". */
+export function findPanelByStrictTitle(
+    entries: DashboardPanelEntry[],
+    title: string
+): DashboardPanelEntry | undefined {
+    const want = normalizePanelTitleForMatch(title);
+    if (!want) {
+        return undefined;
+    }
+    return entries.find((e) => normalizePanelTitleForMatch(e.title) === want);
+}
+
 function titleMatches(want: string, have: string): boolean {
     const w = normalizeTitle(want);
     const h = normalizeTitle(have);

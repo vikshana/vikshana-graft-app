@@ -71,6 +71,45 @@ describe('programmaticPanelRename', () => {
         );
     });
 
+    it('renames Pressure Gauge not shorter Pressure when both exist', async () => {
+        const withPressure = {
+            ...dashboardJson,
+            panels: [
+                { id: 200, title: 'Pressure', type: 'gauge', gridPos: { x: 0, y: 0, w: 6, h: 6 } },
+                { id: 201, title: 'Pressure Gauge', type: 'gauge', gridPos: { x: 6, y: 0, w: 6, h: 6 } },
+            ],
+        };
+        let savedPanelId: number | undefined;
+        const client = {
+            callTool: jest.fn(async ({ name, arguments: args }: { name: string; arguments: unknown }) => {
+                if (name === 'get_dashboard_by_uid') {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: JSON.stringify({ dashboard: withPressure }),
+                            },
+                        ],
+                    };
+                }
+                if (name === 'update_dashboard') {
+                    const dash = (args as { dashboard?: { panels?: { id?: number; title?: string }[] } })
+                        .dashboard;
+                    const renamed = dash?.panels?.find((p) => p.title === 'System Pressure');
+                    savedPanelId = renamed?.id;
+                    return {
+                        content: [{ type: 'text', text: JSON.stringify({ uid: 'cfo0wckufbdhce', version: 71 }) }],
+                    };
+                }
+                throw new Error(`unexpected tool ${name}`);
+            }),
+        };
+        const result = await runProgrammaticPanelRename(client, request);
+        expect(result.ok).toBe(true);
+        expect(result.previousPanelTitle).toBe('Pressure Gauge');
+        expect(savedPanelId).toBe(201);
+    });
+
     it('returns clarification when panel is missing', async () => {
         const result = await runProgrammaticPanelRename(mcpClient(), {
             ...request,

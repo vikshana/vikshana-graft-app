@@ -4,7 +4,7 @@ import { callMcpTool } from './mcpToolClient';
 import type { McpClient } from './dashboardChunkedUpdate';
 import { stampDashboardForOverwrite } from './fluxQueryFix';
 import { normalizeUpdateDashboardArgs } from './updateDashboardArgs';
-import { listDashboardPanels, type DashboardPanelEntry } from './panelDiscovery';
+import { findPanelByStrictTitle, listDashboardPanels, type DashboardPanelEntry } from './panelDiscovery';
 import type { PanelRenameRequest } from './panelRenameParse';
 import { formatPanelRenameNotFoundClarification } from './panelRenameParse';
 import {
@@ -36,24 +36,6 @@ function finishTool(step: ToolExecution, outcome: { ok: boolean; error?: string;
         error: outcome.error,
         summary: outcome.summary,
     };
-}
-
-function normalizeTitle(title: string): string {
-    return title.trim().toLowerCase();
-}
-
-function findPanelByExactTitle(
-    entries: DashboardPanelEntry[],
-    title: string
-): DashboardPanelEntry | undefined {
-    const want = normalizeTitle(title);
-    const exact = entries.find((e) => normalizeTitle(e.title) === want);
-    if (exact) {
-        return exact;
-    }
-    return entries.find(
-        (e) => normalizeTitle(e.title).includes(want) || want.includes(normalizeTitle(e.title))
-    );
 }
 
 async function resolveDashboardUid(
@@ -148,7 +130,7 @@ export async function runProgrammaticPanelRename(
     const baseline = extracted.dashboard;
     const dashboardTitle = typeof baseline.title === 'string' ? baseline.title : resolved.title;
     const entries = listDashboardPanels(baseline.panels);
-    const panelEntry = findPanelByExactTitle(entries, request.currentPanelTitle);
+    const panelEntry = findPanelByStrictTitle(entries, request.currentPanelTitle);
     if (!panelEntry) {
         return {
             ok: false,
@@ -179,7 +161,7 @@ export async function runProgrammaticPanelRename(
 
     const proposed = JSON.parse(JSON.stringify(baseline)) as Record<string, unknown>;
     const proposedEntries = listDashboardPanels(proposed.panels);
-    const proposedEntry = findPanelByExactTitle(proposedEntries, request.currentPanelTitle);
+    const proposedEntry = findPanelByStrictTitle(proposedEntries, request.currentPanelTitle);
     if (!proposedEntry) {
         return { ok: false, error: 'Could not locate panel in dashboard copy', toolExecutions, dashboardUid: targetUid };
     }
@@ -232,7 +214,7 @@ export async function runProgrammaticPanelRename(
             };
         }
         const verifiedEntries = listDashboardPanels(verified?.dashboard?.panels);
-        const renamed = findPanelByExactTitle(verifiedEntries, request.newPanelTitle);
+        const renamed = findPanelByStrictTitle(verifiedEntries, request.newPanelTitle);
         if (!renamed) {
             return {
                 ok: false,
