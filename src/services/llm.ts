@@ -51,6 +51,7 @@ import { resolvePanelForScopedFix } from './panelDiscovery';
 import { tryInterceptRenameBeforeLlm } from './renameLlmGuard';
 import { messageDescribesDashboardRename } from './dashboardRenameParse';
 import { messageDescribesPanelRename } from './panelRenameParse';
+import { userWantsDashboardReviewOnly } from './dashboardReviewParse';
 import { isSimpleConversationalMessage } from './programmaticChatIntents';
 import { contentHasLeakedToolCalls, executeLeakedToolCalls } from './leakedToolCallRecovery';
 import { isExplicitSinglePanelCopyRequest } from './singlePanelCopyParse';
@@ -154,6 +155,11 @@ export function needsDashboardContinueNudge(
     const intent =
         [...recentUserMessages].reverse().find((m) => !/^continue\.?$/i.test(m.trim())) ??
         userContent;
+
+    if (userWantsDashboardReviewOnly(intent) || userWantsDashboardReviewOnly(userContent)) {
+        return false;
+    }
+
     const scoped = parseScopedPanelFixRequest(intent);
     if (scoped) {
         return !toolExecutions.some(

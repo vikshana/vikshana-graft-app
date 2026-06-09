@@ -143,6 +143,14 @@ import {
   runProgrammaticDashboardMetricPanels,
   formatDashboardMetricPanelsReply,
 } from '../../../services/programmaticDashboardMetricPanels';
+import {
+  parseDashboardReviewRequest,
+  userWantsDashboardReviewOnly,
+} from '../../../services/dashboardReviewParse';
+import {
+  runProgrammaticDashboardReview,
+  formatDashboardReviewReply,
+} from '../../../services/programmaticDashboardReview';
 import { formatChatErrorForUser, extractErrorMessage } from '../../../services/chatError';
 import { contentHasLeakedToolCalls } from '../../../services/leakedToolCallRecovery';
 import { tryProgrammaticFallbackAfterLlm } from '../../../services/programmaticLlmFallback';
@@ -1096,6 +1104,54 @@ export const ChatInterface = () => {
               intent: 'dashboard-rename',
               userMessagePreview: content,
               error: dashboardRenameResult.error ?? 'Unknown error',
+            });
+          }
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      const dashboardReviewRequest = parseDashboardReviewRequest(content);
+      if (userWantsDashboardReviewOnly(content) && dashboardReviewRequest) {
+        errorPathTag = 'dashboard-review';
+        if (!mcpClient) {
+          finalContent = '### Could not review dashboard\n\nGrafana MCP tools are not connected.';
+        } else {
+          const reviewResult = await runProgrammaticDashboardReview(mcpClient, dashboardReviewRequest);
+          finalContent = formatDashboardReviewReply(reviewResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = reviewResult.toolExecutions;
+          if (!reviewResult.ok) {
+            recordGraftFailure({
+              buildNumber: GRAFT_BUILD_NUMBER,
+              intent: 'dashboard-review',
+              userMessagePreview: content,
+              error: reviewResult.error ?? 'Unknown error',
+              dashboardTitle: reviewResult.dashboardTitle,
             });
           }
         }

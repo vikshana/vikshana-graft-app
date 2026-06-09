@@ -4,6 +4,7 @@ import {
     userWantsDashboardWork,
 } from './llm';
 import type { ToolExecution } from '../types/llm.types';
+import { DASHBOARD_REVIEW_EXAMPLE_PROMPT } from './dashboardReviewParse';
 
 const cloneUser =
     'Create a new dashboard named "2505-200033 / GlenTest" that is a visual copy of 2103-176030.';
@@ -110,6 +111,18 @@ describe('needsDashboardContinueNudge', () => {
     it('returns false for non-edit requests', () => {
         expect(
             needsDashboardContinueNudge('what is the error rate?', 'I will query prometheus', [])
+        ).toBe(false);
+    });
+
+    it('does not nudge review-only readability prompts after lookup', () => {
+        const tools: ToolExecution[] = [{ name: 'get_dashboard_by_uid', status: 'success' }];
+        expect(
+            needsDashboardContinueNudge(
+                DASHBOARD_REVIEW_EXAMPLE_PROMPT,
+                'Would you like me to apply these improvements? (Yes / prioritize which one)',
+                tools,
+                [DASHBOARD_REVIEW_EXAMPLE_PROMPT]
+            )
         ).toBe(false);
     });
 
