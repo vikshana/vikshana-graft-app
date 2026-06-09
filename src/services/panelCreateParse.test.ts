@@ -37,4 +37,17 @@ describe('panelCreateParse', () => {
             )
         ).toBe(false);
     });
+
+    it('detects table panel create intent for Keysight', () => {
+        const prompt = 'Create a table panel called "Machine Data" for Keysight.';
+        expect(messageDescribesPanelCreate(prompt)).toBe(true);
+        expect(userWantsPanelCreateProgrammatic(prompt)).toBe(true);
+        expect(parsePanelCreateRequest(prompt)).toEqual({
+            panelTitle: 'Machine Data',
+            panelType: 'table',
+            dashboardUid: undefined,
+            titleLabel: 'keysight',
+            machineId: undefined,
+        });
+    });
 });

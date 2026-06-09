@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "module": "commonjs",
+    "isolatedModules": true,
+    "esModuleInterop": true
+  },
+  "include": ["src/**/*", "jest-setup.js", ".config/jest-setup.js"]
+}

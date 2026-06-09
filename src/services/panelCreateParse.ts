@@ -2,7 +2,7 @@ import { extractAllDashboardUids } from './dashboardMentionParse';
 import { findMachineIdsInText, isMachineId, MACHINE_ID_PATTERN } from './dashboardCloneParse';
 import { userWantsDashboardMetricPanels } from './dashboardMetricPanelsParse';
 
-export type PanelCreateType = 'barchart' | 'gauge' | 'stat' | 'timeseries';
+export type PanelCreateType = 'barchart' | 'gauge' | 'stat' | 'timeseries' | 'table';
 
 export interface PanelCreateRequest {
     panelTitle: string;
@@ -18,10 +18,12 @@ function normalizeMessageQuotes(text: string): string {
 
 function extractPanelTitle(text: string): string | undefined {
     const patterns = [
-        /\b(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?(?:bar\s*chart|gauge|stat|time\s*series|timeseries|chart)\s+panel\s+(?:called|named|titled)\s+"([^"]+)"/i,
-        /\b(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?(?:bar\s*chart|gauge|stat|time\s*series|timeseries|chart)\s+(?:called|named|titled)\s+"([^"]+)"/i,
+        /\b(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?(?:(?:[\w-]+\s+)+)?panel\s+(?:called|named|titled)\s+"([^"]+)"/i,
+        /\b(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?(?:(?:[\w-]+\s+)+)?panel\s+(?:called|named|titled)\s+'([^']+)'/i,
+        /\b(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?(?:bar\s*chart|gauge|stat|time\s*series|timeseries|table|chart)\s+panel\s+(?:called|named|titled)\s+"([^"]+)"/i,
+        /\b(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?(?:bar\s*chart|gauge|stat|time\s*series|timeseries|table|chart)\s+(?:called|named|titled)\s+"([^"]+)"/i,
         /\b(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?panel\s+(?:called|named|titled)\s+"([^"]+)"/i,
-        /\b(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?(?:bar\s*chart|gauge|stat|time\s*series|timeseries|chart)\s+panel\s+(?:called|named|titled)\s+'([^']+)'/i,
+        /\b(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?(?:bar\s*chart|gauge|stat|time\s*series|timeseries|table|chart)\s+panel\s+(?:called|named|titled)\s+'([^']+)'/i,
         /\b(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?panel\s+(?:called|named|titled)\s+'([^']+)'/i,
     ];
     for (const re of patterns) {
@@ -34,6 +36,9 @@ function extractPanelTitle(text: string): string | undefined {
 }
 
 function inferPanelType(text: string): PanelCreateType {
+    if (/\btable\b/i.test(text)) {
+        return 'table';
+    }
     if (/\bbar\s*chart\b/i.test(text) || (/\bchart\b/i.test(text) && !/\btime\s*series\b/i.test(text))) {
         return 'barchart';
     }
@@ -83,7 +88,7 @@ export function messageDescribesPanelCreate(message: string): boolean {
         return false;
     }
     const hasTypedPanel =
-        /\b(bar\s*chart|gauge|stat|time\s*series|timeseries|chart)\b/i.test(text) &&
+        /\b(bar\s*chart|gauge|stat|time\s*series|timeseries|table|chart)\b/i.test(text) &&
         /\bpanel\b/i.test(text);
     const hasNamedPanel =
         /\b(create|add|make)\b/i.test(text) &&

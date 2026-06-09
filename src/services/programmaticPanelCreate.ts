@@ -170,7 +170,8 @@ async function buildPanelTargets(
                 refId: 'A',
                 datasource,
                 expr: `machine_metrics{machine="${machineId}"}`,
-                legendFormat: '{{field}}',
+                legendFormat: request.panelType === 'table' ? undefined : '{{field}}',
+                ...(request.panelType === 'table' ? { format: 'table', instant: true } : {}),
             },
         ];
     }
@@ -213,7 +214,26 @@ function buildNewPanel(
         },
     };
 
-    if (request.panelType === 'barchart') {
+    if (request.panelType === 'table') {
+        panel.options = {
+            showHeader: true,
+            cellHeight: 'sm',
+            footer: { show: false, reducer: ['sum'], countRows: false, enablePagination: false },
+            frameIndex: 0,
+            ...(base.options as Record<string, unknown> | undefined),
+        };
+        panel.fieldConfig = {
+            defaults: {
+                custom: { align: 'auto', displayMode: 'auto', inspect: false },
+            },
+            overrides: [],
+        };
+        panel.targets = targets.map((t) => ({
+            ...t,
+            format: 'table',
+            instant: true,
+        }));
+    } else if (request.panelType === 'barchart') {
         panel.options = {
             ...(base.options as Record<string, unknown> | undefined),
             orientation: 'auto',

@@ -1,0 +1,366 @@
+import { appendDashboardReferencesToReply } from '../appendToolReferences';
+import { responseNeedsContinueAction } from '../continueAction';
+import {
+    parseDashboardMetricPanelsRequest,
+    userWantsDashboardMetricPanels,
+} from '../dashboardMetricPanelsParse';
+import {
+    messageDescribesDashboardRename,
+    parseDashboardRenameRequest,
+    userWantsDashboardRename,
+} from '../dashboardRenameParse';
+import {
+    parseDashboardReviewRequest,
+    userWantsDashboardReviewOnly,
+} from '../dashboardReviewParse';
+import { extractMetricsFromPanels } from '../instrumentationMetricDiscovery';
+import {
+    classifyLlmIntent,
+    llmIntentAllowsUpdateDashboard,
+} from '../llmIntentRouter';
+import {
+    messageDescribesPanelCreate,
+    parsePanelCreateRequest,
+    userWantsPanelCreateProgrammatic,
+} from '../panelCreateParse';
+import {
+    messageDescribesPanelRemove,
+    parsePanelRemoveRequest,
+    userWantsPanelRemove,
+} from '../panelRemoveParse';
+import {
+    messageDescribesPanelRename,
+    parsePanelRenameRequest,
+    userWantsPanelRename,
+} from '../panelRenameParse';
+import { messageHasProgrammaticHandler } from '../programmaticChatIntents';
+import { formatDashboardReviewReply } from '../programmaticDashboardReview';
+import { formatPanelCreateReply } from '../programmaticPanelCreate';
+import { formatPanelRemoveReply } from '../programmaticPanelRemove';
+import { formatPanelRenameReply } from '../programmaticPanelRename';
+import { machineMetricsFieldSelectors } from '../prometheusDiscovery';
+import type { ToolExecution } from '../../types/llm.types';
+import {
+    KEYSIGHT_DASHBOARD_UID,
+    REGRESSION_CASES,
+    type RegressionCase,
+    type RegressionHandlerId,
+} from './graftRegressionFixtures';
+
+const BUILD = 87;
+
+function assertHandlerRouting(c: RegressionCase): void {
+    const { prompt, contextDashboardUid } = c;
+
+    switch (c.expectHandler) {
+        case 'dashboard-metric-panels':
+            expect(userWantsDashboardMetricPanels(prompt)).toBe(true);
+            expect(parseDashboardMetricPanelsRequest(prompt)?.dashboardUid).toBe(KEYSIGHT_DASHBOARD_UID);
+            expect(parseDashboardMetricPanelsRequest(prompt)?.maxPanels).toBe(50);
+            break;
+        case 'panel-rename':
+            expect(userWantsPanelRename(prompt)).toBe(true);
+            expect(messageDescribesPanelRename(prompt)).toBe(true);
+            expect(parsePanelRenameRequest(prompt)?.currentPanelTitle).toBe('Pressure Gauge');
+            expect(parsePanelRenameRequest(prompt)?.newPanelTitle).toBe('System Pressure');
+            expect(userWantsDashboardRename(prompt)).toBe(false);
+            expect(messageDescribesDashboardRename(prompt)).toBe(false);
+            expect(parseDashboardRenameRequest(prompt)).toBeNull();
+            break;
+        case 'dashboard-review':
+        case 'llm-save-guard':
+            expect(userWantsDashboardReviewOnly(prompt)).toBe(true);
+            expect(parseDashboardReviewRequest(prompt)).toEqual({
+                dashboardUid: KEYSIGHT_DASHBOARD_UID,
+                suggestionCount: 3,
+            });
+            break;
+        case 'panel-remove':
+            expect(messageDescribesPanelRemove(prompt)).toBe(true);
+            expect(
+                userWantsPanelRemove(prompt, contextDashboardUid ?? KEYSIGHT_DASHBOARD_UID)
+            ).toBe(true);
+            expect(
+                parsePanelRemoveRequest(prompt, {
+                    contextDashboardUid: contextDashboardUid ?? KEYSIGHT_DASHBOARD_UID,
+                })?.panelTitle
+            ).toBe('Cartridge Happiness');
+            break;
+        case 'panel-create':
+            expect(messageDescribesPanelCreate(prompt)).toBe(true);
+            expect(userWantsPanelCreateProgrammatic(prompt)).toBe(true);
+            expect(parsePanelCreateRequest(prompt)).toMatchObject({
+                panelTitle: 'Cartridge Comparison',
+                panelType: 'barchart',
+                titleLabel: 'keysight',
+            });
+            break;
+        default:
+            throw new Error(`Unhandled handler ${c.expectHandler as string}`);
+    }
+}
+
+describe('graft historical failure regression', () => {
+    describe('fixture catalog', () => {
+        it('documents seven known failure patterns', () => {
+            expect(REGRESSION_CASES).toHaveLength(7);
+            const ids = REGRESSION_CASES.map((c) => c.id);
+            expect(new Set(ids).size).toBe(ids.length);
+        });
+    });
+
+    describe.each(REGRESSION_CASES)('$id — routing', (c: RegressionCase) => {
+        it(`detects programmatic handler (${c.failure})`, () => {
+            expect(messageHasProgrammaticHandler(c.prompt)).toBe(c.expectProgrammatic);
+            assertHandlerRouting(c);
+        });
+
+        it(`classifies LLM intent as ${c.expectLlmIntent}`, () => {
+            expect(classifyLlmIntent(c.prompt, c.contextDashboardUid)).toBe(c.expectLlmIntent);
+        });
+    });
+
+    describe('bulk metric panels — machine_metrics field expr', () => {
+        const c = REGRESSION_CASES.find((r) => r.id === 'bulk-metric-panels')!;
+
+        it('discovers Keysight metrics via machine_metrics field label, not standalone names', () => {
+            expect(machineMetricsFieldSelectors('2505-200033')[0].filters).toEqual(
+                expect.arrayContaining([
+                    { name: '__name__', value: 'machine_metrics', type: '=' },
+                    { name: 'machine', value: '2505-200033', type: '=' },
+                ])
+            );
+            const fromPanel = extractMetricsFromPanels(
+                [
+                    {
+                        id: 1,
+                        type: 'stat',
+                        title: 'Pressure 1',
+                        targets: [
+                            {
+                                expr: 'machine_metrics{machine="2505-200033", field="Pressure1_psi"}',
+                            },
+                        ],
+                    },
+                ],
+                '2505-200033'
+            );
+            expect(fromPanel[0].expr).toBe(
+                'machine_metrics{machine="2505-200033",field="Pressure1_psi"}'
+            );
+            expect(fromPanel[0].key).toBe('field:Pressure1_psi');
+        });
+
+        it('routes bulk prompt away from single panel create', () => {
+            expect(messageDescribesPanelCreate(c.prompt)).toBe(false);
+        });
+    });
+
+    describe('panel rename — reply formatting', () => {
+        const c = REGRESSION_CASES.find((r) => r.id === 'panel-rename-not-dashboard')!;
+
+        it('formats Panel renamed, not dashboard saved', () => {
+            const reply = formatPanelRenameReply(
+                {
+                    ok: true,
+                    toolExecutions: [],
+                    dashboardUid: KEYSIGHT_DASHBOARD_UID,
+                    dashboardTitle: '2505-200033 / Keysight',
+                    previousPanelTitle: 'Pressure Gauge',
+                    newPanelTitle: 'System Pressure',
+                    panelId: 10,
+                    version: 70,
+                },
+                BUILD
+            );
+            for (const fragment of c.expectReplyContains ?? []) {
+                expect(reply).toContain(fragment);
+            }
+            for (const fragment of c.expectReplyNotContains ?? []) {
+                expect(reply).not.toContain(fragment);
+            }
+        });
+
+        it('blocks misleading LLM Done (dashboard saved) on panel rename prompts', () => {
+            const tools: ToolExecution[] = [
+                {
+                    name: 'update_dashboard',
+                    status: 'success',
+                    summary: `Saved dashboard uid=${KEYSIGHT_DASHBOARD_UID}, version=76`,
+                },
+            ];
+            const out = appendDashboardReferencesToReply('Done.', tools, [c.prompt], c.prompt);
+            expect(out).toContain('Panel rename should be programmatic');
+            expect(out).not.toContain('### Done (dashboard saved)');
+        });
+    });
+
+    describe('dashboard review — suggest-only reply', () => {
+        const c = REGRESSION_CASES.find((r) => r.id === 'dashboard-review-suggest-only')!;
+
+        it('returns numbered suggestions without apply/continue nudge', () => {
+            const reply = formatDashboardReviewReply(
+                {
+                    ok: true,
+                    toolExecutions: [],
+                    dashboardUid: KEYSIGHT_DASHBOARD_UID,
+                    dashboardTitle: '2505-200033 / Keysight',
+                    panelCount: 40,
+                    suggestions: [
+                        { title: 'Remove duplicate Level panels', detail: '3 duplicates.', priority: 90 },
+                        { title: 'Consolidate sensing voltage', detail: 'Merge 4 panels.', priority: 80 },
+                        { title: 'Add row headers', detail: 'Separate sections.', priority: 70 },
+                    ],
+                },
+                BUILD
+            );
+            expect(reply).toContain('readability suggestions');
+            expect(reply).toMatch(/^\s*1\./m);
+            for (const fragment of c.expectReplyNotContains ?? []) {
+                expect(reply.toLowerCase()).not.toMatch(new RegExp(fragment, 'i'));
+            }
+            expect(responseNeedsContinueAction(reply)).toBe(false);
+        });
+    });
+
+    describe('panel remove — reply formatting', () => {
+        const c = REGRESSION_CASES.find((r) => r.id === 'panel-remove-verify')!;
+
+        it('formats Panel removed with verification hint', () => {
+            const reply = formatPanelRemoveReply(
+                {
+                    ok: true,
+                    toolExecutions: [],
+                    dashboardUid: KEYSIGHT_DASHBOARD_UID,
+                    dashboardTitle: '2505-200033 / Keysight',
+                    removedPanelTitle: 'Cartridge Happiness Score',
+                    panelId: 1,
+                    version: 79,
+                },
+                BUILD
+            );
+            for (const fragment of c.expectReplyContains ?? []) {
+                expect(reply).toContain(fragment);
+            }
+            expect(reply).toContain('Hard-refresh');
+        });
+    });
+
+    describe('panel create bar chart — reply formatting', () => {
+        const c = REGRESSION_CASES.find((r) => r.id === 'panel-create-bar-chart')!;
+
+        it('formats Panel created, not panel fix', () => {
+            const reply = formatPanelCreateReply(
+                {
+                    ok: true,
+                    toolExecutions: [],
+                    dashboardUid: KEYSIGHT_DASHBOARD_UID,
+                    dashboardTitle: '2505-200033 / Keysight',
+                    panelTitle: 'Cartridge Comparison',
+                    panelType: 'barchart',
+                    panelId: 205,
+                    version: 90,
+                },
+                BUILD
+            );
+            for (const fragment of c.expectReplyContains ?? []) {
+                expect(reply).toContain(fragment);
+            }
+            for (const fragment of c.expectReplyNotContains ?? []) {
+                expect(reply).not.toContain(fragment);
+            }
+        });
+
+        it('table panel prompts route programmatically, not LLM-only', () => {
+            const prompt = 'Create a table panel called "Machine Data" for Keysight.';
+            expect(messageHasProgrammaticHandler(prompt)).toBe(true);
+            expect(messageDescribesPanelCreate(prompt)).toBe(true);
+            expect(parsePanelCreateRequest(prompt)?.panelType).toBe('table');
+        });
+
+        it('uses panel added reply when LLM path saves a create prompt', () => {
+            const tools: ToolExecution[] = [
+                { name: 'get_dashboard_by_uid', status: 'success' },
+                {
+                    name: 'update_dashboard',
+                    status: 'success',
+                    summary: `Saved dashboard uid=${KEYSIGHT_DASHBOARD_UID}, version=90`,
+                },
+            ];
+            const modelText =
+                '**Cartridge Comparison** bar chart panel created.\n\n**Panel index** — uid `cfo0wckufbdhce`';
+            const out = appendDashboardReferencesToReply(modelText, tools, [c.prompt], c.prompt);
+            expect(out).toContain('### Done (panel added)');
+            expect(out).not.toContain('### Done (panel fix)');
+        });
+    });
+
+    describe('LLM save guard — review must not allow update_dashboard', () => {
+        const c = REGRESSION_CASES.find((r) => r.id === 'llm-save-read-only-guard')!;
+
+        it('blocks update_dashboard for review intent on LLM path', () => {
+            const intent = classifyLlmIntent(c.prompt);
+            expect(llmIntentAllowsUpdateDashboard(intent)).toBe(false);
+        });
+    });
+
+    describe('auto-continue nudge — review suggestions', () => {
+        const c = REGRESSION_CASES.find((r) => r.id === 'review-no-auto-continue')!;
+
+        it('marks review prompts as review-only so continue loop is skipped', () => {
+            expect(userWantsDashboardReviewOnly(c.prompt)).toBe(true);
+            expect(messageHasProgrammaticHandler(c.prompt)).toBe(true);
+        });
+
+        it('does not show Continue button on formatted review reply', () => {
+            const reply = formatDashboardReviewReply(
+                {
+                    ok: true,
+                    toolExecutions: [{ name: 'get_dashboard_by_uid', status: 'success' }],
+                    dashboardUid: KEYSIGHT_DASHBOARD_UID,
+                    dashboardTitle: 'Keysight',
+                    panelCount: 10,
+                    suggestions: [
+                        { title: 'Fix duplicates', detail: 'detail', priority: 90 },
+                        { title: 'Add headers', detail: 'detail', priority: 80 },
+                        { title: 'Tighten layout', detail: 'detail', priority: 70 },
+                    ],
+                },
+                BUILD
+            );
+            expect(responseNeedsContinueAction(reply)).toBe(false);
+        });
+    });
+
+    describe('handler exclusivity', () => {
+        const handlers: RegressionHandlerId[] = [
+            'dashboard-metric-panels',
+            'panel-rename',
+            'dashboard-review',
+            'panel-remove',
+            'panel-create',
+        ];
+
+        it.each(handlers)('%s prompt does not collide with unrelated handlers', (handlerId) => {
+            const c = REGRESSION_CASES.find(
+                (r) => r.expectHandler === handlerId && r.id !== 'review-no-auto-continue'
+            )!;
+            expect(c).toBeDefined();
+            if (handlerId !== 'dashboard-metric-panels') {
+                expect(userWantsDashboardMetricPanels(c.prompt)).toBe(false);
+            }
+            if (handlerId !== 'panel-rename') {
+                expect(userWantsPanelRename(c.prompt)).toBe(false);
+            }
+            if (handlerId !== 'dashboard-review') {
+                expect(userWantsDashboardReviewOnly(c.prompt)).toBe(false);
+            }
+            if (handlerId !== 'panel-remove') {
+                expect(messageDescribesPanelRemove(c.prompt)).toBe(false);
+            }
+            if (handlerId !== 'panel-create') {
+                expect(messageDescribesPanelCreate(c.prompt)).toBe(false);
+            }
+        });
+    });
+});
