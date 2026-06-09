@@ -5,6 +5,21 @@ describe('dashboardConciseSaveReply', () => {
     const panelTable =
         '**Panel index** — uid `abc123` · 2505-200033 / Keysight\n| **0** | 103 | Overview | timeseries |';
 
+    it('uses panel renamed outcome for panel rename prompts', () => {
+        const user =
+            'Rename the "Pressure Gauge" panel to "System Pressure" on dashboard UID = cfo0wckufbdhce.';
+        const tools: ToolExecution[] = [
+            {
+                name: 'update_dashboard',
+                status: 'success',
+                summary: 'Saved dashboard uid=cfo0wckufbdhce, version=76',
+            },
+        ];
+        const out = applyOperatorFriendlyDashboardSaveReply('Done.', tools, [user], user);
+        expect(out).toContain('Panel renamed and saved');
+        expect(out).not.toContain('Dashboard renamed and saved');
+    });
+
     it('replaces verbose model text with Done block at end', () => {
         const user = 'Update panel titles on dashboard 2505-200033 / Keysight to use the new machine label';
         const modelText =

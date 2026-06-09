@@ -918,6 +918,59 @@ export const ChatInterface = () => {
         return;
       }
 
+      if (messageDescribesPanelRename(content)) {
+        errorPathTag = 'panel-rename';
+        const panelRenameRequest = parsePanelRenameRequest(content);
+        if (!panelRenameRequest) {
+          finalContent = formatPanelRenameClarification(content);
+        } else if (!mcpClient) {
+          finalContent =
+            '### Could not rename panel\n\nGrafana MCP tools are not connected. Open **Grafana LLM / MCP settings**, enable MCP for Graft, hard-refresh, then try again.';
+        } else {
+          const panelRenameResult = await runProgrammaticPanelRename(mcpClient, panelRenameRequest, {
+            contextDashboardUid: contextService.getDashboardUid() ?? undefined,
+          });
+          finalContent = formatPanelRenameReply(panelRenameResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = panelRenameResult.toolExecutions;
+          clearPendingOnProgrammaticSuccess(panelRenameResult.ok);
+          if (!panelRenameResult.ok) {
+            recordGraftFailure({
+              buildNumber: GRAFT_BUILD_NUMBER,
+              intent: 'panel-rename',
+              userMessagePreview: content,
+              error: panelRenameResult.error ?? 'Unknown error',
+            });
+          }
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
       const explicitSinglePanelCopy = isExplicitSinglePanelCopyRequest(content);
       const panelCopyRequest = parseSinglePanelCopyRequest(content);
       if (explicitSinglePanelCopy || messageMentionsSinglePanelCopyIntent(content)) {
@@ -999,59 +1052,6 @@ export const ChatInterface = () => {
               content: finalContent,
               toolExecutions:
                 finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
-            };
-          }
-          return updated;
-        });
-        const finalAssistantMessage: Message = {
-          role: 'assistant',
-          content: finalContent,
-          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
-        };
-        const savedSession = chatHistoryService.saveSession(
-          [...newMessages, finalAssistantMessage],
-          currentSessionId
-        );
-        if (savedSession) {
-          setCurrentSessionId(savedSession.id);
-          currentSessionIdRef.current = savedSession.id;
-          replaceChatSessionInUrl(savedSession.id);
-        }
-        return;
-      }
-
-      if (messageDescribesPanelRename(content)) {
-        errorPathTag = 'panel-rename';
-        const panelRenameRequest = parsePanelRenameRequest(content);
-        if (!panelRenameRequest) {
-          finalContent = formatPanelRenameClarification(content);
-        } else if (!mcpClient) {
-          finalContent =
-            '### Could not rename panel\n\nGrafana MCP tools are not connected. Open **Grafana LLM / MCP settings**, enable MCP for Graft, hard-refresh, then try again.';
-        } else {
-          const panelRenameResult = await runProgrammaticPanelRename(mcpClient, panelRenameRequest, {
-            contextDashboardUid: contextService.getDashboardUid() ?? undefined,
-          });
-          finalContent = formatPanelRenameReply(panelRenameResult, GRAFT_BUILD_NUMBER);
-          finalToolExecutions = panelRenameResult.toolExecutions;
-          clearPendingOnProgrammaticSuccess(panelRenameResult.ok);
-          if (!panelRenameResult.ok) {
-            recordGraftFailure({
-              buildNumber: GRAFT_BUILD_NUMBER,
-              intent: 'panel-rename',
-              userMessagePreview: content,
-              error: panelRenameResult.error ?? 'Unknown error',
-            });
-          }
-        }
-        setMessages((prev) => {
-          const updated = [...prev];
-          const last = updated[updated.length - 1];
-          if (last?.role === 'assistant') {
-            updated[updated.length - 1] = {
-              ...last,
-              content: finalContent,
-              toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
             };
           }
           return updated;
