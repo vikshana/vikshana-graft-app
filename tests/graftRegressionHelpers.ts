@@ -142,3 +142,24 @@ export function assertReplyExpectations(
         expect(lower, `Expected reply not to contain "${fragment}"`).not.toContain(fragment.toLowerCase());
     }
 }
+
+/** Best-effort cleanup so multi-panel create E2E can rerun on the same dashboard. */
+export async function removeE2ePanelsIfPresent(
+    page: Page,
+    panelNames: readonly string[],
+    removePrompt: (panelName: string) => string,
+    { timeoutMs = 120_000 }: { timeoutMs?: number } = {}
+): Promise<void> {
+    for (const panelName of panelNames) {
+        await openFreshGraftChat(page);
+        const startCopyCount = await sendGraftPrompt(page, removePrompt(panelName));
+        const reply = await waitForAssistantReply(page, { timeoutMs, startCopyCount });
+        const lower = reply.toLowerCase();
+        const removed = lower.includes('panel removed');
+        const absent = lower.includes('could not find a matching panel');
+        expect(
+            removed || absent,
+            `Unexpected remove reply for "${panelName}": ${reply.slice(0, 300)}`
+        ).toBe(true);
+    }
+}

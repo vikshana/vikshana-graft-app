@@ -17,6 +17,7 @@
  */
 import {
     E2E_REGRESSION_CASES,
+    E2E_MULTI_PANEL_DEFAULT_TITLES,
     e2ePanelCreateExpectContains,
     e2ePanelCreatePrompt,
     e2ePanelRemovePrompt,
@@ -29,6 +30,7 @@ import {
     isGraftE2eMutatingEnabled,
     isGraftE2eTarget,
     openFreshGraftChat,
+    removeE2ePanelsIfPresent,
     sendGraftPrompt,
     waitForAssistantReply,
 } from './graftRegressionHelpers';
@@ -38,6 +40,7 @@ const mutatingCases = E2E_REGRESSION_CASES.filter((c) => c.e2eEnabled && c.e2eMo
 
 const renameCase = mutatingCases.find((c) => c.id === 'panel-rename-not-dashboard');
 const createCase = mutatingCases.find((c) => c.id === 'panel-create-bar-chart');
+const multiPanelCase = mutatingCases.find((c) => c.id === 'multi-panel-create-types');
 const removeCase = mutatingCases.find((c) => c.id === 'panel-remove-verify');
 
 test.describe('Graft regression E2E (read-only)', () => {
@@ -74,6 +77,32 @@ test.describe('Graft regression E2E (mutating)', () => {
 
     let createdPanelName = '';
     let renamedPanelName = '';
+
+    test('multi-panel-create-types', async ({ page }) => {
+        if (!multiPanelCase) {
+            throw new Error('multi-panel-create-types E2E case missing');
+        }
+        const removeTimeoutMs = removeCase?.replyTimeoutMs ?? multiPanelCase.replyTimeoutMs;
+        test.setTimeout(removeTimeoutMs * (E2E_MULTI_PANEL_DEFAULT_TITLES.length + 1) + 60_000);
+
+        await removeE2ePanelsIfPresent(page, E2E_MULTI_PANEL_DEFAULT_TITLES, e2ePanelRemovePrompt, {
+            timeoutMs: removeTimeoutMs,
+        });
+
+        await openFreshGraftChat(page);
+        const startCopyCount = await sendGraftPrompt(page, multiPanelCase.prompt);
+        const reply = await waitForAssistantReply(page, {
+            timeoutMs: multiPanelCase.replyTimeoutMs,
+            startCopyCount,
+        });
+
+        assertReplyExpectations(
+            reply,
+            multiPanelCase.expectReplyContains,
+            multiPanelCase.expectReplyNotContains
+        );
+        await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
+    });
 
     test('panel-create-bar-chart', async ({ page }) => {
         if (!createCase) {

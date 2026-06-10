@@ -61,6 +61,11 @@ export const E2E_REGRESSION_CASES: E2eRegressionCase[] = [
         e2eMode: 'mutating',
         replyTimeoutMs: SLOW_REPLY_TIMEOUT_MS,
     }),
+    toE2eCase('multi-panel-create-types', {
+        e2eEnabled: true,
+        e2eMode: 'mutating',
+        replyTimeoutMs: SLOW_REPLY_TIMEOUT_MS,
+    }),
     toE2eCase('review-no-auto-continue', { e2eEnabled: false, e2eMode: 'read-only' }),
 ];
 
@@ -83,3 +88,11 @@ export function e2ePanelRenameExpectContains(targetName: string): string[] {
 export function e2ePanelCreateExpectContains(panelName: string): string[] {
     return ['Panel created', panelName];
 }
+
+/** Default titles from multi-panel create programmatic path (Keysight regression). */
+export const E2E_MULTI_PANEL_DEFAULT_TITLES = [
+    'Gauge Panel',
+    'Time Series Panel',
+    'Table Panel',
+    'Stat Panel',
+] as const;
