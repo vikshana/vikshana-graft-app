@@ -44,8 +44,11 @@ import {
 } from './dashboardMetricPanelsParse';
 import { userWantsDashboardReviewOnly } from './dashboardReviewParse';
 import {
+    messageDescribesMultiPanelCreate,
     messageDescribesPanelCreate,
+    parseMultiPanelCreateRequest,
     parsePanelCreateRequest,
+    userWantsMultiPanelCreateProgrammatic,
     userWantsPanelCreateProgrammatic,
 } from './panelCreateParse';
 
@@ -57,6 +60,9 @@ export function messageHasProgrammaticHandler(message: string): boolean {
     }
 
     return (
+        userWantsMultiPanelCreateProgrammatic(text) ||
+        messageDescribesMultiPanelCreate(text) ||
+        parseMultiPanelCreateRequest(text) != null ||
         userWantsPanelCreateProgrammatic(text) ||
         messageDescribesPanelCreate(text) ||
         parsePanelCreateRequest(text) != null ||

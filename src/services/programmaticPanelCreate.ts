@@ -15,7 +15,7 @@ import {
     resolvePrometheusDatasourceUid,
 } from './prometheusDiscovery';
 import { inferMachineIdFromDashboardTitle, resolveDashboardUid } from './programmaticDashboardResolve';
-import type { PanelCreateRequest } from './panelCreateParse';
+import type { MultiPanelCreateRequest, PanelCreateRequest } from './panelCreateParse';
 
 type PanelRecord = Record<string, unknown>;
 
@@ -30,6 +30,29 @@ export interface ProgrammaticPanelCreateResult {
     panelType?: string;
     panelId?: number;
     version?: number;
+}
+
+export interface CreatedPanelSummary {
+    panelTitle: string;
+    panelType: string;
+    panelId?: number;
+}
+
+export interface SkippedPanelSummary {
+    panelTitle: string;
+    reason: string;
+}
+
+export interface ProgrammaticMultiPanelCreateResult {
+    ok: boolean;
+    error?: string;
+    clarification?: boolean;
+    toolExecutions: ToolExecution[];
+    dashboardUid?: string;
+    dashboardTitle?: string;
+    version?: number;
+    createdPanels?: CreatedPanelSummary[];
+    skippedPanels?: SkippedPanelSummary[];
 }
 
 function pendingTool(name: string): ToolExecution {
@@ -246,6 +269,17 @@ function buildNewPanel(
             reduceOptions: { values: false, calcs: ['lastNotNull'] },
             ...(base.options as Record<string, unknown> | undefined),
         };
+    } else if (request.panelType === 'stat') {
+        panel.options = {
+            reduceOptions: { values: false, calcs: ['lastNotNull'] },
+            ...(base.options as Record<string, unknown> | undefined),
+        };
+    } else if (request.panelType === 'timeseries') {
+        panel.options = {
+            legend: { displayMode: 'list', placement: 'bottom', showLegend: true },
+            tooltip: { mode: 'single' },
+            ...(base.options as Record<string, unknown> | undefined),
+        };
     }
 
     return panel;
@@ -386,6 +420,228 @@ export async function runProgrammaticPanelCreate(
         panelId: created.panelId,
         version,
     };
+}
+
+export async function runProgrammaticMultiPanelCreate(
+    mcpClient: McpClient,
+    request: MultiPanelCreateRequest,
+    opts?: { contextDashboardUid?: string }
+): Promise<ProgrammaticMultiPanelCreateResult> {
+    const toolExecutions: ToolExecution[] = [];
+    const resolved = await resolveDashboardUid(
+        mcpClient,
+        {
+            dashboardUid: request.dashboardUid ?? opts?.contextDashboardUid,
+            titleLabel: request.titleLabel,
+            machineId: request.machineId,
+        },
+        toolExecutions
+    );
+    if (!resolved.uid) {
+        return { ok: false, error: resolved.error ?? 'Could not resolve dashboard uid.', toolExecutions };
+    }
+
+    const getStep = pendingTool('get_dashboard_by_uid');
+    toolExecutions.push(getStep);
+    const fetch = await callMcpTool(mcpClient, 'get_dashboard_by_uid', { uid: resolved.uid });
+    toolExecutions[toolExecutions.length - 1] = finishTool(getStep, fetch);
+    if (!fetch.ok) {
+        return { ok: false, error: fetch.error ?? 'Could not load dashboard', toolExecutions, dashboardUid: resolved.uid };
+    }
+
+    const extracted = extractDashboardFromGetByUid(fetch.text);
+    if (!extracted?.dashboard) {
+        return { ok: false, error: 'Could not parse dashboard JSON', toolExecutions, dashboardUid: resolved.uid };
+    }
+
+    const baseline = extracted.dashboard as Record<string, unknown>;
+    const dashboardTitle = typeof baseline.title === 'string' ? baseline.title : resolved.title;
+    let entries = listDashboardPanels(baseline.panels);
+    const skippedPanels: SkippedPanelSummary[] = [];
+    const panelsToCreate = request.panels.filter((spec) => {
+        const existing = findPanelByStrictTitle(entries, spec.panelTitle);
+        if (existing) {
+            skippedPanels.push({
+                panelTitle: spec.panelTitle,
+                reason: `already exists (id ${existing.panelId ?? '?'})`,
+            });
+            return false;
+        }
+        return true;
+    });
+
+    if (panelsToCreate.length === 0) {
+        return {
+            ok: false,
+            error: 'All requested panels already exist on the dashboard.',
+            toolExecutions,
+            dashboardUid: resolved.uid,
+            dashboardTitle,
+            skippedPanels,
+        };
+    }
+
+    const machineId = request.machineId ?? inferMachineIdFromDashboardTitle(dashboardTitle);
+    const proposed = JSON.parse(JSON.stringify(baseline)) as Record<string, unknown>;
+    const panels = Array.isArray(proposed.panels) ? [...(proposed.panels as PanelRecord[])] : [];
+    const createdPanels: CreatedPanelSummary[] = [];
+
+    for (const spec of panelsToCreate) {
+        const panelRequest: PanelCreateRequest = {
+            panelTitle: spec.panelTitle,
+            panelType: spec.panelType,
+            dashboardUid: resolved.uid,
+            titleLabel: request.titleLabel,
+            machineId: request.machineId,
+        };
+        const template = findTemplatePanel(entries, spec.panelType);
+        const targets = await buildPanelTargets(
+            panelRequest,
+            entries,
+            machineId,
+            Array.isArray(baseline.panels) ? baseline.panels : [],
+            mcpClient,
+            toolExecutions
+        );
+        const nextId = maxPanelId(entries) + 1;
+        const draftPanel = buildNewPanel(
+            panelRequest,
+            nextId,
+            computeAppendGridPos(entries, template ?? { gridPos: { w: 12, h: 8 } }),
+            targets,
+            template
+        );
+        panels.push(draftPanel);
+        createdPanels.push({
+            panelTitle: spec.panelTitle,
+            panelType: spec.panelType,
+            panelId: nextId,
+        });
+        entries = [
+            ...entries,
+            {
+                title: spec.panelTitle,
+                panelId: nextId,
+                panel: draftPanel,
+            },
+        ];
+    }
+
+    proposed.panels = panels;
+
+    const saveStep = pendingTool('update_dashboard');
+    toolExecutions.push(saveStep);
+    const panelLabels = createdPanels.map((p) => `"${p.panelTitle}" (${p.panelType})`).join(', ');
+    const savePayload = normalizeUpdateDashboardArgs({
+        dashboard: stampDashboardForOverwrite(baseline, proposed),
+        overwrite: true,
+        message: `Graft: create panels ${panelLabels}`,
+    });
+    const saveResult = await callMcpTool(mcpClient, 'update_dashboard', savePayload);
+    toolExecutions[toolExecutions.length - 1] = finishTool(saveStep, saveResult);
+    if (!saveResult.ok) {
+        return {
+            ok: false,
+            error: saveResult.error ?? 'update_dashboard failed',
+            toolExecutions,
+            dashboardUid: resolved.uid,
+            dashboardTitle,
+            createdPanels,
+            skippedPanels,
+        };
+    }
+
+    const verifyStep = pendingTool('get_dashboard_by_uid');
+    toolExecutions.push(verifyStep);
+    const verify = await callMcpTool(mcpClient, 'get_dashboard_by_uid', { uid: resolved.uid });
+    toolExecutions[toolExecutions.length - 1] = finishTool(verifyStep, verify);
+    if (!verify.ok) {
+        return {
+            ok: false,
+            error: 'Save reported success but dashboard could not be re-fetched for verification.',
+            toolExecutions,
+            dashboardUid: resolved.uid,
+            dashboardTitle,
+            createdPanels,
+            skippedPanels,
+        };
+    }
+
+    const verified = extractDashboardFromGetByUid(verify.text);
+    const version = typeof verified?.dashboard?.version === 'number' ? verified.dashboard.version : undefined;
+    const verifiedEntries = listDashboardPanels(verified?.dashboard?.panels);
+    const missing = createdPanels.filter((p) => !findPanelByStrictTitle(verifiedEntries, p.panelTitle));
+    if (missing.length > 0) {
+        const names = missing.map((p) => `**${p.panelTitle}**`).join(', ');
+        return {
+            ok: false,
+            error: `Save reported success but panel(s) ${names} were not found on the dashboard.`,
+            toolExecutions,
+            dashboardUid: resolved.uid,
+            dashboardTitle,
+            createdPanels,
+            skippedPanels,
+            version,
+        };
+    }
+
+    const verifiedCreated = createdPanels.map((p) => {
+        const found = findPanelByStrictTitle(verifiedEntries, p.panelTitle);
+        return {
+            panelTitle: p.panelTitle,
+            panelType: p.panelType,
+            panelId: found?.panelId ?? p.panelId,
+        };
+    });
+
+    return {
+        ok: true,
+        toolExecutions,
+        dashboardUid: resolved.uid,
+        dashboardTitle,
+        version,
+        createdPanels: verifiedCreated,
+        skippedPanels: skippedPanels.length > 0 ? skippedPanels : undefined,
+    };
+}
+
+export function formatMultiPanelCreateReply(
+    result: ProgrammaticMultiPanelCreateResult,
+    buildNumber: number
+): string {
+    if (result.ok) {
+        const panelLines = (result.createdPanels ?? [])
+            .map(
+                (p) =>
+                    `- **${p.panelTitle}** (${p.panelType}` +
+                    (p.panelId != null ? `, id ${p.panelId}` : '') +
+                    `)`
+            )
+            .join('\n');
+        const skippedLines =
+            result.skippedPanels && result.skippedPanels.length > 0
+                ? `\n\n**Skipped** (already on dashboard):\n` +
+                  result.skippedPanels
+                      .map((s) => `- **${s.panelTitle}** — ${s.reason}`)
+                      .join('\n')
+                : '';
+        return (
+            `### Panels created (Graft build ${buildNumber})\n\n` +
+            panelLines +
+            `\n- **Dashboard:** ${result.dashboardTitle ?? '(untitled)'} — uid \`${result.dashboardUid ?? '?'}\`` +
+            (result.version != null ? `\n- **Version:** ${result.version}` : '') +
+            skippedLines +
+            `\n\nHard-refresh the dashboard (**Cmd+Shift+R**) to see the new panels.`
+        );
+    }
+    if (result.clarification) {
+        return result.error ?? '### Need clarification';
+    }
+    const skippedNote =
+        result.skippedPanels && result.skippedPanels.length > 0
+            ? `\n\n**Skipped:** ${result.skippedPanels.map((s) => s.panelTitle).join(', ')}`
+            : '';
+    return `### Could not create panels\n\n${result.error ?? 'Unknown error.'}${skippedNote}`;
 }
 
 export function formatPanelCreateReply(result: ProgrammaticPanelCreateResult, buildNumber: number): string {

@@ -120,12 +120,17 @@ import {
   formatPanelRemoveReply,
 } from '../../../services/programmaticPanelRemove';
 import {
+  messageDescribesMultiPanelCreate,
   messageDescribesPanelCreate,
+  parseMultiPanelCreateRequest,
   parsePanelCreateRequest,
+  formatMultiPanelCreateClarification,
   formatPanelCreateClarification,
 } from '../../../services/panelCreateParse';
 import {
+  runProgrammaticMultiPanelCreate,
   runProgrammaticPanelCreate,
+  formatMultiPanelCreateReply,
   formatPanelCreateReply,
 } from '../../../services/programmaticPanelCreate';
 import {
@@ -965,6 +970,65 @@ export const ChatInterface = () => {
               intent: 'panel-rename',
               userMessagePreview: content,
               error: panelRenameResult.error ?? 'Unknown error',
+            });
+          }
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      if (messageDescribesMultiPanelCreate(content)) {
+        errorPathTag = 'multi-panel-create';
+        const multiPanelCreateRequest = parseMultiPanelCreateRequest(content, {
+          contextDashboardUid: contextService.getDashboardUid() ?? undefined,
+        });
+        if (!multiPanelCreateRequest) {
+          finalContent = formatMultiPanelCreateClarification(content);
+        } else if (!mcpClient) {
+          finalContent =
+            '### Could not create panels\n\nGrafana MCP tools are not connected. Open **Grafana LLM / MCP settings**, enable MCP for Graft, hard-refresh, then try again.';
+        } else {
+          const multiPanelCreateResult = await runProgrammaticMultiPanelCreate(
+            mcpClient,
+            multiPanelCreateRequest,
+            {
+              contextDashboardUid: contextService.getDashboardUid() ?? undefined,
+            }
+          );
+          finalContent = formatMultiPanelCreateReply(multiPanelCreateResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = multiPanelCreateResult.toolExecutions;
+          clearPendingOnProgrammaticSuccess(multiPanelCreateResult.ok);
+          if (!multiPanelCreateResult.ok) {
+            recordGraftFailure({
+              buildNumber: GRAFT_BUILD_NUMBER,
+              intent: 'multi-panel-create',
+              userMessagePreview: content,
+              error: multiPanelCreateResult.error ?? 'Unknown error',
             });
           }
         }

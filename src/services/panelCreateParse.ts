@@ -12,6 +12,29 @@ export interface PanelCreateRequest {
     machineId?: string;
 }
 
+export interface MultiPanelCreateSpec {
+    panelType: PanelCreateType;
+    panelTitle: string;
+}
+
+export interface MultiPanelCreateRequest {
+    dashboardUid?: string;
+    titleLabel?: string;
+    machineId?: string;
+    panels: MultiPanelCreateSpec[];
+}
+
+const MULTI_PANEL_TYPE_PATTERNS: {
+    type: PanelCreateType;
+    re: RegExp;
+    defaultTitle: string;
+}[] = [
+    { type: 'gauge', re: /\bgauge\s+panel\b/gi, defaultTitle: 'Gauge Panel' },
+    { type: 'timeseries', re: /\btime\s*series\s+panel\b/gi, defaultTitle: 'Time Series Panel' },
+    { type: 'table', re: /\btable\s+panel\b/gi, defaultTitle: 'Table Panel' },
+    { type: 'stat', re: /\bstat\s+panel\b/gi, defaultTitle: 'Stat Panel' },
+];
+
 function normalizeMessageQuotes(text: string): string {
     return text.replace(/[\u201C\u201D]/g, '"').replace(/[\u2018\u2019]/g, "'");
 }
@@ -132,11 +155,108 @@ export function parsePanelCreateRequest(
     };
 }
 
+function extractMultiPanelSpecs(text: string): MultiPanelCreateSpec[] {
+    const found: { index: number; panelType: PanelCreateType; panelTitle: string }[] = [];
+    for (const { type, re, defaultTitle } of MULTI_PANEL_TYPE_PATTERNS) {
+        re.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = re.exec(text)) !== null) {
+            found.push({ index: match.index, panelType: type, panelTitle: defaultTitle });
+        }
+    }
+    found.sort((a, b) => a.index - b.index);
+    const seen = new Set<PanelCreateType>();
+    const panels: MultiPanelCreateSpec[] = [];
+    for (const entry of found) {
+        if (seen.has(entry.panelType)) {
+            continue;
+        }
+        seen.add(entry.panelType);
+        panels.push({ panelType: entry.panelType, panelTitle: entry.panelTitle });
+    }
+    return panels;
+}
+
+function hasDashboardContext(text: string, contextDashboardUid?: string): boolean {
+    return Boolean(
+        extractAllDashboardUids(text)[0] ??
+            contextDashboardUid ??
+            extractTitleLabel(text) ??
+            extractMachineId(text)
+    );
+}
+
+export function messageDescribesMultiPanelCreate(message: string): boolean {
+    const text = normalizeMessageQuotes(message.trim());
+    if (!text || userWantsDashboardMetricPanels(text)) {
+        return false;
+    }
+    if (extractPanelTitle(text)) {
+        return false;
+    }
+    if (messageDescribesPanelCreate(text)) {
+        return false;
+    }
+    if (!/\b(create|add|make)\b/i.test(text)) {
+        return false;
+    }
+    const panels = extractMultiPanelSpecs(text);
+    if (panels.length < 2) {
+        return false;
+    }
+    return hasDashboardContext(text);
+}
+
+export function userWantsMultiPanelCreateProgrammatic(
+    message: string,
+    contextDashboardUid?: string
+): boolean {
+    return parseMultiPanelCreateRequest(message, { contextDashboardUid }) != null;
+}
+
+export function parseMultiPanelCreateRequest(
+    message: string,
+    opts?: { contextDashboardUid?: string }
+): MultiPanelCreateRequest | null {
+    const text = normalizeMessageQuotes(message.trim());
+    if (!messageDescribesMultiPanelCreate(text)) {
+        return null;
+    }
+
+    const panels = extractMultiPanelSpecs(text);
+    if (panels.length < 2) {
+        return null;
+    }
+
+    const dashboardUid = extractAllDashboardUids(text)[0] ?? opts?.contextDashboardUid;
+    const titleLabel = extractTitleLabel(text);
+    const machineId = extractMachineId(text);
+
+    if (!dashboardUid && !titleLabel && !machineId) {
+        return null;
+    }
+
+    return {
+        dashboardUid,
+        titleLabel,
+        machineId,
+        panels,
+    };
+}
+
 export function formatPanelCreateClarification(message: string): string {
     return (
         `### Need clarification\n\n` +
         `Graft understood a panel-create request but needs the dashboard.\n\n` +
         `**Example:** \`Create a bar chart panel called "Cartridge Comparison" for Keysight.\`\n` +
         `Or include dashboard uid: \`... on dashboard uid=cfo0wckufbdhce\``
+    );
+}
+
+export function formatMultiPanelCreateClarification(message: string): string {
+    return (
+        `### Need clarification\n\n` +
+        `Graft understood a multi-panel create request but needs the dashboard.\n\n` +
+        `**Example:** \`Create a gauge panel, time series panel, table panel, and stat panel for dashboard with UID = cfo0wckufbdhce.\``
     );
 }

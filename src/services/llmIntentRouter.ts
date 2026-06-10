@@ -1,7 +1,7 @@
 import { isDashboardDataInvestigationQuestion } from './dashboardInvestigation';
 import { userWantsDashboardReviewOnly } from './dashboardReviewParse';
 import { isSimpleConversationalMessage, messageHasProgrammaticHandler } from './programmaticChatIntents';
-import { messageDescribesPanelCreate } from './panelCreateParse';
+import { messageDescribesMultiPanelCreate, messageDescribesPanelCreate } from './panelCreateParse';
 import { messageDescribesPanelRemove, userWantsPanelRemove } from './panelRemoveParse';
 import { messageDescribesPanelRename, userWantsPanelRename } from './panelRenameParse';
 
@@ -28,7 +28,7 @@ export function classifyLlmIntent(userMessage: string, contextDashboardUid?: str
     ) {
         return 'read_only';
     }
-    if (messageDescribesPanelCreate(text)) {
+    if (messageDescribesMultiPanelCreate(text) || messageDescribesPanelCreate(text)) {
         return 'programmatic';
     }
     if (userWantsPanelRemove(text, contextDashboardUid) || messageDescribesPanelRemove(text)) {

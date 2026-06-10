@@ -19,8 +19,11 @@ import {
     llmIntentAllowsUpdateDashboard,
 } from '../llmIntentRouter';
 import {
+    messageDescribesMultiPanelCreate,
     messageDescribesPanelCreate,
+    parseMultiPanelCreateRequest,
     parsePanelCreateRequest,
+    userWantsMultiPanelCreateProgrammatic,
     userWantsPanelCreateProgrammatic,
 } from '../panelCreateParse';
 import {
@@ -35,7 +38,7 @@ import {
 } from '../panelRenameParse';
 import { messageHasProgrammaticHandler } from '../programmaticChatIntents';
 import { formatDashboardReviewReply } from '../programmaticDashboardReview';
-import { formatPanelCreateReply } from '../programmaticPanelCreate';
+import { formatMultiPanelCreateReply, formatPanelCreateReply } from '../programmaticPanelCreate';
 import { formatPanelRemoveReply } from '../programmaticPanelRemove';
 import { formatPanelRenameReply } from '../programmaticPanelRename';
 import { machineMetricsFieldSelectors } from '../prometheusDiscovery';
@@ -88,11 +91,26 @@ function assertHandlerRouting(c: RegressionCase): void {
             break;
         case 'panel-create':
             expect(messageDescribesPanelCreate(prompt)).toBe(true);
+            expect(messageDescribesMultiPanelCreate(prompt)).toBe(false);
             expect(userWantsPanelCreateProgrammatic(prompt)).toBe(true);
             expect(parsePanelCreateRequest(prompt)).toMatchObject({
                 panelTitle: 'Cartridge Comparison',
                 panelType: 'barchart',
                 titleLabel: 'keysight',
+            });
+            break;
+        case 'panel-create-multi':
+            expect(messageDescribesMultiPanelCreate(prompt)).toBe(true);
+            expect(messageDescribesPanelCreate(prompt)).toBe(false);
+            expect(userWantsMultiPanelCreateProgrammatic(prompt)).toBe(true);
+            expect(parseMultiPanelCreateRequest(prompt)).toMatchObject({
+                dashboardUid: KEYSIGHT_DASHBOARD_UID,
+                panels: [
+                    { panelType: 'gauge', panelTitle: 'Gauge Panel' },
+                    { panelType: 'timeseries', panelTitle: 'Time Series Panel' },
+                    { panelType: 'table', panelTitle: 'Table Panel' },
+                    { panelType: 'stat', panelTitle: 'Stat Panel' },
+                ],
             });
             break;
         default:
@@ -102,8 +120,8 @@ function assertHandlerRouting(c: RegressionCase): void {
 
 describe('graft historical failure regression', () => {
     describe('fixture catalog', () => {
-        it('documents seven known failure patterns', () => {
-            expect(REGRESSION_CASES).toHaveLength(7);
+        it('documents eight known failure patterns', () => {
+            expect(REGRESSION_CASES).toHaveLength(8);
             const ids = REGRESSION_CASES.map((c) => c.id);
             expect(new Set(ids).size).toBe(ids.length);
         });
@@ -246,6 +264,42 @@ describe('graft historical failure regression', () => {
         });
     });
 
+    describe('multi panel create — reply formatting', () => {
+        const c = REGRESSION_CASES.find((r) => r.id === 'multi-panel-create-types')!;
+
+        it('formats Panels created for all four panel types', () => {
+            const reply = formatMultiPanelCreateReply(
+                {
+                    ok: true,
+                    toolExecutions: [],
+                    dashboardUid: KEYSIGHT_DASHBOARD_UID,
+                    dashboardTitle: '2505-200033 / Keysight',
+                    version: 130,
+                    createdPanels: [
+                        { panelTitle: 'Gauge Panel', panelType: 'gauge', panelId: 201 },
+                        { panelTitle: 'Time Series Panel', panelType: 'timeseries', panelId: 202 },
+                        { panelTitle: 'Table Panel', panelType: 'table', panelId: 203 },
+                        { panelTitle: 'Stat Panel', panelType: 'stat', panelId: 204 },
+                    ],
+                },
+                BUILD
+            );
+            for (const fragment of c.expectReplyContains ?? []) {
+                expect(reply).toContain(fragment);
+            }
+            for (const fragment of c.expectReplyNotContains ?? []) {
+                expect(reply).not.toContain(fragment);
+            }
+        });
+
+        it('routes multi-type prompt programmatically, not LLM fake Done', () => {
+            expect(messageHasProgrammaticHandler(c.prompt)).toBe(true);
+            expect(messageDescribesMultiPanelCreate(c.prompt)).toBe(true);
+            expect(messageDescribesPanelCreate(c.prompt)).toBe(false);
+            expect(classifyLlmIntent(c.prompt)).toBe('programmatic');
+        });
+    });
+
     describe('panel create bar chart — reply formatting', () => {
         const c = REGRESSION_CASES.find((r) => r.id === 'panel-create-bar-chart')!;
 
@@ -339,6 +393,7 @@ describe('graft historical failure regression', () => {
             'dashboard-review',
             'panel-remove',
             'panel-create',
+            'panel-create-multi',
         ];
 
         it.each(handlers)('%s prompt does not collide with unrelated handlers', (handlerId) => {
@@ -360,6 +415,9 @@ describe('graft historical failure regression', () => {
             }
             if (handlerId !== 'panel-create') {
                 expect(messageDescribesPanelCreate(c.prompt)).toBe(false);
+            }
+            if (handlerId !== 'panel-create-multi') {
+                expect(messageDescribesMultiPanelCreate(c.prompt)).toBe(false);
             }
         });
     });

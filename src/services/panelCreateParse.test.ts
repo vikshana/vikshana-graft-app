@@ -1,6 +1,9 @@
 import {
+    messageDescribesMultiPanelCreate,
     messageDescribesPanelCreate,
+    parseMultiPanelCreateRequest,
     parsePanelCreateRequest,
+    userWantsMultiPanelCreateProgrammatic,
     userWantsPanelCreateProgrammatic,
 } from './panelCreateParse';
 
@@ -48,6 +51,46 @@ describe('panelCreateParse', () => {
             dashboardUid: undefined,
             titleLabel: 'keysight',
             machineId: undefined,
+        });
+    });
+
+    describe('multi panel create', () => {
+        const multiPrompt =
+            'Create a gauge panel, time series panel, table panel, and stat panel for dashboard with UID = cfo0wckufbdhce.';
+
+        it('detects multi-type panel create without quoted titles', () => {
+            expect(messageDescribesMultiPanelCreate(multiPrompt)).toBe(true);
+            expect(messageDescribesPanelCreate(multiPrompt)).toBe(false);
+            expect(userWantsMultiPanelCreateProgrammatic(multiPrompt)).toBe(true);
+        });
+
+        it('parses four panel types with default titles and dashboard uid', () => {
+            expect(parseMultiPanelCreateRequest(multiPrompt)).toEqual({
+                dashboardUid: 'cfo0wckufbdhce',
+                titleLabel: undefined,
+                machineId: undefined,
+                panels: [
+                    { panelType: 'gauge', panelTitle: 'Gauge Panel' },
+                    { panelType: 'timeseries', panelTitle: 'Time Series Panel' },
+                    { panelType: 'table', panelTitle: 'Table Panel' },
+                    { panelType: 'stat', panelTitle: 'Stat Panel' },
+                ],
+            });
+        });
+
+        it('does not match single named panel create', () => {
+            const single =
+                'Create a gauge panel called "System Pressure" for dashboard with UID = cfo0wckufbdhce.';
+            expect(messageDescribesMultiPanelCreate(single)).toBe(false);
+            expect(messageDescribesPanelCreate(single)).toBe(true);
+        });
+
+        it('does not match bulk metric panel prompts', () => {
+            expect(
+                messageDescribesMultiPanelCreate(
+                    'Create 50 panels covering every available metric on the dashboard with UID = cfo0wckufbdhce'
+                )
+            ).toBe(false);
         });
     });
 });

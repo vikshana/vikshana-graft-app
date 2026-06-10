@@ -7,6 +7,7 @@ export type RegressionHandlerId =
     | 'dashboard-review'
     | 'panel-remove'
     | 'panel-create'
+    | 'panel-create-multi'
     | 'llm-save-guard';
 
 export interface RegressionCase {
@@ -105,5 +106,17 @@ export const REGRESSION_CASES: RegressionCase[] = [
         expectHandler: 'dashboard-review',
         expectProgrammatic: true,
         expectLlmIntent: 'programmatic',
+    },
+    {
+        id: 'multi-panel-create-types',
+        failure:
+            'Multi-type panel create (gauge, time series, table, stat) faked Done success with no panels saved',
+        prompt:
+            'Create a gauge panel, time series panel, table panel, and stat panel for dashboard with UID = cfo0wckufbdhce.',
+        expectHandler: 'panel-create-multi',
+        expectProgrammatic: true,
+        expectLlmIntent: 'programmatic',
+        expectReplyContains: ['Panels created', 'Gauge Panel', 'Time Series Panel', 'Table Panel', 'Stat Panel'],
+        expectReplyNotContains: ['### Done (panel fix)', '### Done (dashboard saved)'],
     },
 ];
