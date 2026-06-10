@@ -18,7 +18,7 @@ export function classifyLlmIntent(userMessage: string, contextDashboardUid?: str
     if (!text || isSimpleConversationalMessage(text)) {
         return 'conversational';
     }
-    if (messageHasProgrammaticHandler(text)) {
+    if (messageHasProgrammaticHandler(text, contextDashboardUid)) {
         return 'programmatic';
     }
     if (
@@ -28,7 +28,7 @@ export function classifyLlmIntent(userMessage: string, contextDashboardUid?: str
     ) {
         return 'read_only';
     }
-    if (messageDescribesMultiPanelCreate(text) || messageDescribesPanelCreate(text)) {
+    if (messageDescribesMultiPanelCreate(text, contextDashboardUid) || messageDescribesPanelCreate(text)) {
         return 'programmatic';
     }
     if (userWantsPanelRemove(text, contextDashboardUid) || messageDescribesPanelRemove(text)) {

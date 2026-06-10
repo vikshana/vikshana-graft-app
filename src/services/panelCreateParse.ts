@@ -186,7 +186,7 @@ function hasDashboardContext(text: string, contextDashboardUid?: string): boolea
     );
 }
 
-export function messageDescribesMultiPanelCreate(message: string): boolean {
+export function messageDescribesMultiPanelCreate(message: string, contextDashboardUid?: string): boolean {
     const text = normalizeMessageQuotes(message.trim());
     if (!text || userWantsDashboardMetricPanels(text)) {
         return false;
@@ -204,7 +204,7 @@ export function messageDescribesMultiPanelCreate(message: string): boolean {
     if (panels.length < 2) {
         return false;
     }
-    return hasDashboardContext(text);
+    return hasDashboardContext(text, contextDashboardUid);
 }
 
 export function userWantsMultiPanelCreateProgrammatic(
@@ -219,7 +219,7 @@ export function parseMultiPanelCreateRequest(
     opts?: { contextDashboardUid?: string }
 ): MultiPanelCreateRequest | null {
     const text = normalizeMessageQuotes(message.trim());
-    if (!messageDescribesMultiPanelCreate(text)) {
+    if (!messageDescribesMultiPanelCreate(text, opts?.contextDashboardUid)) {
         return null;
     }
 

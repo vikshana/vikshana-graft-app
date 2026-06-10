@@ -1002,7 +1002,7 @@ export const ChatInterface = () => {
         return;
       }
 
-      if (messageDescribesMultiPanelCreate(content)) {
+      if (messageDescribesMultiPanelCreate(content, contextService.getDashboardUid() ?? undefined)) {
         errorPathTag = 'multi-panel-create';
         const multiPanelCreateRequest = parseMultiPanelCreateRequest(content, {
           contextDashboardUid: contextService.getDashboardUid() ?? undefined,

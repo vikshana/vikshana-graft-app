@@ -92,5 +92,18 @@ describe('panelCreateParse', () => {
                 )
             ).toBe(false);
         });
+
+        it('uses open dashboard context when uid is omitted from the prompt', () => {
+            const prompt =
+                'Create a gauge panel, time series panel, table panel, and stat panel.';
+            expect(messageDescribesMultiPanelCreate(prompt)).toBe(false);
+            expect(
+                messageDescribesMultiPanelCreate(prompt, 'cfo0wckufbdhce')
+            ).toBe(true);
+            expect(parseMultiPanelCreateRequest(prompt, { contextDashboardUid: 'cfo0wckufbdhce' })).toMatchObject({
+                dashboardUid: 'cfo0wckufbdhce',
+                panels: expect.any(Array),
+            });
+        });
     });
 });

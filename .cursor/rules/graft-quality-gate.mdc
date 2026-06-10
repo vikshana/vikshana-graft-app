@@ -1,0 +1,52 @@
+---
+description: Graft quality gate — Bugbot + regression tests before merge/deploy
+alwaysApply: true
+---
+
+# Graft quality gate
+
+Use **three layers** together; none replaces the others.
+
+## 1. Jest regression (fast, required)
+
+After handler/routing/reply changes:
+
+```bash
+npm run test:regression
+```
+
+Add a fixture in `src/services/regression/graftRegressionFixtures.ts` for every production failure prompt (exact operator wording).
+
+## 2. Bugbot (PR / pre-push review)
+
+Before opening or updating a PR, run `/review-bugbot` (or `/review`) on **branch changes**.
+
+Focus Bugbot on gaps Jest cannot catch: missing `contextDashboardUid` in parsers, LLM fallback paths that fake `### Done`, handler order in `ChatInterface.tsx`, post-save verification.
+
+On GitHub, Bugbot runs automatically on PR updates when enabled.
+
+## 3. Playwright E2E (before merge / deploy)
+
+Against EC2 Grafana with credentials:
+
+```bash
+GRAFANA_E2E=1 GRAFANA_E2E_MUTATING=1 \
+GRAFANA_ADMIN_USER=... GRAFANA_ADMIN_PASSWORD=... \
+GRAFANA_MIN_BUILD=<current> \
+npm run test:regression:e2e:mutating
+```
+
+Mutating tests modify the Keysight dashboard; new create flows need idempotent cleanup (see `removeE2ePanelsIfPresent`).
+
+## Deploy checklist
+
+1. `npm run test:regression` — green
+2. Bugbot review — no unresolved high-severity findings
+3. Mutating E2E — green (when touching programmatic save paths)
+4. `./scripts/deploy-electramet.sh` — clean git tree, bump build metadata
+
+## Common false-success patterns to guard
+
+- LLM replies `### Done` without `get_dashboard_by_uid` verification after save
+- Parser matches intent but `ChatInterface` gate omits `contextService.getDashboardUid()`
+- `messageHasProgrammaticHandler` / `classifyLlmIntent` disagree on whether context uid counts

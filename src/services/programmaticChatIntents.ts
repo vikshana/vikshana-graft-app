@@ -53,16 +53,16 @@ import {
 } from './panelCreateParse';
 
 /** True when Graft can handle the message via MCP without calling the LLM. */
-export function messageHasProgrammaticHandler(message: string): boolean {
+export function messageHasProgrammaticHandler(message: string, contextDashboardUid?: string): boolean {
     const text = message.trim();
     if (!text) {
         return false;
     }
 
     return (
-        userWantsMultiPanelCreateProgrammatic(text) ||
-        messageDescribesMultiPanelCreate(text) ||
-        parseMultiPanelCreateRequest(text) != null ||
+        userWantsMultiPanelCreateProgrammatic(text, contextDashboardUid) ||
+        messageDescribesMultiPanelCreate(text, contextDashboardUid) ||
+        parseMultiPanelCreateRequest(text, { contextDashboardUid }) != null ||
         userWantsPanelCreateProgrammatic(text) ||
         messageDescribesPanelCreate(text) ||
         parsePanelCreateRequest(text) != null ||
