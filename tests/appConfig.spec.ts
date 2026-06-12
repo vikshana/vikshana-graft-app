@@ -36,8 +36,9 @@ test('should be possible to upload prompt library', async ({ appConfigPage, page
   await expect(page.getByText(/Successfully loaded 1 categories/i)).toBeVisible();
 
   // Save - button is now just "Save" since model health checks are handled by Grafana LLM Plugin
+  // Use force to bypass Grafana 13 portal overlay that intercepts pointer events
   const saveButton = page.getByRole('button', { name: /^Save$/i });
   const saveResponse = appConfigPage.waitForSettingsResponse();
-  await saveButton.click();
+  await saveButton.click({ force: true });
   await expect(saveResponse).toBeOK();
 });

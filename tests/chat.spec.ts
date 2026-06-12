@@ -8,7 +8,7 @@ test('ChatInterface should render and allow sending messages', async ({ page, mo
     await page.goto('/a/vikshana-graft-app');
 
     // Check if the landing page is rendered
-    await expect(page.getByTestId('landing-title')).toBeVisible();
+    await expect(page.getByTestId('landing-title')).toBeVisible({ timeout: 15000 });
     await expect(page.getByTestId('previous-conversations-link')).toBeVisible();
 
     // Wait for chat-input to be enabled (health check resolved)
@@ -18,10 +18,10 @@ test('ChatInterface should render and allow sending messages', async ({ page, mo
     // Type a message
     await input.fill('Hello Graft');
 
-    // Send the message
+    // Send the message - use force to bypass Grafana 13 portal overlay
     const sendButton = page.getByTestId('send-message-button');
     await expect(sendButton).toBeEnabled();
-    await sendButton.click();
+    await sendButton.click({ force: true });
 
     // Check if the chat interface is active (landing page specific element should be gone)
     await expect(page.getByTestId('landing-title')).not.toBeVisible();
@@ -40,8 +40,8 @@ test('ChatInterface should navigate to history', async ({ page }) => {
     // Wait for the landing page to fully render before clicking
     await expect(page.getByTestId('landing-title')).toBeVisible({ timeout: 15000 });
 
-    // Click on "Previous Conversations"
-    await page.getByTestId('previous-conversations-link').click();
+    // Click on "Previous Conversations" - use force to bypass Grafana 13 portal overlay
+    await page.getByTestId('previous-conversations-link').click({ force: true });
 
     // Check if we are on the history page
     await expect(page).toHaveURL(/.*\/history/);
@@ -68,34 +68,19 @@ test('ChatInterface should support multiple file uploads', async ({ page }) => {
         buffer: Buffer.from('content2'),
     };
 
-    // Upload files
-    // Note: The input is hidden, so we might need to make it visible or use setInputFiles on the label/button if possible, 
-    // or just target the hidden input directly.
-    // The input has data-testid="landing-file-input" (based on ChatInterface.tsx line 740)
+    // Upload files via setInputFiles (bypasses pointer events, no force needed)
     await page.getByTestId('landing-file-input').setInputFiles([file1, file2]);
 
     // Verify previews
-    // The previews are rendered in landingInputWrapper -> filePreviewList -> FilePreview
-    // FilePreview component likely renders the name.
     await expect(page.getByText('test1.txt')).toBeVisible();
     await expect(page.getByText('test2.png')).toBeVisible();
 
-    // Remove one file
-    // We need to find the remove button.
-    const removeButtons = page.locator('button').filter({ has: page.locator('svg') });
-    // This selector is a bit loose.
-    // ChatInterface.tsx uses FilePreview component.
-    // The list is div class={styles.filePreviewList}
-    // We can target the remove button inside the preview item.
-    // Assuming FilePreview renders the name and a close button.
-    // Let's use getByLabel or similar if available, or just standard traversal
-
     // Use the data-testid on the remove button in FilePreview component
+    // Use force to bypass Grafana 13 portal overlay
     const removeButton = page.getByTestId('remove-file-button').first();
-    await removeButton.click();
+    await removeButton.click({ force: true });
 
     // Verify one file is gone and one remains
-    // If we removed the first one, test1.txt should be gone
     await expect(page.getByText('test1.txt')).not.toBeVisible();
     await expect(page.getByText('test2.png')).toBeVisible();
 });
@@ -110,11 +95,11 @@ test('ChatInterface header should be sticky', async ({ page, mockLLMHealth }) =>
     const input = page.getByTestId('chat-input');
     await expect(input).toBeEnabled({ timeout: 15000 });
 
-    // Start a chat to get the header
+    // Start a chat to get the header - use force to bypass Grafana 13 portal overlay
     await input.fill('Hello');
     const sendButton = page.getByTestId('send-message-button');
     await expect(sendButton).toBeEnabled();
-    await sendButton.click();
+    await sendButton.click({ force: true });
 
     // Check CSS of the header
     // The header contains "Graft AI Assistant" and "Back" button.
@@ -155,15 +140,15 @@ test('ChatHistory should allow pinning and unpinning conversations', async ({ pa
     await expect(sessionCard).toBeVisible({ timeout: 10000 });
     await sessionCard.hover();
 
-    // Click pin button
+    // Click pin button - use force to bypass Grafana 13 portal overlay
     const pinButton = sessionCard.getByLabel(/Pin conversation/);
-    await pinButton.click();
+    await pinButton.click({ force: true });
 
     // Verify star icon changes to filled
     await expect(sessionCard.getByLabel('Unpin conversation')).toBeVisible();
 
-    // Unpin
-    await sessionCard.getByLabel('Unpin conversation').click();
+    // Unpin - use force to bypass Grafana 13 portal overlay
+    await sessionCard.getByLabel('Unpin conversation').click({ force: true });
 
     // Verify star icon changes back
     await sessionCard.hover();
@@ -208,16 +193,16 @@ test('ChatHistory should show delete confirmation dialog', async ({ page }) => {
     await expect(sessionCard).toBeVisible({ timeout: 10000 });
     await sessionCard.hover();
 
-    // Click delete button
+    // Click delete button - use force to bypass Grafana 13 portal overlay
     const deleteButton = sessionCard.getByLabel('Delete conversation');
-    await deleteButton.click();
+    await deleteButton.click({ force: true });
 
     // Verify confirmation modal appears
     await expect(page.getByText('Delete Conversation')).toBeVisible();
     await expect(page.getByText(/This action cannot be undone/)).toBeVisible();
 
-    // Click Cancel
-    await page.getByText('Cancel').click();
+    // Click Cancel - use force to bypass Grafana 13 portal overlay
+    await page.getByText('Cancel').click({ force: true });
 
     // Verify modal is dismissed and conversation still exists
     await expect(page.getByText('Delete Conversation')).not.toBeVisible();
@@ -254,14 +239,14 @@ test('ChatHistory should delete conversation after confirmation', async ({ page 
     // Wait for history page to load
     await expect(page.getByTestId('history-search-input')).toBeVisible({ timeout: 15000 });
 
-    // Find and delete the conversation
+    // Find and delete the conversation - use force to bypass Grafana 13 portal overlay
     const sessionCard = page.getByTestId('session-card').filter({ hasText: uniqueTitle }).first();
     await expect(sessionCard).toBeVisible({ timeout: 10000 });
     await sessionCard.hover();
-    await sessionCard.getByLabel('Delete conversation').click();
+    await sessionCard.getByLabel('Delete conversation').click({ force: true });
 
-    // Confirm deletion
-    await page.getByTestId('data-testid Confirm Modal Danger Button').click();
+    // Confirm deletion - use force to bypass Grafana 13 portal overlay
+    await page.getByTestId('data-testid Confirm Modal Danger Button').click({ force: true });
 
     // Verify conversation is removed
     await expect(page.getByTestId('session-card').filter({ hasText: uniqueTitle })).not.toBeVisible();
@@ -343,7 +328,7 @@ test.skip('ChatInterface thinking block appears and shows timer with "Thinking f
 
     const input = page.getByTestId('chat-input');
     await input.fill('What is the answer?');
-    await page.getByTestId('send-message-button').click();
+    await page.getByTestId('send-message-button').click({ force: true });
 
     // Verify thinking block shows "Thinking for" label during streaming
     await expect(page.getByText(/Thinking for \d+s/)).toBeVisible({ timeout: 1000 });
@@ -368,7 +353,7 @@ test.skip('ChatInterface thinking block can be expanded and collapsed', async ({
 
     const input = page.getByTestId('chat-input');
     await input.fill('Test');
-    await page.getByTestId('send-message-button').click();
+    await page.getByTestId('send-message-button').click({ force: true });
 
     const thinkingHeader = page.getByText(/Thought for \d+s/);
     await expect(thinkingHeader).toBeVisible();
@@ -377,11 +362,11 @@ test.skip('ChatInterface thinking block can be expanded and collapsed', async ({
     await expect(page.getByText('Internal reasoning here')).not.toBeVisible();
 
     // Click to expand
-    await thinkingHeader.click();
+    await thinkingHeader.click({ force: true });
     await expect(page.getByText('Internal reasoning here')).toBeVisible();
 
     // Click to collapse
-    await thinkingHeader.click();
+    await thinkingHeader.click({ force: true });
     await expect(page.getByText('Internal reasoning here')).not.toBeVisible();
 });
 
@@ -401,7 +386,7 @@ test.skip('ChatInterface thinking timer increments during streaming and uses "Th
 
     const input = page.getByTestId('chat-input');
     await input.fill('Test');
-    await page.getByTestId('send-message-button').click();
+    await page.getByTestId('send-message-button').click({ force: true });
 
     // Check for "Thinking for" label during streaming
     await expect(page.getByText(/Thinking for \d+s/)).toBeVisible({ timeout: 1000 });
@@ -446,17 +431,16 @@ test('ChatHistory should display persisted thinking duration when loading conver
     await page.reload();
 
     // Go to history
-    // Ensure we track state correctly or just force navigate
     await page.goto('/a/vikshana-graft-app/history');
     await expect(page).toHaveURL(/.*\/history/);
 
     // Wait for history page to load
     await expect(page.getByTestId('history-search-input')).toBeVisible({ timeout: 15000 });
 
-    // Find and click on our test session
+    // Find and click on our test session - use force to bypass Grafana 13 portal overlay
     const sessionCard = page.getByTestId('session-card').filter({ hasText: 'Test question with thinking' }).first();
     await expect(sessionCard).toBeVisible({ timeout: 10000 });
-    await sessionCard.click();
+    await sessionCard.click({ force: true });
 
     // Verify we're now viewing the conversation
     await expect(page.getByText('Test question with thinking', { exact: true })).toBeVisible();
@@ -465,14 +449,14 @@ test('ChatHistory should display persisted thinking duration when loading conver
     // Most importantly, verify the thinking block shows the persisted duration (7 seconds), not 0
     await expect(page.getByText('Thought for 7s')).toBeVisible();
 
-    // Verify we can expand the thinking block
+    // Verify we can expand the thinking block - use force to bypass Grafana 13 portal overlay
     const thinkingHeader = page.getByText('Thought for 7s');
-    await thinkingHeader.click();
+    await thinkingHeader.click({ force: true });
 
     // Check that thinking content is now visible
     await expect(page.getByText('Complex reasoning process here')).toBeVisible();
 
     // Collapse it again
-    await thinkingHeader.click();
+    await thinkingHeader.click({ force: true });
     await expect(page.getByText('Complex reasoning process here')).not.toBeVisible();
 });

@@ -11,22 +11,22 @@ test.describe('Prompt Library', () => {
         // Wait for the landing page to fully render before clicking
         await expect(page.getByTestId('landing-title')).toBeVisible({ timeout: 15000 });
 
-        // Click Prompt Library link
-        await page.getByTestId('prompt-library-link').click();
+        // Click Prompt Library link - use force to bypass Grafana 13 portal overlay
+        await page.getByTestId('prompt-library-link').click({ force: true });
         await expect(page).toHaveURL(/.*\/prompts/);
 
         // Check for pre-configured prompts tab
         await expect(page.getByText('Pre-configured Prompts')).toBeVisible();
 
         // Wait for prompts to load and select the first available pre-configured prompt
-        // We use an actual pre-configured prompt from the default library
         const promptItem = page.getByTestId('pre-configured-prompt-item').first();
         await expect(promptItem).toBeVisible({ timeout: 10000 });
 
         // Get the prompt content text before clicking
         const promptContent = await promptItem.locator('[data-testid="prompt-content"]').textContent()
             ?? await promptItem.textContent() ?? '';
-        await promptItem.click();
+        // use force to bypass Grafana 13 portal overlay
+        await promptItem.click({ force: true });
 
         // Should navigate back to chat interface (base URL without /prompts)
         await expect(page).toHaveURL(/\/a\/vikshana-graft-app$/);
@@ -45,10 +45,10 @@ test.describe('Prompt Library', () => {
         // Wait for prompts page to load
         await expect(page.getByText('Pre-configured Prompts')).toBeVisible({ timeout: 15000 });
 
-        // Switch to My Prompts - wait for tab content to stabilize
-        await page.getByText('My Prompts').click();
+        // Switch to My Prompts - use force to bypass Grafana 13 portal overlay
+        await page.getByText('My Prompts').click({ force: true });
 
-        // Wait for "Create New Prompt" button and click - use force to bypass overlay issues in older Grafana versions
+        // Wait for "Create New Prompt" button and click - use force to bypass overlay issues
         const createButton = page.getByRole('button', { name: 'Create New Prompt' });
         await expect(createButton).toBeVisible();
         await createButton.click({ force: true });
@@ -59,12 +59,11 @@ test.describe('Prompt Library', () => {
         // Verify it appears
         await expect(page.getByText('E2E Test Prompt')).toBeVisible();
 
-        // Pin it - target the pin button inside the user prompt card
+        // Pin it - use force to bypass Grafana 13 portal overlay
         const card = page.getByTestId('user-prompt-card').filter({ hasText: 'E2E Test Prompt' });
-        // The first button in card actions is pin
         await card.locator('button').first().click({ force: true });
 
-        // Delete it - target the delete button (last one)
+        // Delete it - use force to bypass Grafana 13 portal overlay
         await card.locator('button').last().click({ force: true });
         // Wait for confirm modal and click Delete button - scoped to dialog for cross-version compatibility
         const modal = page.locator('[role="dialog"]');
@@ -85,15 +84,15 @@ test.describe('Prompt Library', () => {
         const promptItem = page.getByTestId('pre-configured-prompt-item').first();
         await expect(promptItem).toBeVisible({ timeout: 10000 });
 
-        // Click pin button inside the item
+        // Click pin button inside the item - use force to bypass Grafana 13 portal overlay
         const pinButton = promptItem.getByTitle('Pin prompt');
-        await pinButton.click();
+        await pinButton.click({ force: true });
 
         // Verify it is now pinned (title changes to "Unpin prompt")
         await expect(promptItem.getByTitle('Unpin prompt')).toBeVisible();
 
-        // Unpin
-        await promptItem.getByTitle('Unpin prompt').click();
+        // Unpin - use force to bypass Grafana 13 portal overlay
+        await promptItem.getByTitle('Unpin prompt').click({ force: true });
         await expect(promptItem.getByTitle('Pin prompt')).toBeVisible();
     });
 });

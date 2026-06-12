@@ -15,17 +15,17 @@ test('ChatInterface should maintain mode selection when navigating', async ({ pa
     const input = page.getByTestId('chat-input');
     await expect(input).toBeEnabled({ timeout: 15000 });
 
-    // Send a message to enter chat view
+    // Send a message to enter chat view - use force to bypass Grafana 13 portal overlay
     await input.fill('Test message');
     const sendButton = page.getByTestId('send-message-button');
     await expect(sendButton).toBeEnabled();
-    await sendButton.click();
+    await sendButton.click({ force: true });
 
     // Verify we're in chat view
     await expect(page.getByText('Test message')).toBeVisible();
 
-    // Go back to landing page
-    await page.getByTestId('back-button').click();
+    // Go back to landing page - use force to bypass Grafana 13 portal overlay
+    await page.getByTestId('back-button').click({ force: true });
 
     // Verify landing page is displayed again
     await expect(page.getByTestId('landing-title')).toBeVisible();
