@@ -20,6 +20,8 @@ import { llmService } from '../../../services/llm';
 import type { Message, ToolExecution } from '../../../types/llm.types';
 import { contextService, UserContext, DataSourceContext, DashboardContext } from '../../../services/context';
 import { chatHistoryService } from '../../../services/chatHistory';
+import { truncateMessages } from '../../../services/truncation';
+import { filterTools } from '../../../services/toolFilter';
 
 // Local hooks
 import { useRollingPlaceholder, usePluginSettings, useAutoScroll } from './hooks';
@@ -56,25 +58,80 @@ const normalizeMarkdown = (content: string): string => {
 };
 
 const formatContext = (dashboard: DashboardContext, user: UserContext, dataSources: DataSourceContext[]): string => {
-  let contextStr = '';
+  const lines: string[] = [];
 
-  if (user && user.login) {
-    contextStr += `User: \n-Name: ${user.name || 'Unknown'} \n-Email: ${user.email || 'Unknown'} \n-Role: ${user.orgRole || 'Unknown'} \n\n`;
+  // Role + scope (critical instructions near top)
+  lines.push(
+    `You are Graft, an AI assistant embedded in Grafana. ` +
+    `You help users query metrics and logs, build and edit dashboards, and understand their observability data. ` +
+    `If a request is unrelated to Grafana, metrics, logs, or dashboards, politely decline.`
+  );
+  lines.push('');
+
+  // Behavioural instructions (positive framing, near top for primacy)
+  lines.push(
+    `When using tools: call the next tool immediately when you have enough information — ` +
+    `do not narrate your next step in text. Only respond with text when the task is fully ` +
+    `complete or you need clarification from the user. ` +
+    `If a tool returns an error or empty result, explain what failed and why before stopping.`
+  );
+  lines.push('');
+
+  // Output format
+  lines.push(
+    `Output format: use markdown. Wrap PromQL in \`\`\`promql blocks, LogQL in \`\`\`logql blocks, ` +
+    `and dashboard JSON in \`\`\`json blocks. Keep explanations concise.`
+  );
+  lines.push('');
+
+  // Dynamic runtime context
+  lines.push(`Current time: ${new Date().toISOString()}`);
+
+  if (user?.login) {
+    lines.push(`User: ${user.name || user.login} | Role: ${user.orgRole}`);
   }
 
   if (dashboard.uid) {
-    contextStr += `Current Dashboard: \n-Title: ${dashboard.title} \n-UID: ${dashboard.uid} \n\n`;
+    lines.push(`Active dashboard: "${dashboard.title}" (uid: ${dashboard.uid})`);
   }
 
-  if (dataSources && dataSources.length > 0) {
-    contextStr += `Available Data Sources: \n`;
+  // Datasource-to-tool mapping
+  if (dataSources?.length > 0) {
+    lines.push('');
+    lines.push('Available datasources:');
     dataSources.forEach(ds => {
-      contextStr += `-${ds.name} (Type: ${ds.type}, UID: ${ds.uid}) \n`;
+      let toolHint = '';
+      if (ds.type === 'prometheus') { toolHint = ' → query_prometheus, list_prometheus_*'; }
+      else if (ds.type === 'loki')  { toolHint = ' → query_loki_logs, list_loki_*'; }
+      lines.push(`- ${ds.name} (${ds.type}, uid: ${ds.uid})${toolHint}`);
     });
-    contextStr += '\n';
   }
 
-  return contextStr;
+  // Query guidance
+  lines.push('');
+  lines.push('Query guidance:');
+  lines.push('- Prometheus: PromQL. Call list_prometheus_metric_names before querying unknown metrics.');
+  lines.push('- Loki: LogQL. Call list_loki_label_names/values to discover labels before querying.');
+  lines.push('- Time ranges: use Grafana relative format ("now-1h" / "now"). Default to last 1 hour unless the user specifies otherwise.');
+
+  // Dashboard editing
+  lines.push('');
+  lines.push('Dashboard editing:');
+  lines.push(
+    `- To modify an existing dashboard: call get_dashboard_by_uid first, then call update_dashboard with the modified JSON.`
+  );
+  lines.push(
+    `- To create a new dashboard: build it incrementally. ` +
+    `First, call update_dashboard with a minimal dashboard JSON (title, uid: "", id: null, empty panels array). ` +
+    `Then, call get_dashboard_by_uid to get the created dashboard with its assigned UID. ` +
+    `Then add panels one at a time — each time, fetch the latest JSON, append one panel, and call update_dashboard. ` +
+    `This keeps each call small and reliable.`
+  );
+  lines.push(
+    `- Only confirm the dashboard UID with the user if they reference an existing dashboard by name and you cannot determine its UID from context.`
+  );
+
+  return lines.join('\n');
 };
 
 
@@ -164,7 +221,7 @@ export const ChatInterface = () => {
   useEffect(() => {
     if (mcpEnabled && mcpClient) {
       mcpClient.listTools().then((response) => {
-        const tools = mcp.convertToolsToOpenAI(response.tools);
+        const tools = filterTools(mcp.convertToolsToOpenAI(response.tools));
         setMcpTools(tools);
       }).catch(() => {
         // MCP tools loading failed - continue without tools
@@ -410,7 +467,9 @@ export const ChatInterface = () => {
       let finalContent = '';
       let finalToolExecutions: ToolExecution[] = [];
 
-      await llmService.chat(newMessages, context, (fullContent, toolExecutions) => {
+      const truncatedMessages = truncateMessages(newMessages, 10);
+
+      await llmService.chat(truncatedMessages, context, (fullContent, toolExecutions) => {
         // Capture the latest values for saving after completion
         finalContent = fullContent;
         finalToolExecutions = toolExecutions || [];

@@ -1,5 +1,5 @@
 // External libraries
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const PLACEHOLDER_TEXTS = [
     'Query Metrics, Logs and Traces ...',
@@ -20,53 +20,40 @@ const PLACEHOLDER_TEXTS = [
 export const useRollingPlaceholder = (): string => {
     const [currentText, setCurrentText] = useState('');
     const [currentIndex, setCurrentIndex] = useState(0);
-    const stateRef = useRef({ isDeleting: false, isPaused: false });
+    const isDeletingRef = useRef(false);
 
-    const tick = useCallback(() => {
-        const { isDeleting, isPaused } = stateRef.current;
+    useEffect(() => {
         const targetText = PLACEHOLDER_TEXTS[currentIndex];
-
-        if (isPaused) {
-            return;
-        }
+        const isDeleting = isDeletingRef.current;
 
         if (!isDeleting && currentText === targetText) {
             // Finished typing, pause before deleting
-            stateRef.current.isPaused = true;
-            stateRef.current.isDeleting = true;
-            return;
+            const timeout = setTimeout(() => {
+                isDeletingRef.current = true;
+                setCurrentText(targetText.substring(0, targetText.length - 1));
+            }, 2000);
+            return () => clearTimeout(timeout);
         }
 
         if (isDeleting && currentText === '') {
             // Finished deleting, pause before next text
-            stateRef.current.isPaused = true;
-            stateRef.current.isDeleting = false;
-            setCurrentIndex((prev) => (prev + 1) % PLACEHOLDER_TEXTS.length);
-            return;
-        }
-
-        if (isDeleting) {
-            setCurrentText(currentText.substring(0, currentText.length - 1));
-        } else {
-            setCurrentText(targetText.substring(0, currentText.length + 1));
-        }
-    }, [currentText, currentIndex]);
-
-    useEffect(() => {
-        const { isDeleting, isPaused } = stateRef.current;
-
-        if (isPaused) {
-            const pauseDuration = isDeleting ? 2000 : 1000;
             const timeout = setTimeout(() => {
-                stateRef.current.isPaused = false;
-                tick();
-            }, pauseDuration);
+                isDeletingRef.current = false;
+                setCurrentIndex((prev) => (prev + 1) % PLACEHOLDER_TEXTS.length);
+            }, 1000);
             return () => clearTimeout(timeout);
         }
 
-        const timeout = setTimeout(tick, stateRef.current.isDeleting ? 50 : 80);
+        const delay = isDeleting ? 50 : 80;
+        const timeout = setTimeout(() => {
+            if (isDeleting) {
+                setCurrentText(currentText.substring(0, currentText.length - 1));
+            } else {
+                setCurrentText(targetText.substring(0, currentText.length + 1));
+            }
+        }, delay);
         return () => clearTimeout(timeout);
-    }, [currentText, currentIndex, tick]);
+    }, [currentText, currentIndex]);
 
     return currentText;
 };

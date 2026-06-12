@@ -4,26 +4,24 @@ import { test, expect } from './fixtures';
 // in ChatInterface.test.tsx. E2E tests for these features were removed because Grafana's
 // plugin loader initializes before page render, making API mocking ineffective.
 
-test('ChatInterface should maintain mode selection when navigating', async ({ page, mockLLMHealth }) => {
-    // Mock LLM health API to ensure chat functionality is enabled
+test('ChatInterface should maintain mode selection when navigating', async ({ page, mockLLMHealth, waitForPortal }) => {
     await mockLLMHealth();
-
     await page.goto('/a/vikshana-graft-app');
 
-    // Wait for landing page to load
     await expect(page.getByTestId('landing-title')).toBeVisible({ timeout: 10000 });
+    await waitForPortal();
 
-    // Send a message to enter chat view
     const input = page.getByTestId('chat-input');
+    await expect(input).toBeEnabled({ timeout: 15000 });
     await input.fill('Test message');
-    await page.getByTestId('send-message-button').click();
 
-    // Verify we're in chat view
+    const sendButton = page.getByTestId('send-message-button');
+    await expect(sendButton).toBeEnabled();
+    await sendButton.click();
+
     await expect(page.getByText('Test message')).toBeVisible();
 
-    // Go back to landing page
     await page.getByTestId('back-button').click();
 
-    // Verify landing page is displayed again
     await expect(page.getByTestId('landing-title')).toBeVisible();
 });
