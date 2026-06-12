@@ -4,18 +4,33 @@ export const testIds = {
     apiUrl: 'data-testid ac-api-url',
     submit: 'data-testid ac-submit-form',
   },
-  pageOne: {
-    container: 'data-testid pg-one-container',
-    navigateToFour: 'data-testid navigate-to-four',
+  rcaDashboard: {
+    container: 'data-testid rca-dashboard-container',
+    backButton: 'data-testid rca-dashboard-back',
+    recentAnomaliesTable: 'data-testid rca-dashboard-anomalies-table',
+    viewAllButton: 'data-testid rca-dashboard-view-all',
   },
-  pageTwo: {
-    container: 'data-testid pg-two-container',
+  rcaList: {
+    container: 'data-testid rca-list-container',
+    backButton: 'data-testid rca-list-back',
+    alertNameFilter: 'data-testid rca-list-filter-alert',
+    statusFilter: 'data-testid rca-list-filter-status',
+    serviceFilter: 'data-testid rca-list-filter-service',
+    table: 'data-testid rca-list-table',
+    investigateButton: 'data-testid rca-list-investigate',
+    pagination: 'data-testid rca-list-pagination',
   },
-  pageThree: {
-    container: 'data-testid pg-three-container',
-  },
-  pageFour: {
-    container: 'data-testid pg-four-container',
-    navigateBack: 'data-testid navigate-back',
+  rcaInvestigate: {
+    container: 'data-testid rca-investigate-container',
+    backButton: 'data-testid rca-investigate-back',
+    stepsPanel: 'data-testid rca-investigate-steps',
+    hypothesisPanel: 'data-testid rca-investigate-hypothesis',
+    transcriptPanel: 'data-testid rca-investigate-transcript',
+    reportPanel: 'data-testid rca-investigate-report',
+    inputPanel: 'data-testid rca-investigate-input-panel',
+    messageInput: 'data-testid rca-investigate-message-input',
+    sendButton: 'data-testid rca-investigate-send',
+    acceptButton: 'data-testid rca-investigate-accept',
+    startButton: 'data-testid rca-investigate-start',
   },
 };

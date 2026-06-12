@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { RCAInvestigate } from './RCAInvestigate';
 import * as rcaApi from '../services/rcaApi';
 import { RCAHistoryResponse } from '../types/rca.types';
+import { testIds } from '../components/testIds';
 
 jest.mock('../services/rcaApi');
 
@@ -32,9 +33,12 @@ const mockHistoryAwaitingInput: RCAHistoryResponse = {
 };
 
 function renderInvestigate(threadId: string) {
+  const basePath = `/a/vikshana-graft-app/rca/investigate/${threadId}`;
   return render(
-    <MemoryRouter initialEntries={[`/rca/investigate/${threadId}`]}>
+    <MemoryRouter initialEntries={[basePath]}>
       <Routes>
+        <Route path="/a/vikshana-graft-app/rca/investigate/:threadId" element={<RCAInvestigate />} />
+        {/* Fallback route so navigate({ replace: true }) doesn't unmount the component */}
         <Route path="/rca/investigate/:threadId" element={<RCAInvestigate />} />
       </Routes>
     </MemoryRouter>
@@ -145,7 +149,7 @@ describe('RCAInvestigate', () => {
     });
 
     // Second click confirms
-    fireEvent.click(screen.getByText(/accept as final rca/i));
+    fireEvent.click(screen.getByTestId(testIds.rcaInvestigate.acceptButton));
     await waitFor(() => {
       expect(screen.getByText(/Final RCA Report/i)).toBeInTheDocument();
       expect(screen.getByText(/DB pool was exhausted/i)).toBeInTheDocument();

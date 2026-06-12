@@ -69,7 +69,7 @@ describe('RCAList', () => {
     });
   });
 
-  it('renders Investigate link for each row', async () => {
+  it('renders clickable rows for each RCA', async () => {
     (rcaApi.listRCAs as jest.Mock).mockResolvedValue(mockListResponse);
     render(
       <MemoryRouter>
@@ -78,6 +78,9 @@ describe('RCAList', () => {
     );
 
     await waitFor(() => {
+      expect(screen.getByText('HighLatency')).toBeInTheDocument();
+      expect(screen.getByText('HighErrorRate')).toBeInTheDocument();
+      // Each row also has an Investigate button
       const investigateLinks = screen.getAllByText(/investigate/i);
       expect(investigateLinks).toHaveLength(2);
     });
@@ -137,8 +140,8 @@ describe('RCAList', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText(/next/i)).toBeInTheDocument();
-      expect(screen.getByText(/prev/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /next page/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /previous page/i })).toBeInTheDocument();
     });
   });
 
