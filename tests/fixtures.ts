@@ -35,17 +35,48 @@ const mockLLMHealthResponse = {
 };
 
 /**
- * Wait for the Grafana portal overlay to clear.
- * Grafana 13+ renders a transient div[role="presentation"] inside #grafana-portal-container
- * during plugin initialisation. While present it intercepts pointer events, preventing
- * React onClick handlers from firing even with { force: true }. Waiting for the container
- * to be empty ensures clicks reach the underlying elements.
+ * Wait for the Grafana portal overlay to stop intercepting pointer events.
+ * Grafana 13 Enterprise renders a trial/license modal inside #grafana-portal-container
+ * on startup. We dismiss it if present, then wait for any remaining blocking overlay
+ * (div[role="presentation"] without an aria-label, which is a backdrop) to clear.
  */
 async function waitForPortalToClear(page: Page, timeout = 15000): Promise<void> {
+  // Dismiss any Grafana Enterprise trial/license dialog that may be blocking the UI
+  try {
+    const dismissSelectors = [
+      'button[aria-label="Close dialogue"]',
+      'button[aria-label="Close"]',
+      '[aria-label="Dismiss"]',
+      'button:has-text("Maybe later")',
+      'button:has-text("Skip")',
+      'button:has-text("Close")',
+    ];
+    for (const selector of dismissSelectors) {
+      const btn = page.locator(selector).first();
+      if (await btn.isVisible({ timeout: 500 }).catch(() => false)) {
+        await btn.click({ force: true });
+        break;
+      }
+    }
+  } catch {
+    // Ignore — no dialog to dismiss
+  }
+
+  // Wait for any full-viewport backdrop (role="presentation" with no meaningful content)
+  // to clear from the portal container, with a generous timeout
   await page.waitForFunction(
     () => {
       const portal = document.getElementById('grafana-portal-container');
-      return !portal || portal.children.length === 0;
+      if (!portal) {
+        return true;
+      }
+      // A blocking backdrop is a div[role="presentation"] that covers the full viewport
+      const backdrops = Array.from(portal.querySelectorAll('[role="presentation"]')) as HTMLElement[];
+      const blocking = backdrops.find((el) => {
+        const r = el.getBoundingClientRect();
+        return r.width > window.innerWidth * 0.9 && r.height > window.innerHeight * 0.9;
+      });
+      return !blocking;
     },
     { timeout }
   );
