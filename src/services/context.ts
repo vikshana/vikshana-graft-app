@@ -1,4 +1,4 @@
-import { getBackendSrv, getTemplateSrv, config, getDataSourceSrv } from '@grafana/runtime';
+import { getBackendSrv, getTemplateSrv, getDataSourceSrv } from '@grafana/runtime';
 
 // Import types from centralized location
 import type { DashboardContext, UserContext, DataSourceContext } from '../types/context.types';
@@ -15,7 +15,7 @@ export const contextService = {
     },
 
     getUserContext(): UserContext {
-        const user = config.bootData.user;
+        const user = (window as any).grafanaBootData?.user ?? {};
         return {
             name: user.name,
             email: user.email,
