@@ -11,13 +11,56 @@ export type { ToolExecution };
 // while leaving room for dashboard JSON generation.
 const MAX_TOOL_RESULT_CHARS = 4000;
 
-function truncateToolResult(content: string): string {
-    if (content.length <= MAX_TOOL_RESULT_CHARS) {
-        return content;
+/**
+ * Truncates MCP tool result content to stay within the token budget.
+ *
+ * MCP results are arrays of content blocks ({ type, text } | { type, data, ... }).
+ * We truncate the `text` of each block in place so the returned value remains
+ * valid, parseable JSON — the same shape the model expects for tool results.
+ * The truncation notice is appended inside the text of the last block that
+ * had content removed, so the model sees it in the natural reading position.
+ */
+function truncateToolResult(contentJson: string): string {
+    if (contentJson.length <= MAX_TOOL_RESULT_CHARS) {
+        return contentJson;
     }
-    const truncated = content.slice(0, MAX_TOOL_RESULT_CHARS);
-    const omittedChars = content.length - MAX_TOOL_RESULT_CHARS;
-    return `${truncated}\n...[truncated — ${omittedChars} characters omitted. Ask the user to narrow the query if more detail is needed.]`;
+
+    let blocks: any[];
+    try {
+        blocks = JSON.parse(contentJson);
+    } catch {
+        // Not valid JSON (shouldn't happen, but fall back to safe string truncation)
+        const omittedChars = contentJson.length - MAX_TOOL_RESULT_CHARS;
+        return contentJson.slice(0, MAX_TOOL_RESULT_CHARS) +
+            `[truncated — ${omittedChars} chars omitted]`;
+    }
+
+    if (!Array.isArray(blocks)) {
+        // Scalar JSON value — truncate the serialised form
+        const omittedChars = contentJson.length - MAX_TOOL_RESULT_CHARS;
+        return contentJson.slice(0, MAX_TOOL_RESULT_CHARS) +
+            `[truncated — ${omittedChars} chars omitted]`;
+    }
+
+    let budget = MAX_TOOL_RESULT_CHARS;
+    const result = blocks.map((block: any) => {
+        if (typeof block?.text !== 'string' || budget <= 0) {
+            return block;
+        }
+        if (block.text.length <= budget) {
+            budget -= block.text.length;
+            return block;
+        }
+        const kept = block.text.slice(0, budget);
+        const omittedChars = block.text.length - budget;
+        budget = 0;
+        return {
+            ...block,
+            text: `${kept}[truncated — ${omittedChars} chars omitted. Narrow the query if more detail is needed.]`,
+        };
+    });
+
+    return JSON.stringify(result);
 }
 
 export const llmService = {
