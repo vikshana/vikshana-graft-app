@@ -11,12 +11,16 @@ test('ChatInterface should render and allow sending messages', async ({ page, mo
     await expect(page.getByTestId('landing-title')).toBeVisible();
     await expect(page.getByTestId('previous-conversations-link')).toBeVisible();
 
-    // Type a message
+    // Wait for chat-input to be enabled (health check resolved)
     const input = page.getByTestId('chat-input');
+    await expect(input).toBeEnabled({ timeout: 15000 });
+
+    // Type a message
     await input.fill('Hello Graft');
 
     // Send the message
     const sendButton = page.getByTestId('send-message-button');
+    await expect(sendButton).toBeEnabled();
     await sendButton.click();
 
     // Check if the chat interface is active (landing page specific element should be gone)
@@ -33,6 +37,9 @@ test('ChatInterface should render and allow sending messages', async ({ page, mo
 test('ChatInterface should navigate to history', async ({ page }) => {
     await page.goto('/a/vikshana-graft-app');
 
+    // Wait for the landing page to fully render before clicking
+    await expect(page.getByTestId('landing-title')).toBeVisible({ timeout: 15000 });
+
     // Click on "Previous Conversations"
     await page.getByTestId('previous-conversations-link').click();
 
@@ -43,6 +50,9 @@ test('ChatInterface should navigate to history', async ({ page }) => {
 
 test('ChatInterface should support multiple file uploads', async ({ page }) => {
     await page.goto('/a/vikshana-graft-app');
+
+    // Wait for the landing page to fully render before interacting
+    await expect(page.getByTestId('landing-title')).toBeVisible({ timeout: 15000 });
 
     // Create dummy files
     const file1 = {
@@ -96,10 +106,15 @@ test('ChatInterface header should be sticky', async ({ page, mockLLMHealth }) =>
 
     await page.goto('/a/vikshana-graft-app');
 
-    // Start a chat to get the header
+    // Wait for chat-input to be enabled (health check resolved)
     const input = page.getByTestId('chat-input');
+    await expect(input).toBeEnabled({ timeout: 15000 });
+
+    // Start a chat to get the header
     await input.fill('Hello');
-    await page.getByTestId('send-message-button').click();
+    const sendButton = page.getByTestId('send-message-button');
+    await expect(sendButton).toBeEnabled();
+    await sendButton.click();
 
     // Check CSS of the header
     // The header contains "Graft AI Assistant" and "Back" button.
@@ -132,8 +147,12 @@ test('ChatHistory should allow pinning and unpinning conversations', async ({ pa
     // Navigate to history
     await page.goto('/a/vikshana-graft-app/history');
 
+    // Wait for history page to load
+    await expect(page.getByTestId('history-search-input')).toBeVisible({ timeout: 15000 });
+
     // Find the conversation card and hover to show pin button
     const sessionCard = page.getByTestId('session-card').filter({ hasText: 'Test conversation for pinning' }).first();
+    await expect(sessionCard).toBeVisible({ timeout: 10000 });
     await sessionCard.hover();
 
     // Click pin button
@@ -181,8 +200,12 @@ test('ChatHistory should show delete confirmation dialog', async ({ page }) => {
     await page.goto('/a/vikshana-graft-app/history');
     await expect(page).toHaveURL(/.*\/history/);
 
+    // Wait for history page to load
+    await expect(page.getByTestId('history-search-input')).toBeVisible({ timeout: 15000 });
+
     // Find the conversation and hover to show delete button
     const sessionCard = page.getByTestId('session-card').filter({ hasText: 'Test conversation to delete' }).first();
+    await expect(sessionCard).toBeVisible({ timeout: 10000 });
     await sessionCard.hover();
 
     // Click delete button
@@ -228,8 +251,12 @@ test('ChatHistory should delete conversation after confirmation', async ({ page 
     await page.goto('/a/vikshana-graft-app/history');
     await expect(page).toHaveURL(/.*\/history/);
 
+    // Wait for history page to load
+    await expect(page.getByTestId('history-search-input')).toBeVisible({ timeout: 15000 });
+
     // Find and delete the conversation
     const sessionCard = page.getByTestId('session-card').filter({ hasText: uniqueTitle }).first();
+    await expect(sessionCard).toBeVisible({ timeout: 10000 });
     await sessionCard.hover();
     await sessionCard.getByLabel('Delete conversation').click();
 
@@ -277,6 +304,9 @@ test('ChatHistory should filter conversations with search', async ({ page }) => 
     // Navigate to history
     await page.goto('/a/vikshana-graft-app/history');
     await expect(page).toHaveURL(/.*\/history/);
+
+    // Wait for history page to load
+    await expect(page.getByTestId('history-search-input')).toBeVisible({ timeout: 15000 });
 
     // Search for specific conversation
     const searchInput = page.getByTestId('history-search-input');
@@ -420,8 +450,12 @@ test('ChatHistory should display persisted thinking duration when loading conver
     await page.goto('/a/vikshana-graft-app/history');
     await expect(page).toHaveURL(/.*\/history/);
 
+    // Wait for history page to load
+    await expect(page.getByTestId('history-search-input')).toBeVisible({ timeout: 15000 });
+
     // Find and click on our test session
     const sessionCard = page.getByTestId('session-card').filter({ hasText: 'Test question with thinking' }).first();
+    await expect(sessionCard).toBeVisible({ timeout: 10000 });
     await sessionCard.click();
 
     // Verify we're now viewing the conversation
@@ -442,4 +476,3 @@ test('ChatHistory should display persisted thinking duration when loading conver
     await thinkingHeader.click();
     await expect(page.getByText('Complex reasoning process here')).not.toBeVisible();
 });
-

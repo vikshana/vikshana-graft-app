@@ -10,13 +10,16 @@ test('ChatInterface should maintain mode selection when navigating', async ({ pa
 
     await page.goto('/a/vikshana-graft-app');
 
-    // Wait for landing page to load
+    // Wait for landing page to load and inputs to be interactive
     await expect(page.getByTestId('landing-title')).toBeVisible({ timeout: 10000 });
+    const input = page.getByTestId('chat-input');
+    await expect(input).toBeEnabled({ timeout: 15000 });
 
     // Send a message to enter chat view
-    const input = page.getByTestId('chat-input');
     await input.fill('Test message');
-    await page.getByTestId('send-message-button').click();
+    const sendButton = page.getByTestId('send-message-button');
+    await expect(sendButton).toBeEnabled();
+    await sendButton.click();
 
     // Verify we're in chat view
     await expect(page.getByText('Test message')).toBeVisible();

@@ -1,9 +1,15 @@
-import { test, expect } from '@grafana/plugin-e2e';
+import { test, expect } from './fixtures';
 
 test.describe('Prompt Library', () => {
-    test('should navigate to prompt library and select a pre-configured prompt', async ({ page }) => {
+    test('should navigate to prompt library and select a pre-configured prompt', async ({ page, mockLLMHealth }) => {
+        // Mock LLM health so chat-input is enabled when we return from the prompt library
+        await mockLLMHealth();
+
         // Go to landing page
         await page.goto('/a/vikshana-graft-app');
+
+        // Wait for the landing page to fully render before clicking
+        await expect(page.getByTestId('landing-title')).toBeVisible({ timeout: 15000 });
 
         // Click Prompt Library link
         await page.getByTestId('prompt-library-link').click();
@@ -25,14 +31,19 @@ test.describe('Prompt Library', () => {
         // Should navigate back to chat interface (base URL without /prompts)
         await expect(page).toHaveURL(/\/a\/vikshana-graft-app$/);
 
-        // Check if input is populated with some content from the clicked prompt
+        // Wait for chat-input to be enabled, then check it's populated
         const input = page.getByTestId('chat-input');
+        await expect(input).toBeEnabled({ timeout: 15000 });
+
         // The input should have some value after selecting a prompt
         await expect(input).not.toHaveValue('');
     });
 
     test('should create, pin, and delete a user prompt', async ({ page }) => {
         await page.goto('/a/vikshana-graft-app/prompts');
+
+        // Wait for prompts page to load
+        await expect(page.getByText('Pre-configured Prompts')).toBeVisible({ timeout: 15000 });
 
         // Switch to My Prompts - wait for tab content to stabilize
         await page.getByText('My Prompts').click();
@@ -66,6 +77,9 @@ test.describe('Prompt Library', () => {
 
     test('should pin a pre-configured prompt', async ({ page }) => {
         await page.goto('/a/vikshana-graft-app/prompts');
+
+        // Wait for prompts page to load
+        await expect(page.getByText('Pre-configured Prompts')).toBeVisible({ timeout: 15000 });
 
         // Find the first available pre-configured prompt
         const promptItem = page.getByTestId('pre-configured-prompt-item').first();
