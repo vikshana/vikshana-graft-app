@@ -4,8 +4,10 @@ import { test, expect } from './fixtures';
 // since model configuration is now handled by the Grafana LLM Plugin.
 // This plugin's AppConfig only handles prompt library configuration.
 
-test('should be possible to upload prompt library', async ({ appConfigPage, page }) => {
-  // Create a dummy YAML file
+test('should be possible to upload prompt library', async ({ appConfigPage, page, waitForPortal }) => {
+  // Wait for the Grafana portal overlay to clear before interacting
+  await waitForPortal();
+
   const yamlContent = `
 - id: "e2e-test"
   name: "E2E Test Category"
@@ -17,14 +19,6 @@ test('should be possible to upload prompt library', async ({ appConfigPage, page
           content: "E2E Content"
 `;
 
-  // In Playwright, we can set the input files directly
-  // The file input has data-testid="prompt-library-upload"
-  // Note: Grafana UI FileUpload might hide the actual input, so we might need to target the input inside it.
-  // Usually it's an input[type="file"]
-
-  // We'll use a buffer to simulate the file
-  // The container has data-testid="prompt-library-upload-container"
-  // We need to find the input[type="file"] inside it
   await page.locator('[data-testid="prompt-library-upload-container"] input[type="file"]').setInputFiles({
     name: 'prompts.yaml',
     mimeType: 'application/x-yaml',
@@ -32,13 +26,10 @@ test('should be possible to upload prompt library', async ({ appConfigPage, page
     buffer: Buffer.from(yamlContent)
   });
 
-  // Check for success message
   await expect(page.getByText(/Successfully loaded 1 categories/i)).toBeVisible();
 
-  // Save - button is now just "Save" since model health checks are handled by Grafana LLM Plugin
-  // Use force to bypass Grafana 13 portal overlay that intercepts pointer events
   const saveButton = page.getByRole('button', { name: /^Save$/i });
   const saveResponse = appConfigPage.waitForSettingsResponse();
-  await saveButton.click({ force: true });
+  await saveButton.click();
   await expect(saveResponse).toBeOK();
 });

@@ -1,10 +1,12 @@
 import { AppConfigPage, AppPage, test as base } from '@grafana/plugin-e2e';
+import { Page } from '@playwright/test';
 import pluginJson from '../src/plugin.json';
 
 type AppTestFixture = {
   appConfigPage: AppConfigPage;
   gotoPage: (path?: string) => Promise<AppPage>;
   mockLLMHealth: () => Promise<void>;
+  waitForPortal: () => Promise<void>;
 };
 
 /**
@@ -31,6 +33,23 @@ const mockLLMHealthResponse = {
     },
   },
 };
+
+/**
+ * Wait for the Grafana portal overlay to clear.
+ * Grafana 13+ renders a transient div[role="presentation"] inside #grafana-portal-container
+ * during plugin initialisation. While present it intercepts pointer events, preventing
+ * React onClick handlers from firing even with { force: true }. Waiting for the container
+ * to be empty ensures clicks reach the underlying elements.
+ */
+async function waitForPortalToClear(page: Page, timeout = 15000): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const portal = document.getElementById('grafana-portal-container');
+      return !portal || portal.children.length === 0;
+    },
+    { timeout }
+  );
+}
 
 export const test = base.extend<AppTestFixture>({
   appConfigPage: async ({ gotoAppConfigPage }, use) => {
@@ -72,6 +91,13 @@ export const test = base.extend<AppTestFixture>({
       });
     };
     await use(mockHealth);
+  },
+  /**
+   * Fixture that waits for the Grafana 13+ portal overlay to clear before tests interact
+   * with the page. Call after page.goto() and any visibility checks.
+   */
+  waitForPortal: async ({ page }, use) => {
+    await use(() => waitForPortalToClear(page));
   },
 });
 
