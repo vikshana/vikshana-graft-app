@@ -1,0 +1,22 @@
+# Companion to is-compatible.yml.
+# Reports success under the same job name when the real compatibility check
+# is skipped due to path filters, keeping branch protection green.
+name: Latest Grafana API compatibility check (skip)
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - 'src/**'
+      - 'package*.json'
+      - 'tsconfig*.json'
+      - '.config/**'
+      - '.github/workflows/is-compatible.yml'
+
+jobs:
+  compatibilitycheck:
+    name: compatibilitycheck
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Compatibility check skipped — no source files changed in this PR"

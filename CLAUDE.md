@@ -209,6 +209,10 @@ feat!(config): redesign prompt library API
   2. The PR's CI pipeline passes (check with `gh pr checks <number>`).
   3. All relevant automated review comments have been addressed.
 
+### CI path filters
+The CI workflows (`ci.yml`, `is-compatible.yml`, `bundle-stats.yml`) only run when files that can affect their outcome are changed — `src/**`, `pkg/**`, `tests/**`, build config, etc. PRs that touch only docs, `CLAUDE.md`, workflow files, or release config will skip the real CI jobs and instead run a lightweight companion workflow (e.g. `ci-skip.yml`) that reports success immediately so branch protection checks stay green.
+
+**This is intentional and safe.** Files outside the path filters cannot affect the built artifact or test outcomes. If you add a new build config file (e.g. a new root-level `eslint.config.js`), add it to the `paths` list in `ci.yml` and the `paths-ignore` list in `ci-skip.yml` to keep the two in sync.
 ### Versioning and Releases
 - Releases are managed automatically by **release-please**. Do not manually edit `package.json` version, `CHANGELOG.md`, or push version tags.
 - Commit messages must follow **Conventional Commits** (see above) — release-please reads them to determine the next version and generate the CHANGELOG.

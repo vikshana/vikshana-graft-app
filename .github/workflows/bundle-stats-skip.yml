@@ -1,0 +1,21 @@
+# Companion to bundle-stats.yml.
+# Reports success under the same job name when the real bundle stats
+# comparison is skipped due to path filters, keeping branch protection green.
+name: Bundle Stats (skip)
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - 'src/**'
+      - 'package*.json'
+      - '.config/**'
+      - '.github/workflows/bundle-stats.yml'
+
+jobs:
+  compare:
+    name: compare
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Bundle stats skipped — no frontend source files changed in this PR"

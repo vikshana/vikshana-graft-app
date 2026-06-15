@@ -4,9 +4,39 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'src/**'
+      - 'pkg/**'
+      - 'tests/**'
+      - 'package*.json'
+      - 'tsconfig*.json'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Magefile.go'
+      - '.config/**'
+      - 'playwright.config.ts'
+      - 'jest*.js'
+      - 'jest*.ts'
+      - 'eslint.config.mjs'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches:
       - main
+    paths:
+      - 'src/**'
+      - 'pkg/**'
+      - 'tests/**'
+      - 'package*.json'
+      - 'tsconfig*.json'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Magefile.go'
+      - '.config/**'
+      - 'playwright.config.ts'
+      - 'jest*.js'
+      - 'jest*.ts'
+      - 'eslint.config.mjs'
+      - '.github/workflows/ci.yml'
 
 jobs:
   build:
