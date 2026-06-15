@@ -150,3 +150,13 @@ The frontend uses `@grafana/llm` MCP client for tool execution. Tools are loaded
   1. All unit, backend, and E2E tests pass.
   2. The PR's CI pipeline passes (check with `gh pr checks <number>`).
   3. All relevant automated review comments have been addressed.
+
+### Versioning and Releases
+- Releases are managed automatically by **release-please**. Do not manually edit `package.json` version, `CHANGELOG.md`, or push version tags.
+- Commit messages must follow **Conventional Commits** — this is how release-please determines the next version:
+  - `fix:` → patch bump
+  - `feat:` → minor bump
+  - `feat!:` or `BREAKING CHANGE:` footer → major bump
+  - `chore:`, `test:`, `ci:`, `refactor:`, `build:` → no version bump
+- After merging to `main`, release-please opens a Release PR automatically. Merge it when ready to publish a release.
+- See `docs/release_workflow.md` for the full release process.
