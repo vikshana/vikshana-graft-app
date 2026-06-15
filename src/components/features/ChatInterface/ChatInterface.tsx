@@ -721,6 +721,14 @@ ${input} `
     <div className={styles.container}>
       {messages.length === 0 ? (
         <div className={styles.landingContainer}>
+          <button
+            className={styles.settingsButton}
+            data-testid="settings-button"
+            title="Plugin configuration"
+            onClick={() => { window.location.href = '/plugins/vikshana-graft-app?page=configuration'; }}
+          >
+            <Icon name="cog" size="lg" />
+          </button>
           <div className={styles.landingContent}>
 
             <div className={styles.logo}>
