@@ -1,0 +1,35 @@
+# Companion to ci.yml.
+# When a PR touches only files outside ci.yml's path filter (docs, config,
+# workflow files etc.) the real CI workflow is skipped entirely. GitHub branch
+# protection rules that require a named status check will then block the merge
+# because the check never ran.
+#
+# This workflow fires on the *inverse* path set and immediately reports success
+# under the same job name ("Build, lint and unit tests") so branch protection
+# stays green without wasting any compute.
+name: CI (skip)
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - 'src/**'
+      - 'pkg/**'
+      - 'tests/**'
+      - 'package*.json'
+      - 'tsconfig*.json'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Magefile.go'
+      - '.config/**'
+      - 'playwright.config.ts'
+      - 'jest*.js'
+      - 'jest*.ts'
+
+jobs:
+  build:
+    name: Build, lint and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "CI skipped — no source files changed in this PR"
