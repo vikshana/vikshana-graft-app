@@ -1,4 +1,6 @@
-# Custom release workflow with Go 1.24 support
+# Build and publish a GitHub Release for every vX.Y.Z tag.
+# Tags are created automatically by the release-please workflow when its
+# Release PR is merged. See docs/release_workflow.md for the full process.
 name: Release
 
 on:
