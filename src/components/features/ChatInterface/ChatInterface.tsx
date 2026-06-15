@@ -722,9 +722,11 @@ ${input} `
       {messages.length === 0 ? (
         <div className={styles.landingContainer}>
           <button
+            type="button"
             className={styles.settingsButton}
             data-testid="settings-button"
             title="Plugin configuration"
+            aria-label="Plugin configuration"
             onClick={() => { window.location.href = '/plugins/vikshana-graft-app?page=configuration'; }}
           >
             <Icon name="cog" size="lg" />
