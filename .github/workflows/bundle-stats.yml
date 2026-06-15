@@ -9,6 +9,7 @@ on:
       - 'src/**'
       - 'package*.json'
       - '.config/**'
+      - '.github/workflows/bundle-stats.yml'
   push:
     branches:
       - main
@@ -16,6 +17,7 @@ on:
       - 'src/**'
       - 'package*.json'
       - '.config/**'
+      - '.github/workflows/bundle-stats.yml'
 
 permissions:
   contents: write

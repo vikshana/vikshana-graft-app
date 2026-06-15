@@ -12,6 +12,7 @@ on:
       - 'package*.json'
       - 'tsconfig*.json'
       - '.config/**'
+      - '.github/workflows/is-compatible.yml'
 
 jobs:
   compatibilitycheck:

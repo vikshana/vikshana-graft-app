@@ -26,6 +26,8 @@ on:
       - 'playwright.config.ts'
       - 'jest*.js'
       - 'jest*.ts'
+      - 'eslint.config.mjs'
+      - '.github/workflows/ci.yml'
 
 jobs:
   build:
