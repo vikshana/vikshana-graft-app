@@ -748,4 +748,90 @@ describe('ChatInterface', () => {
             });
         });
     });
+
+    describe('Settings gear icon', () => {
+        it('renders the settings button on the landing page', async () => {
+            render(
+                <MemoryRouter>
+                    <ChatInterface />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                expect(screen.getByTestId('landing-title')).toBeInTheDocument();
+            });
+
+            expect(screen.getByTestId('settings-button')).toBeInTheDocument();
+        });
+
+        it('settings button has the correct title attribute', async () => {
+            render(
+                <MemoryRouter>
+                    <ChatInterface />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                expect(screen.getByTestId('settings-button')).toBeInTheDocument();
+            });
+
+            expect(screen.getByTestId('settings-button')).toHaveAttribute('title', 'Plugin configuration');
+        });
+
+        it('navigates to the plugin config page when settings button is clicked', async () => {
+            const originalLocation = window.location;
+            // jsdom does not support navigation, so we replace href with a writable mock
+            delete (window as any).location;
+            (window as any).location = { href: '' };
+
+            try {
+                render(
+                    <MemoryRouter>
+                        <ChatInterface />
+                    </MemoryRouter>
+                );
+
+                await waitFor(() => {
+                    expect(screen.getByTestId('settings-button')).toBeInTheDocument();
+                });
+
+                fireEvent.click(screen.getByTestId('settings-button'));
+
+                expect(window.location.href).toBe('/plugins/vikshana-graft-app?page=configuration');
+            } finally {
+                // Always restore original location, even if an assertion throws
+                (window as any).location = originalLocation;
+            }
+        });
+
+        it('settings button is not shown in active chat view', async () => {
+            (llmService.chat as jest.Mock).mockImplementation(async (messages, context, onUpdate) => {
+                onUpdate('Hello there!');
+            });
+
+            render(
+                <MemoryRouter>
+                    <ChatInterface />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                expect(screen.getByTestId('send-message-button')).not.toBeDisabled();
+            });
+
+            const input = screen.getByTestId('chat-input');
+            fireEvent.change(input, { target: { value: 'Hello' } });
+
+            await act(async () => {
+                fireEvent.click(screen.getByLabelText('Send message'));
+            });
+
+            await waitFor(() => {
+                expect(screen.getByText('Hello there!')).toBeInTheDocument();
+            });
+
+            // Landing page (and its settings button) should be gone
+            expect(screen.queryByTestId('settings-button')).not.toBeInTheDocument();
+        });
+    });
 });

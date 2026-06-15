@@ -24,6 +24,25 @@ position: absolute;
 top: ${theme.spacing(2)};
 right: ${theme.spacing(2)};
 `,
+  settingsButton: css`
+position: absolute;
+top: ${theme.spacing(1)};
+right: ${theme.spacing(1)};
+padding: ${theme.spacing(0.5)};
+color: ${theme.colors.text.secondary};
+background: transparent;
+border: none;
+border-radius: ${theme.shape.radius.default};
+cursor: pointer;
+display: flex;
+align-items: center;
+justify-content: center;
+line-height: 1;
+&:hover {
+  color: ${theme.colors.text.primary};
+  background: ${theme.colors.action.hover};
+}
+`,
   landingContent: css`
 max-width: 960px;
 width: 100%;
