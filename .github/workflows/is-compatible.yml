@@ -1,5 +1,13 @@
 name: Latest Grafana API compatibility check
-on: [pull_request]
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'package*.json'
+      - 'tsconfig*.json'
+      - '.config/**'
 
 jobs:
   compatibilitycheck:

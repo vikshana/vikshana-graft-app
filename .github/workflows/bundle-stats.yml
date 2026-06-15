@@ -5,9 +5,17 @@ on:
   pull_request:
     branches:
       - main
+    paths:
+      - 'src/**'
+      - 'package*.json'
+      - '.config/**'
   push:
     branches:
       - main
+    paths:
+      - 'src/**'
+      - 'package*.json'
+      - '.config/**'
 
 permissions:
   contents: write
