@@ -121,3 +121,42 @@ The frontend uses `@grafana/llm` MCP client for tool execution. Tools are loaded
 - **LLM Calls**: Frontend calls `@grafana/llm` directly (synchronous chat completions, not streaming)
 - **Test IDs**: Use `data-testid` attributes defined in `src/components/testIds.ts`
 - **Lazy Loading**: Route components use React lazy loading with Suspense
+
+## Workflow Rules
+
+### Branching
+- Before starting any change, check the current branch with `git branch --show-current`.
+- If on `main`, create a feature branch (`git checkout -b feature/<short-description>`) before making any commits.
+- All commits must go to the feature branch — never commit directly to `main`.
+
+### Testing
+- After every change, run the full test suite before committing:
+  1. Unit + integration tests: `npm run test:ci`
+  2. Backend tests: `go test ./pkg/...`
+  3. E2E tests: `npm run e2e` (requires Grafana running via `npm run server`)
+- All tests must pass. Fix any regressions before proceeding.
+
+### Pull Requests
+- Push the feature branch and open a PR against `main` using `gh pr create`.
+- After creating the PR, check for Copilot (or other automated) review comments:
+  ```bash
+  gh pr view <number> --comments
+  gh api repos/{owner}/{repo}/pulls/<number>/comments
+  ```
+- Review each comment, implement fixes for relevant ones, then push the updated branch.
+
+### Definition of Done
+- The task is only complete and ready for human review when:
+  1. All unit, backend, and E2E tests pass.
+  2. The PR's CI pipeline passes (check with `gh pr checks <number>`).
+  3. All relevant automated review comments have been addressed.
+
+### Versioning and Releases
+- Releases are managed automatically by **release-please**. Do not manually edit `package.json` version, `CHANGELOG.md`, or push version tags.
+- Commit messages must follow **Conventional Commits** — this is how release-please determines the next version:
+  - `fix:` → patch bump
+  - `feat:` → minor bump
+  - `feat!:` or `BREAKING CHANGE:` footer → major bump
+  - `chore:`, `test:`, `ci:`, `refactor:`, `build:` → no version bump
+- After merging to `main`, release-please opens a Release PR automatically. Merge it when ready to publish a release.
+- See `docs/release_workflow.md` for the full release process.
