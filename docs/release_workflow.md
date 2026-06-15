@@ -26,7 +26,7 @@ Version bumps are determined automatically from commit message prefixes:
 | `fix:` | `fix: correct health check timeout` | Patch (`0.2.0 → 0.2.1`) |
 | `feat:` | `feat: add dark mode support` | Minor (`0.2.0 → 0.3.0`) |
 | `feat!:` or `BREAKING CHANGE:` footer | `feat!: redesign config API` | Major (`0.2.0 → 1.0.0`) |
-| `chore:`, `test:`, `ci:`, `refactor:` | `chore: update dependencies` | No bump (hidden from changelog) |
+| `chore:`, `test:`, `ci:`, `refactor:`, `build:` | `chore: update dependencies` | No bump (hidden from changelog) |
 | `docs:` | `docs: improve setup guide` | No bump (shown in changelog) |
 | `perf:` | `perf: optimise bundle size` | Patch |
 
@@ -64,7 +64,6 @@ If a commit message was wrong and the version bump is incorrect, you can overrid
 
 When ready to release, simply **merge the Release PR**. release-please will:
 - Push a `vX.Y.Z` tag to `main`
-- Create a GitHub Release
 
 ### 5. Automated build and publish
 
@@ -72,7 +71,7 @@ The `vX.Y.Z` tag push triggers `.github/workflows/release.yml`, which:
 1. Builds the frontend (`npm run build`)
 2. Builds the Go backend for all platforms (`mage -v`)
 3. Packages `dist/` as `vikshana-graft-app-vX.Y.Z.zip`
-4. Attaches the zip to the GitHub Release
+4. Creates a GitHub Release and attaches the zip as a downloadable artifact
 
 The release is then available at:
 ```

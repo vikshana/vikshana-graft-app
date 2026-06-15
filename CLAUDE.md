@@ -157,6 +157,6 @@ The frontend uses `@grafana/llm` MCP client for tool execution. Tools are loaded
   - `fix:` → patch bump
   - `feat:` → minor bump
   - `feat!:` or `BREAKING CHANGE:` footer → major bump
-  - `chore:`, `test:`, `ci:`, `refactor:` → no version bump
+  - `chore:`, `test:`, `ci:`, `refactor:`, `build:` → no version bump
 - After merging to `main`, release-please opens a Release PR automatically. Merge it when ready to publish a release.
 - See `docs/release_workflow.md` for the full release process.
