@@ -18,6 +18,8 @@
 import {
     E2E_REGRESSION_CASES,
     E2E_MULTI_PANEL_DEFAULT_TITLES,
+    e2eDashboardRowWithPanelsExpectContains,
+    e2eDashboardRowWithPanelsPrompt,
     e2ePanelCreateExpectContains,
     e2ePanelCreatePrompt,
     e2ePanelRemovePrompt,
@@ -41,6 +43,8 @@ const mutatingCases = E2E_REGRESSION_CASES.filter((c) => c.e2eEnabled && c.e2eMo
 const renameCase = mutatingCases.find((c) => c.id === 'panel-rename-not-dashboard');
 const createCase = mutatingCases.find((c) => c.id === 'panel-create-bar-chart');
 const multiPanelCase = mutatingCases.find((c) => c.id === 'multi-panel-create-types');
+const rowWithPanelsCase = mutatingCases.find((c) => c.id === 'dashboard-row-with-panels');
+const bulkGaugeCase = mutatingCases.find((c) => c.id === 'bulk-gauge-panel-rename');
 const removeCase = mutatingCases.find((c) => c.id === 'panel-remove-verify');
 
 test.describe('Graft regression E2E (read-only)', () => {
@@ -77,6 +81,51 @@ test.describe('Graft regression E2E (mutating)', () => {
 
     let createdPanelName = '';
     let renamedPanelName = '';
+
+    test('dashboard-row-with-panels', async ({ page }) => {
+        if (!rowWithPanelsCase) {
+            throw new Error('dashboard-row-with-panels E2E case missing');
+        }
+        test.setTimeout(rowWithPanelsCase.replyTimeoutMs + 60_000);
+
+        const rowTitle = `Machine Health E2E ${Date.now()}`;
+        const prompt = e2eDashboardRowWithPanelsPrompt(rowTitle);
+
+        await openFreshGraftChat(page);
+        const startCopyCount = await sendGraftPrompt(page, prompt);
+        const reply = await waitForAssistantReply(page, {
+            timeoutMs: rowWithPanelsCase.replyTimeoutMs,
+            startCopyCount,
+        });
+
+        assertReplyExpectations(
+            reply,
+            e2eDashboardRowWithPanelsExpectContains(rowTitle),
+            rowWithPanelsCase.expectReplyNotContains
+        );
+        await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
+    });
+
+    test('bulk-gauge-panel-rename', async ({ page }) => {
+        if (!bulkGaugeCase) {
+            throw new Error('bulk-gauge-panel-rename E2E case missing');
+        }
+        test.setTimeout(bulkGaugeCase.replyTimeoutMs + 60_000);
+
+        await openFreshGraftChat(page);
+        const startCopyCount = await sendGraftPrompt(page, bulkGaugeCase.prompt);
+        const reply = await waitForAssistantReply(page, {
+            timeoutMs: bulkGaugeCase.replyTimeoutMs,
+            startCopyCount,
+        });
+
+        assertReplyExpectations(
+            reply,
+            bulkGaugeCase.expectReplyContains,
+            bulkGaugeCase.expectReplyNotContains
+        );
+        await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
+    });
 
     test('multi-panel-create-types', async ({ page }) => {
         if (!multiPanelCase) {

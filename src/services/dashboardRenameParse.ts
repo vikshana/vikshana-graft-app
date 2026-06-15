@@ -1,6 +1,7 @@
 import { extractAllDashboardUids } from './dashboardMentionParse';
 import { findMachineIdsInText, isMachineId, MACHINE_ID_PATTERN } from './dashboardCloneParse';
 import { messageDescribesPanelRename } from './panelRenameParse';
+import { messageDescribesBulkGaugePanelRename } from './bulkGaugePanelRenameParse';
 
 export interface DashboardRenameRequest {
     machineId?: string;
@@ -18,6 +19,9 @@ function normalizeMessageQuotes(text: string): string {
 
 export function messageDescribesDashboardRename(message: string): boolean {
     const text = normalizeMessageQuotes(message.trim());
+    if (messageDescribesBulkGaugePanelRename(text)) {
+        return false;
+    }
     if (messageDescribesPanelRename(text)) {
         return false;
     }

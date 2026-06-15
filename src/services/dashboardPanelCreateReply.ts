@@ -5,6 +5,8 @@ import {
     userWantsDashboardPanelFix,
 } from './dashboardCloneProgress';
 import { messageDescribesPanelCreate } from './panelCreateParse';
+import { messageDescribesDashboardRowWithPanels } from './dashboardRowWithPanelsParse';
+import { messageDescribesBulkGaugePanelRename } from './bulkGaugePanelRenameParse';
 import {
     isExplicitSinglePanelCopyRequest,
     messageMentionsSinglePanelCopyIntent,
@@ -37,11 +39,16 @@ export function userWantsPanelCreate(message: string): boolean {
     if (userWantsDashboardPanelFix(text)) {
         return false;
     }
+    if (messageDescribesDashboardRowWithPanels(text)) {
+        return false;
+    }
+    if (messageDescribesBulkGaugePanelRename(text)) {
+        return false;
+    }
     return (
         messageDescribesPanelCreate(text) ||
-        (/\b(create|add|make)\b/i.test(text) && /\b(panel|gauge)\b/i.test(text)) ||
-        /\bnew\s+(?:pressure\s+)?gauge\b/i.test(text) ||
-        (/\b(create|add)\b/i.test(text) && /\bdashboard\b/i.test(text) && /\bpanel/i.test(text))
+        (/\b(create|add|make)\b/i.test(text) && /\b(panel|gauge)\b/i.test(text) && !/\brow\b/i.test(text)) ||
+        /\bnew\s+(?:pressure\s+)?gauge\b/i.test(text)
     );
 }
 

@@ -8,6 +8,8 @@ export type RegressionHandlerId =
     | 'panel-remove'
     | 'panel-create'
     | 'panel-create-multi'
+    | 'dashboard-row-with-panels'
+    | 'bulk-gauge-panel-rename'
     | 'llm-save-guard';
 
 export interface RegressionCase {
@@ -118,5 +120,27 @@ export const REGRESSION_CASES: RegressionCase[] = [
         expectLlmIntent: 'programmatic',
         expectReplyContains: ['Panels created', 'Gauge Panel', 'Time Series Panel', 'Table Panel', 'Stat Panel'],
         expectReplyNotContains: ['### Done (panel fix)', '### Done (dashboard saved)'],
+    },
+    {
+        id: 'dashboard-row-with-panels',
+        failure: 'Row + panels create faked Done (panel added) with failed-plugin panels',
+        prompt:
+            'Create a dashboard row called "Machine Health" and add two panels to it for dashboard with UID = cfo0wckufbdhce.',
+        expectHandler: 'dashboard-row-with-panels',
+        expectProgrammatic: true,
+        expectLlmIntent: 'programmatic',
+        expectReplyContains: ['Row and panels created', 'Machine Health'],
+        expectReplyNotContains: ['### Done (panel added)', 'new panel'],
+    },
+    {
+        id: 'bulk-gauge-panel-rename',
+        failure: 'Bulk gauge panel rename routed to dashboard rename (begin label)',
+        prompt:
+            'Rename all gauge panels to begin with "System" for dashboard with UID = cfo0wckufbdhce.',
+        expectHandler: 'bulk-gauge-panel-rename',
+        expectProgrammatic: true,
+        expectLlmIntent: 'programmatic',
+        expectReplyContains: ['Gauge panels renamed', 'System'],
+        expectReplyNotContains: ['Could not rename dashboard', 'Dashboard renamed'],
     },
 ];

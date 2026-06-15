@@ -19,6 +19,16 @@ import {
     llmIntentAllowsUpdateDashboard,
 } from '../llmIntentRouter';
 import {
+    messageDescribesBulkGaugePanelRename,
+    parseBulkGaugePanelRenameRequest,
+    userWantsBulkGaugePanelRenameProgrammatic,
+} from '../bulkGaugePanelRenameParse';
+import {
+    messageDescribesDashboardRowWithPanels,
+    parseDashboardRowWithPanelsRequest,
+    userWantsDashboardRowWithPanelsProgrammatic,
+} from '../dashboardRowWithPanelsParse';
+import {
     messageDescribesMultiPanelCreate,
     messageDescribesPanelCreate,
     parseMultiPanelCreateRequest,
@@ -113,6 +123,25 @@ function assertHandlerRouting(c: RegressionCase): void {
                 ],
             });
             break;
+        case 'dashboard-row-with-panels':
+            expect(messageDescribesDashboardRowWithPanels(prompt)).toBe(true);
+            expect(userWantsDashboardRowWithPanelsProgrammatic(prompt)).toBe(true);
+            expect(parseDashboardRowWithPanelsRequest(prompt)).toMatchObject({
+                rowTitle: 'Machine Health',
+                panelCount: 2,
+                dashboardUid: KEYSIGHT_DASHBOARD_UID,
+            });
+            break;
+        case 'bulk-gauge-panel-rename':
+            expect(messageDescribesBulkGaugePanelRename(prompt)).toBe(true);
+            expect(userWantsBulkGaugePanelRenameProgrammatic(prompt)).toBe(true);
+            expect(parseBulkGaugePanelRenameRequest(prompt)).toMatchObject({
+                titlePrefix: 'System',
+                dashboardUid: KEYSIGHT_DASHBOARD_UID,
+            });
+            expect(userWantsDashboardRename(prompt)).toBe(false);
+            expect(messageDescribesDashboardRename(prompt)).toBe(false);
+            break;
         default:
             throw new Error(`Unhandled handler ${c.expectHandler as string}`);
     }
@@ -120,8 +149,8 @@ function assertHandlerRouting(c: RegressionCase): void {
 
 describe('graft historical failure regression', () => {
     describe('fixture catalog', () => {
-        it('documents eight known failure patterns', () => {
-            expect(REGRESSION_CASES).toHaveLength(8);
+        it('documents ten known failure patterns', () => {
+            expect(REGRESSION_CASES).toHaveLength(10);
             const ids = REGRESSION_CASES.map((c) => c.id);
             expect(new Set(ids).size).toBe(ids.length);
         });
@@ -394,6 +423,8 @@ describe('graft historical failure regression', () => {
             'panel-remove',
             'panel-create',
             'panel-create-multi',
+            'dashboard-row-with-panels',
+            'bulk-gauge-panel-rename',
         ];
 
         it.each(handlers)('%s prompt does not collide with unrelated handlers', (handlerId) => {
@@ -418,6 +449,12 @@ describe('graft historical failure regression', () => {
             }
             if (handlerId !== 'panel-create-multi') {
                 expect(messageDescribesMultiPanelCreate(c.prompt)).toBe(false);
+            }
+            if (handlerId !== 'dashboard-row-with-panels') {
+                expect(messageDescribesDashboardRowWithPanels(c.prompt)).toBe(false);
+            }
+            if (handlerId !== 'bulk-gauge-panel-rename') {
+                expect(messageDescribesBulkGaugePanelRename(c.prompt)).toBe(false);
             }
         });
     });

@@ -66,6 +66,16 @@ export const E2E_REGRESSION_CASES: E2eRegressionCase[] = [
         e2eMode: 'mutating',
         replyTimeoutMs: SLOW_REPLY_TIMEOUT_MS,
     }),
+    toE2eCase('dashboard-row-with-panels', {
+        e2eEnabled: true,
+        e2eMode: 'mutating',
+        replyTimeoutMs: SLOW_REPLY_TIMEOUT_MS,
+    }),
+    toE2eCase('bulk-gauge-panel-rename', {
+        e2eEnabled: true,
+        e2eMode: 'mutating',
+        replyTimeoutMs: SLOW_REPLY_TIMEOUT_MS,
+    }),
     toE2eCase('review-no-auto-continue', { e2eEnabled: false, e2eMode: 'read-only' }),
 ];
 
@@ -87,6 +97,14 @@ export function e2ePanelRenameExpectContains(targetName: string): string[] {
 
 export function e2ePanelCreateExpectContains(panelName: string): string[] {
     return ['Panel created', panelName];
+}
+
+export function e2eDashboardRowWithPanelsPrompt(rowTitle: string): string {
+    return `Create a dashboard row called "${rowTitle}" and add two panels to it for dashboard with UID = ${KEYSIGHT_DASHBOARD_UID}.`;
+}
+
+export function e2eDashboardRowWithPanelsExpectContains(rowTitle: string): string[] {
+    return ['Row and panels created', rowTitle];
 }
 
 /** Default titles from multi-panel create programmatic path (Keysight regression). */

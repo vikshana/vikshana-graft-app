@@ -44,6 +44,16 @@ import {
 } from './dashboardMetricPanelsParse';
 import { userWantsDashboardReviewOnly } from './dashboardReviewParse';
 import {
+    messageDescribesBulkGaugePanelRename,
+    parseBulkGaugePanelRenameRequest,
+    userWantsBulkGaugePanelRenameProgrammatic,
+} from './bulkGaugePanelRenameParse';
+import {
+    messageDescribesDashboardRowWithPanels,
+    parseDashboardRowWithPanelsRequest,
+    userWantsDashboardRowWithPanelsProgrammatic,
+} from './dashboardRowWithPanelsParse';
+import {
     messageDescribesMultiPanelCreate,
     messageDescribesPanelCreate,
     parseMultiPanelCreateRequest,
@@ -60,6 +70,12 @@ export function messageHasProgrammaticHandler(message: string, contextDashboardU
     }
 
     return (
+        userWantsBulkGaugePanelRenameProgrammatic(text, contextDashboardUid) ||
+        messageDescribesBulkGaugePanelRename(text) ||
+        parseBulkGaugePanelRenameRequest(text, { contextDashboardUid }) != null ||
+        userWantsDashboardRowWithPanelsProgrammatic(text, contextDashboardUid) ||
+        messageDescribesDashboardRowWithPanels(text, contextDashboardUid) ||
+        parseDashboardRowWithPanelsRequest(text, { contextDashboardUid }) != null ||
         userWantsMultiPanelCreateProgrammatic(text, contextDashboardUid) ||
         messageDescribesMultiPanelCreate(text, contextDashboardUid) ||
         parseMultiPanelCreateRequest(text, { contextDashboardUid }) != null ||

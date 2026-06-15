@@ -102,6 +102,24 @@ import {
   formatModulePanelReorderReply,
 } from '../../../services/programmaticModulePanelReorder';
 import {
+  messageDescribesBulkGaugePanelRename,
+  parseBulkGaugePanelRenameRequest,
+  formatBulkGaugePanelRenameClarification,
+} from '../../../services/bulkGaugePanelRenameParse';
+import {
+  runProgrammaticBulkGaugePanelRename,
+  formatBulkGaugePanelRenameReply,
+} from '../../../services/programmaticBulkGaugePanelRename';
+import {
+  messageDescribesDashboardRowWithPanels,
+  parseDashboardRowWithPanelsRequest,
+  formatDashboardRowWithPanelsClarification,
+} from '../../../services/dashboardRowWithPanelsParse';
+import {
+  runProgrammaticDashboardRowWithPanels,
+  formatDashboardRowWithPanelsReply,
+} from '../../../services/programmaticDashboardRowWithPanels';
+import {
   messageDescribesPanelRename,
   parsePanelRenameRequest,
   formatPanelRenameClarification,
@@ -949,6 +967,61 @@ export const ChatInterface = () => {
         return;
       }
 
+      if (messageDescribesBulkGaugePanelRename(content)) {
+        errorPathTag = 'bulk-gauge-panel-rename';
+        const bulkRenameRequest = parseBulkGaugePanelRenameRequest(content, {
+          contextDashboardUid: contextService.getDashboardUid() ?? undefined,
+        });
+        if (!bulkRenameRequest) {
+          finalContent = formatBulkGaugePanelRenameClarification();
+        } else if (!mcpClient) {
+          finalContent =
+            '### Could not rename gauge panels\n\nGrafana MCP tools are not connected. Open **Grafana LLM / MCP settings**, enable MCP for Graft, hard-refresh, then try again.';
+        } else {
+          const bulkRenameResult = await runProgrammaticBulkGaugePanelRename(mcpClient, bulkRenameRequest, {
+            contextDashboardUid: contextService.getDashboardUid() ?? undefined,
+          });
+          finalContent = formatBulkGaugePanelRenameReply(bulkRenameResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = bulkRenameResult.toolExecutions;
+          clearPendingOnProgrammaticSuccess(bulkRenameResult.ok);
+          if (!bulkRenameResult.ok) {
+            recordGraftFailure({
+              buildNumber: GRAFT_BUILD_NUMBER,
+              intent: 'bulk-gauge-panel-rename',
+              userMessagePreview: content,
+              error: bulkRenameResult.error ?? 'Unknown error',
+            });
+          }
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
       if (messageDescribesPanelRename(content)) {
         errorPathTag = 'panel-rename';
         const panelRenameRequest = parsePanelRenameRequest(content);
@@ -970,6 +1043,61 @@ export const ChatInterface = () => {
               intent: 'panel-rename',
               userMessagePreview: content,
               error: panelRenameResult.error ?? 'Unknown error',
+            });
+          }
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      if (messageDescribesDashboardRowWithPanels(content, contextService.getDashboardUid() ?? undefined)) {
+        errorPathTag = 'dashboard-row-with-panels';
+        const rowRequest = parseDashboardRowWithPanelsRequest(content, {
+          contextDashboardUid: contextService.getDashboardUid() ?? undefined,
+        });
+        if (!rowRequest) {
+          finalContent = formatDashboardRowWithPanelsClarification();
+        } else if (!mcpClient) {
+          finalContent =
+            '### Could not create row and panels\n\nGrafana MCP tools are not connected. Open **Grafana LLM / MCP settings**, enable MCP for Graft, hard-refresh, then try again.';
+        } else {
+          const rowResult = await runProgrammaticDashboardRowWithPanels(mcpClient, rowRequest, {
+            contextDashboardUid: contextService.getDashboardUid() ?? undefined,
+          });
+          finalContent = formatDashboardRowWithPanelsReply(rowResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = rowResult.toolExecutions;
+          clearPendingOnProgrammaticSuccess(rowResult.ok);
+          if (!rowResult.ok) {
+            recordGraftFailure({
+              buildNumber: GRAFT_BUILD_NUMBER,
+              intent: 'dashboard-row-with-panels',
+              userMessagePreview: content,
+              error: rowResult.error ?? 'Unknown error',
             });
           }
         }

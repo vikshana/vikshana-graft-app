@@ -127,6 +127,29 @@ export function findPanelForRemoval(
     return undefined;
 }
 
+/** Resolve a panel node from dashboard.panels tree by listDashboardPanels path indices. */
+export function getPanelAtPath(rootPanels: unknown[], path: number[]): PanelRecord | undefined {
+    if (!Array.isArray(rootPanels) || path.length === 0) {
+        return undefined;
+    }
+    let current: unknown[] = rootPanels;
+    for (let i = 0; i < path.length; i++) {
+        const node = current[path[i]];
+        if (!node || typeof node !== 'object') {
+            return undefined;
+        }
+        if (i === path.length - 1) {
+            return node as PanelRecord;
+        }
+        const nested = (node as PanelRecord).panels;
+        if (!Array.isArray(nested)) {
+            return undefined;
+        }
+        current = nested;
+    }
+    return undefined;
+}
+
 /** Remove a panel from dashboard.panels tree by listDashboardPanels path indices. */
 export function removePanelAtPath(rootPanels: unknown[], path: number[]): boolean {
     if (!Array.isArray(rootPanels) || path.length === 0) {

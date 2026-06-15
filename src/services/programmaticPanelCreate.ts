@@ -285,6 +285,32 @@ function buildNewPanel(
     return panel;
 }
 
+export async function draftPanelForCreate(
+    mcpClient: McpClient,
+    request: PanelCreateRequest,
+    opts: {
+        entries: DashboardPanelEntry[];
+        baselinePanels: unknown;
+        machineId?: string;
+        dashboardTitle?: string;
+        panelId: number;
+        gridPos: { x: number; y: number; w: number; h: number };
+        toolExecutions: ToolExecution[];
+    }
+): Promise<PanelRecord> {
+    const machineId = opts.machineId ?? inferMachineIdFromDashboardTitle(opts.dashboardTitle ?? '');
+    const template = findTemplatePanel(opts.entries, request.panelType);
+    const targets = await buildPanelTargets(
+        request,
+        opts.entries,
+        machineId,
+        Array.isArray(opts.baselinePanels) ? opts.baselinePanels : [],
+        mcpClient,
+        opts.toolExecutions
+    );
+    return buildNewPanel(request, opts.panelId, opts.gridPos, targets, template);
+}
+
 export async function runProgrammaticPanelCreate(
     mcpClient: McpClient,
     request: PanelCreateRequest,

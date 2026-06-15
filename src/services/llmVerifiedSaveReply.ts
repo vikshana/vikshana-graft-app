@@ -8,7 +8,10 @@ import {
     savedVersionFromTools,
 } from './dashboardSaveReplyUtils';
 import { stripPanelIndexTables } from './dashboardTaskStatus';
-import { userWantsPanelCreate } from './dashboardPanelCreateReply';
+import {
+    applyOperatorFriendlyPanelCreateReply,
+    userWantsPanelCreate,
+} from './dashboardPanelCreateReply';
 import { messageDescribesPanelRemove, userWantsPanelRemove } from './panelRemoveParse';
 import { messageDescribesPanelRename, userWantsPanelRename } from './panelRenameParse';
 
@@ -24,9 +27,6 @@ export function applyLlmVerifiedSaveReply(
         [...recentUserMessages].reverse().find((m) => !/^continue\.?$/i.test(m.trim())) ??
         fallbackUserMessage.trim();
 
-    if (userWantsPanelCreate(latestUser)) {
-        return content;
-    }
     if (userWantsPanelRename(latestUser) || messageDescribesPanelRename(latestUser)) {
         return content;
     }
@@ -45,6 +45,15 @@ export function applyLlmVerifiedSaveReply(
             `⚠️ ${verification.detail ?? 'Dashboard save could not be verified.'}\n` +
             `- ${dashboard}${versionBit}\n\n` +
             `Hard-refresh and check the dashboard. Retry with a more specific prompt or use a programmatic handler.\n`
+        );
+    }
+
+    if (verification.verified && userWantsPanelCreate(latestUser)) {
+        return applyOperatorFriendlyPanelCreateReply(
+            stripped,
+            toolExecutions,
+            recentUserMessages,
+            fallbackUserMessage
         );
     }
 
