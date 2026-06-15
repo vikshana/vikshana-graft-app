@@ -30,7 +30,7 @@ Version bumps are determined automatically from commit message prefixes:
 | `docs:` | `docs: improve setup guide` | No bump (shown in changelog) |
 | `perf:` | `perf: optimise bundle size` | Patch |
 
-> **Note:** While the repo is pre-1.0 (`0.x.y`), `feat:` bumps the minor version and `fix:` bumps the patch, as configured by `bump-minor-pre-major` and `bump-patch-for-minor-pre-major` in `release-please-config.json`. A `BREAKING CHANGE` still bumps major.
+> **Note:** While the repo is pre-1.0 (`0.x.y`), `feat:` bumps the minor version and `fix:` bumps the patch, as configured by `bump-minor-pre-major` in `release-please-config.json`. A `BREAKING CHANGE` still bumps major.
 
 ---
 
