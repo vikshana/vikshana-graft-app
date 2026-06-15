@@ -129,6 +129,64 @@ The frontend uses `@grafana/llm` MCP client for tool execution. Tools are loaded
 - If on `main`, create a feature branch (`git checkout -b feature/<short-description>`) before making any commits.
 - All commits must go to the feature branch — never commit directly to `main`.
 
+### Commit messages
+All commit messages **must** follow the [Conventional Commits](https://www.conventionalcommits.org) format:
+
+```
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+**Always include a scope** where it reflects the area of the codebase being changed. Use the scope to describe *what part* of the repo is affected, not *what was done* (that's the type).
+
+Scopes for this repo:
+
+| Scope | When to use |
+|---|---|
+| `chat` | Chat interface, message handling, conversation flow |
+| `llm` | LLM service, model selection, tool execution loop |
+| `history` | Chat history storage and browsing |
+| `prompts` | Prompt library management |
+| `config` | Plugin configuration page (AppConfig) |
+| `context` | Grafana context service (user, dashboard, datasources) |
+| `mcp` | MCP client integration and tool handling |
+| `backend` | Go plugin backend (health checks, routes, metrics) |
+| `deps` | Dependency updates (npm, Go modules) |
+| `ci` | CI/CD workflow files |
+| `release` | Release configuration and process |
+
+Commit types and their effect on versioning:
+
+| Type | When to use | Version bump |
+|---|---|---|
+| `feat` | New user-facing feature | Minor (`0.2.0 → 0.3.0`) |
+| `fix` | Bug fix | Patch (`0.2.0 → 0.2.1`) |
+| `feat!` / `BREAKING CHANGE:` footer | Incompatible API change | Major (`0.2.0 → 1.0.0`) |
+| `perf` | Performance improvement | Patch |
+| `docs` | Documentation only | No bump (visible in changelog) |
+| `chore` | Maintenance, dependency updates | No bump |
+| `refactor` | Code restructure, no behaviour change | No bump |
+| `test` | Adding or fixing tests | No bump |
+| `ci` | CI/CD pipeline changes | No bump |
+| `build` | Build system changes | No bump |
+
+Examples:
+```
+feat(chat): add file attachment support
+fix(llm): handle empty response from health check
+refactor(context): simplify dashboard context fetching
+test(history): add session pagination tests
+docs(release): update release workflow guide
+chore(deps): bump grafana/ui to v11
+ci(release): upgrade release-please-action to v5
+feat!(config): redesign prompt library API
+```
+
+> Commit messages drive the automated release process — release-please reads them to determine the next version and generate the CHANGELOG. Vague messages like `fix: stuff`, missing types, or missing scopes will produce unhelpful changelogs.
+
 ### Testing
 - After every change, run the full test suite before committing:
   1. Unit + integration tests: `npm run test:ci`
@@ -153,10 +211,6 @@ The frontend uses `@grafana/llm` MCP client for tool execution. Tools are loaded
 
 ### Versioning and Releases
 - Releases are managed automatically by **release-please**. Do not manually edit `package.json` version, `CHANGELOG.md`, or push version tags.
-- Commit messages must follow **Conventional Commits** — this is how release-please determines the next version:
-  - `fix:` → patch bump
-  - `feat:` → minor bump
-  - `feat!:` or `BREAKING CHANGE:` footer → major bump
-  - `chore:`, `test:`, `ci:`, `refactor:`, `build:` → no version bump
+- Commit messages must follow **Conventional Commits** (see above) — release-please reads them to determine the next version and generate the CHANGELOG.
 - After merging to `main`, release-please opens a Release PR automatically. Merge it when ready to publish a release.
 - See `docs/release_workflow.md` for the full release process.
