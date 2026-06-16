@@ -34,6 +34,10 @@ import {
     messageDescribesPanelRename,
     parsePanelRenameRequest,
 } from './panelRenameParse';
+import {
+    formatAmbiguousGraphCreateClarification,
+    messageDescribesAmbiguousGraphCreate,
+} from './ambiguousGraphCreateParse';
 
 /** Enough to identify a dashboard for panel fix (uid, machine id, or title). */
 export function hasDashboardIdentityForPanelFix(message: string): boolean {
@@ -104,6 +108,10 @@ export function formatClarificationIfNeeded(userMessage: string): string | null 
             return null;
         }
         return formatPanelRenameClarification(text);
+    }
+
+    if (messageDescribesAmbiguousGraphCreate(text)) {
+        return formatAmbiguousGraphCreateClarification(text);
     }
 
     if (messageDescribesDashboardRename(text)) {

@@ -1,4 +1,8 @@
 import { appendDashboardReferencesToReply } from '../appendToolReferences';
+import {
+    formatAmbiguousGraphCreateClarification,
+    messageDescribesAmbiguousGraphCreate,
+} from '../ambiguousGraphCreateParse';
 import { responseNeedsContinueAction } from '../continueAction';
 import {
     parseDashboardMetricPanelsRequest,
@@ -51,6 +55,7 @@ import { formatDashboardReviewReply } from '../programmaticDashboardReview';
 import { formatMultiPanelCreateReply, formatPanelCreateReply } from '../programmaticPanelCreate';
 import { formatPanelRemoveReply } from '../programmaticPanelRemove';
 import { formatPanelRenameReply } from '../programmaticPanelRename';
+import { formatClarificationIfNeeded } from '../requestClarity';
 import { machineMetricsFieldSelectors } from '../prometheusDiscovery';
 import type { ToolExecution } from '../../types/llm.types';
 import {
@@ -142,6 +147,13 @@ function assertHandlerRouting(c: RegressionCase): void {
             expect(userWantsDashboardRename(prompt)).toBe(false);
             expect(messageDescribesDashboardRename(prompt)).toBe(false);
             break;
+        case 'ambiguous-graph-clarify':
+            expect(messageDescribesAmbiguousGraphCreate(prompt)).toBe(true);
+            expect(userWantsDashboardMetricPanels(prompt)).toBe(false);
+            expect(messageDescribesMultiPanelCreate(prompt)).toBe(false);
+            expect(messageDescribesPanelCreate(prompt)).toBe(false);
+            expect(formatClarificationIfNeeded(prompt)).toContain('Need clarification');
+            break;
         default:
             throw new Error(`Unhandled handler ${c.expectHandler as string}`);
     }
@@ -149,8 +161,8 @@ function assertHandlerRouting(c: RegressionCase): void {
 
 describe('graft historical failure regression', () => {
     describe('fixture catalog', () => {
-        it('documents ten known failure patterns', () => {
-            expect(REGRESSION_CASES).toHaveLength(10);
+        it('documents eleven known failure patterns', () => {
+            expect(REGRESSION_CASES).toHaveLength(11);
             const ids = REGRESSION_CASES.map((c) => c.id);
             expect(new Set(ids).size).toBe(ids.length);
         });
@@ -425,6 +437,7 @@ describe('graft historical failure regression', () => {
             'panel-create-multi',
             'dashboard-row-with-panels',
             'bulk-gauge-panel-rename',
+            'ambiguous-graph-clarify',
         ];
 
         it.each(handlers)('%s prompt does not collide with unrelated handlers', (handlerId) => {
@@ -455,6 +468,23 @@ describe('graft historical failure regression', () => {
             }
             if (handlerId !== 'bulk-gauge-panel-rename') {
                 expect(messageDescribesBulkGaugePanelRename(c.prompt)).toBe(false);
+            }
+            if (handlerId !== 'ambiguous-graph-clarify') {
+                expect(messageDescribesAmbiguousGraphCreate(c.prompt)).toBe(false);
+            }
+        });
+    });
+
+    describe('ambiguous graphs — clarification', () => {
+        const c = REGRESSION_CASES.find((r) => r.id === 'ambiguous-graphs-keysight')!;
+
+        it('returns clarification instead of LLM save reply', () => {
+            const reply = formatAmbiguousGraphCreateClarification(c.prompt);
+            for (const needle of c.expectReplyContains ?? []) {
+                expect(reply).toContain(needle);
+            }
+            for (const needle of c.expectReplyNotContains ?? []) {
+                expect(reply).not.toContain(needle);
             }
         });
     });

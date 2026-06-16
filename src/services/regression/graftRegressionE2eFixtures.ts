@@ -50,6 +50,11 @@ export const E2E_REGRESSION_CASES: E2eRegressionCase[] = [
         e2eEnabled: true,
         e2eMode: 'read-only',
     }),
+    toE2eCase('ambiguous-graphs-keysight', {
+        e2eEnabled: true,
+        e2eMode: 'read-only',
+        replyTimeoutMs: 30_000,
+    }),
     toE2eCase('panel-remove-verify', {
         e2eEnabled: true,
         e2eMode: 'mutating',

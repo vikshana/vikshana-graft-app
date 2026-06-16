@@ -1,6 +1,10 @@
 import type { ToolExecution } from '../types/llm.types';
 import type { LlmSaveVerification } from './llmSaveVerification';
 import {
+    formatAmbiguousGraphCreateClarification,
+    messageDescribesAmbiguousGraphCreate,
+} from './ambiguousGraphCreateParse';
+import {
     describeDefaultSaveOutcome,
     extractSuccessLineFromModel,
     HARD_REFRESH_LINE,
@@ -40,6 +44,9 @@ export function applyLlmVerifiedSaveReply(
     const versionBit = version ? ` (version **${version}**)` : '';
 
     if (!verification.verified && !verification.skipped) {
+        if (messageDescribesAmbiguousGraphCreate(latestUser)) {
+            return formatAmbiguousGraphCreateClarification(latestUser);
+        }
         return (
             `### Save not verified (LLM · build ${buildNumber})\n\n` +
             `⚠️ ${verification.detail ?? 'Dashboard save could not be verified.'}\n` +

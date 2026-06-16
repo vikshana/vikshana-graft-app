@@ -10,6 +10,7 @@ export type RegressionHandlerId =
     | 'panel-create-multi'
     | 'dashboard-row-with-panels'
     | 'bulk-gauge-panel-rename'
+    | 'ambiguous-graph-clarify'
     | 'llm-save-guard';
 
 export interface RegressionCase {
@@ -142,5 +143,17 @@ export const REGRESSION_CASES: RegressionCase[] = [
         expectLlmIntent: 'programmatic',
         expectReplyContains: ['Gauge panels renamed', 'System'],
         expectReplyNotContains: ['Could not rename dashboard', 'Dashboard renamed'],
+    },
+    {
+        id: 'ambiguous-graphs-keysight',
+        failure:
+            'Vague "create useful graphs" LLM path claimed panels saved but none appeared on dashboard',
+        prompt:
+            'Create graphs that would be useful for the Keysight machine on the dashboard with UID = cfo0wckufbdhce.',
+        expectHandler: 'ambiguous-graph-clarify',
+        expectProgrammatic: false,
+        expectLlmIntent: 'mutating',
+        expectReplyContains: ['Need clarification', 'machine_metrics'],
+        expectReplyNotContains: ['### Done (panel added)', 'comprehensive monitoring panels'],
     },
 ];

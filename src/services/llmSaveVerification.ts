@@ -8,6 +8,7 @@ import { getTurnDashboardBaseline } from './llmDashboardSnapshot';
 import { parsePanelCreateRequest } from './panelCreateParse';
 import { parsePanelRemoveRequest } from './panelRemoveParse';
 import { parsePanelRenameRequest } from './panelRenameParse';
+import { messageDescribesAmbiguousGraphCreate } from './ambiguousGraphCreateParse';
 import { findPanelByStrictTitle } from './panelDiscovery';
 import { savedUidFromTools, savedVersionFromTools } from './dashboardSaveReplyUtils';
 import { hasSuccessfulDashboardSave } from './continueAction';
@@ -176,6 +177,24 @@ export async function verifyLlmDashboardSave(
             baselinePanelCount: baseline.panelCount,
             currentPanelCount: currentCount,
             detail: 'Panel count unchanged after a remove/delete request.',
+        };
+    }
+
+    if (
+        messageDescribesAmbiguousGraphCreate(userMessage, contextDashboardUid) &&
+        baseline &&
+        currentCount <= baseline.panelCount
+    ) {
+        return {
+            verified: false,
+            skipped: false,
+            uid,
+            version,
+            baselinePanelCount: baseline.panelCount,
+            currentPanelCount: currentCount,
+            detail:
+                'No new panels were added after a vague graph/chart create request. ' +
+                'Use a specific programmatic prompt (typed panels, bulk metrics, or row + panels).',
         };
     }
 

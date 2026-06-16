@@ -23,11 +23,31 @@ describe('applyLlmVerifiedSaveReply', () => {
             { verified: false, skipped: false, detail: 'Panel still present.' },
             tools,
             [],
-            'remove panel X',
+            'reorganize dashboard panels on uid abc123',
             158
         );
         expect(out).toContain('Save not verified');
         expect(out).toContain('Panel still present');
+    });
+
+    it('shows clarification when vague graph save is unverified', () => {
+        const prompt =
+            'Create graphs that would be useful for the Keysight machine on the dashboard with UID = cfo0wckufbdhce.';
+        const out = applyLlmVerifiedSaveReply(
+            '### Keysight Machine Monitoring Graphs Created\n\n8 panels added.',
+            {
+                verified: false,
+                skipped: false,
+                detail: 'No new panels were added after a vague graph/chart create request.',
+            },
+            tools,
+            [prompt],
+            prompt,
+            166
+        );
+        expect(out).toContain('Need clarification');
+        expect(out).toContain('machine_metrics');
+        expect(out).not.toContain('8 panels added');
     });
 
     it('skips rename prompts', () => {

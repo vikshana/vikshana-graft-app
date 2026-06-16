@@ -42,6 +42,10 @@ import { filterTools } from '../../../services/toolFilter';
 import { isSimpleConversationalMessage } from '../../../services/programmaticChatIntents';
 import { latestNonContinueUserMessage } from '../../../services/dashboardCloneProgress';
 import { extractDashboardUidFromMessage } from '../../../services/dashboardMentionParse';
+import {
+    formatAmbiguousGraphCreateClarification,
+    messageDescribesAmbiguousGraphCreate,
+} from '../../../services/ambiguousGraphCreateParse';
 import { clearActiveCloneIntent } from '../../../services/cloneSessionStorage';
 import { GRAFT_BUILD_NUMBER } from '../../../buildInfo';
 import {
@@ -2195,6 +2199,29 @@ export const ChatInterface = () => {
           content: finalContent,
           toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
         };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      if (messageDescribesAmbiguousGraphCreate(content, contextService.getDashboardUid() ?? undefined)) {
+        finalContent = formatAmbiguousGraphCreateClarification(content);
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = { role: 'assistant', content: finalContent };
         const savedSession = chatHistoryService.saveSession(
           [...newMessages, finalAssistantMessage],
           currentSessionId
