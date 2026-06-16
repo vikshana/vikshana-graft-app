@@ -13,13 +13,17 @@ export interface ToolCategoryConfig {
 
 /**
  * Top-level tool access configuration, persisted in plugin jsonData.
- * Each key corresponds to one of the known MCP tool categories.
+ * The four fixed keys cover the core MCP tool categories.
+ * Additional keys (e.g. 'alerting', 'cloudwatch') hold discovered category configs
+ * populated by the Agent config page from the live MCP tool list.
  */
 export interface ToolsConfig {
     loki: ToolCategoryConfig;
     prometheus: ToolCategoryConfig;
     dashboards: ToolCategoryConfig;
     datasources: ToolCategoryConfig;
+    /** Dynamic discovered categories (e.g. alerting, cloudwatch, oncall) */
+    [key: string]: ToolCategoryConfig;
 }
 
 /**

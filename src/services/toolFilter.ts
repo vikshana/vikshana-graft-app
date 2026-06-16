@@ -39,13 +39,8 @@ export const TOOL_CATEGORIES: Record<keyof ToolsConfig, string[]> = {
     ],
 };
 
-// Reverse lookup: tool name → category key
-const TOOL_TO_CATEGORY: Record<string, keyof ToolsConfig> = {};
-for (const [category, tools] of Object.entries(TOOL_CATEGORIES) as [keyof ToolsConfig, string[]][]) {
-    for (const tool of tools) {
-        TOOL_TO_CATEGORY[tool] = category;
-    }
-}
+// Note: TOOL_TO_CATEGORY reverse lookup removed — filterTools now scans all
+// config keys directly, supporting both fixed and dynamic discovered categories.
 
 /**
  * Returns a default ToolsConfig with all categories and tools enabled.
@@ -65,10 +60,13 @@ export function getDefaultToolsConfig(): ToolsConfig {
 /**
  * Filters an OpenAI-format tool list based on the user's ToolsConfig.
  *
+ * Scans ALL keys in config (both the 4 fixed categories and any dynamic
+ * discovered categories such as 'alerting', 'cloudwatch', 'oncall').
+ *
  * - If config is undefined, all tools pass through (safe default for fresh installs).
- * - Tools not in TOOL_CATEGORIES (i.e. newly discovered from the MCP server) pass
- *   through by default unless explicitly present and disabled in config.
- * - Tools in a disabled category are always excluded regardless of per-tool setting.
+ * - A tool is excluded only if it is explicitly present in a category's tools map
+ *   AND that category is disabled, OR the tool's per-tool flag is false.
+ * - Tools not found in any category pass through by default.
  */
 export function filterTools(tools: any[], config?: ToolsConfig): any[] {
     if (!config) {
@@ -81,26 +79,19 @@ export function filterTools(tools: any[], config?: ToolsConfig): any[] {
             return false;
         }
 
-        const category = TOOL_TO_CATEGORY[name];
-
-        // Tool is not in any known category — pass through by default
-        if (!category) {
-            return true;
+        // Search all config keys (fixed + dynamic) for this tool name
+        for (const catConfig of Object.values(config)) {
+            if (!Object.prototype.hasOwnProperty.call(catConfig.tools, name)) {
+                continue;
+            }
+            // Tool found in this category
+            if (!catConfig.enabled) {
+                return false;
+            }
+            return catConfig.tools[name] === true;
         }
 
-        const categoryConfig = config[category];
-
-        // Category is disabled — exclude all its tools
-        if (!categoryConfig?.enabled) {
-            return false;
-        }
-
-        // Per-tool check: if explicitly set to false, exclude; otherwise include
-        if (Object.prototype.hasOwnProperty.call(categoryConfig.tools, name)) {
-            return categoryConfig.tools[name] === true;
-        }
-
-        // Tool not in config map but category is enabled — include by default
+        // Tool not found in any configured category — pass through
         return true;
     });
 }

@@ -58,7 +58,7 @@ describe('filterTools', () => {
             expect(result.map(t => t.function.name)).toContain('query_prometheus_histogram');
         });
 
-        it('passes through tools not in TOOL_CATEGORIES (unknown/discovered tools)', () => {
+        it('passes through tools not in any config category (unrecognised tools)', () => {
             const config = getDefaultToolsConfig();
             const tools = [
                 tool('query_loki_logs'),
@@ -66,6 +66,54 @@ describe('filterTools', () => {
             ];
             const result = filterTools(tools, config);
             expect(result.map(t => t.function.name)).toContain('some_future_tool_not_in_categories');
+        });
+
+        it('filters tools in dynamic discovered categories (e.g. alerting)', () => {
+            const config: ToolsConfig = {
+                ...getDefaultToolsConfig(),
+                alerting: {
+                    enabled: false,
+                    tools: { alerting_manage_routing: false, alerting_manage_rules: false },
+                },
+            };
+            const tools = [
+                tool('alerting_manage_routing'),
+                tool('query_loki_logs'),
+            ];
+            const result = filterTools(tools, config);
+            expect(result.map(t => t.function.name)).not.toContain('alerting_manage_routing');
+            expect(result.map(t => t.function.name)).toContain('query_loki_logs');
+        });
+
+        it('honours per-tool disable within a dynamic category', () => {
+            const config: ToolsConfig = {
+                ...getDefaultToolsConfig(),
+                cloudwatch: {
+                    enabled: true,
+                    tools: {
+                        query_cloudwatch: false,
+                        list_cloudwatch_metrics: true,
+                        list_cloudwatch_namespaces: true,
+                    },
+                },
+            };
+            const tools = [
+                tool('query_cloudwatch'),
+                tool('list_cloudwatch_metrics'),
+            ];
+            const result = filterTools(tools, config);
+            expect(result.map(t => t.function.name)).not.toContain('query_cloudwatch');
+            expect(result.map(t => t.function.name)).toContain('list_cloudwatch_metrics');
+        });
+
+        it('tool not in any config category passes through even with dynamic categories present', () => {
+            const config: ToolsConfig = {
+                ...getDefaultToolsConfig(),
+                alerting: { enabled: true, tools: { alerting_manage_routing: true } },
+            };
+            const tools = [tool('some_brand_new_tool')];
+            const result = filterTools(tools, config);
+            expect(result).toHaveLength(1);
         });
 
         it('handles tools with no function.name gracefully', () => {
