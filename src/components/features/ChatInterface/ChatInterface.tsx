@@ -2,7 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { CodeBlock } from './components/CodeBlock';
 import { MermaidBlock } from './components/MermaidBlock';
 import { ThinkingBlock } from './components/ThinkingBlock';
+import { PlanBlock } from './components/PlanBlock';
 import { ToolCallContainer } from './components/ToolCallContainer';
+import { StepToolCallContainer } from './components/StepToolCallContainer';
 import { FilePreview } from './components/FilePreview';
 import { AttachmentModal } from './components/AttachmentModal';
 import ReactMarkdown from 'react-markdown';
@@ -17,11 +19,37 @@ import { mcp } from '@grafana/llm';
 
 // Local services
 import { llmService } from '../../../services/llm';
-import type { Message, ToolExecution } from '../../../types/llm.types';
+import type { Message, ToolExecution, StepToolExecutions } from '../../../types/llm.types';
 import { contextService, UserContext, DataSourceContext, DashboardContext } from '../../../services/context';
 import { chatHistoryService } from '../../../services/chatHistory';
 import { truncateMessages } from '../../../services/truncation';
 import { filterTools } from '../../../services/toolFilter';
+import { runOrchestration } from '../../../services/agents/orchestrator';
+import type { OrchestrationUpdate } from '../../../services/agents/types';
+import type { ToolsConfig } from '../../../types/settings.types';
+
+/**
+ * Merges an incoming toolExecutions update for a specific stepId into the
+ * existing stepGroups array, replacing only that step's entry and leaving
+ * all other steps intact. This prevents parallel specialists from clobbering
+ * each other's tool call state.
+ */
+function mergeStepToolExecutions(
+  existing: StepToolExecutions[],
+  stepId: string,
+  stepDescription: string,
+  toolExecutions: ToolExecution[],
+  status: StepToolExecutions['status']
+): StepToolExecutions[] {
+  const idx = existing.findIndex(s => s.stepId === stepId);
+  const entry: StepToolExecutions = { stepId, stepDescription, toolExecutions, status };
+  if (idx === -1) {
+    return [...existing, entry];
+  }
+  const updated = [...existing];
+  updated[idx] = entry;
+  return updated;
+}
 
 // Local hooks
 import { useRollingPlaceholder, usePluginSettings, useAutoScroll } from './hooks';
@@ -57,7 +85,7 @@ const normalizeMarkdown = (content: string): string => {
   return content.replace(/\n\n+/g, '\n');
 };
 
-const formatContext = (dashboard: DashboardContext, user: UserContext, dataSources: DataSourceContext[]): string => {
+const formatContext = (dashboard: DashboardContext, user: UserContext, dataSources: DataSourceContext[], toolsConfig?: ToolsConfig): string => {
   const lines: string[] = [];
 
   // Role + scope (critical instructions near top)
@@ -95,14 +123,25 @@ const formatContext = (dashboard: DashboardContext, user: UserContext, dataSourc
     lines.push(`Active dashboard: "${dashboard.title}" (uid: ${dashboard.uid})`);
   }
 
-  // Datasource-to-tool mapping
+  // Datasource-to-tool mapping — inform the model about tool availability per datasource
   if (dataSources?.length > 0) {
     lines.push('');
     lines.push('Available datasources:');
     dataSources.forEach(ds => {
       let toolHint = '';
-      if (ds.type === 'prometheus') { toolHint = ' → query_prometheus, list_prometheus_*'; }
-      else if (ds.type === 'loki')  { toolHint = ' → query_loki_logs, list_loki_*'; }
+      if (ds.type === 'prometheus') {
+        const enabled = !toolsConfig || toolsConfig.prometheus?.enabled !== false;
+        toolHint = enabled
+          ? ' → query_prometheus, list_prometheus_*'
+          : ' (Prometheus tools are disabled — enable them in the Graft plugin settings at /plugins/vikshana-graft-app)';
+      } else if (ds.type === 'loki') {
+        const enabled = !toolsConfig || toolsConfig.loki?.enabled !== false;
+        toolHint = enabled
+          ? ' → query_loki_logs, list_loki_*'
+          : ' (Loki tools are disabled — enable them in the Graft plugin settings at /plugins/vikshana-graft-app)';
+      } else {
+        toolHint = ' (no query tools available for this datasource type)';
+      }
       lines.push(`- ${ds.name} (${ds.type}, uid: ${ds.uid})${toolHint}`);
     });
   }
@@ -130,6 +169,9 @@ const formatContext = (dashboard: DashboardContext, user: UserContext, dataSourc
   lines.push(
     `- Only confirm the dashboard UID with the user if they reference an existing dashboard by name and you cannot determine its UID from context.`
   );
+  lines.push(
+    `- Dashboard links: when referencing a created or modified dashboard, always render its UID as a markdown link: [Open dashboard](/d/{uid}). Never leave a UID as bare text.`
+  );
 
   return lines.join('\n');
 };
@@ -140,6 +182,14 @@ const formatContext = (dashboard: DashboardContext, user: UserContext, dataSourc
 
 const MemoizedReactMarkdown = React.memo(({ content, theme, onRender, isStreaming }: { content: string; theme: GrafanaTheme2; onRender: () => void; isStreaming: boolean }) => {
   const components = React.useMemo(() => ({
+    a({ href, children, ...props }: any) {
+      // Open all links in a new tab with safe rel attributes
+      return (
+        <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+          {children}
+        </a>
+      );
+    },
     code({ node, inline, className, children, ...props }: any) {
       const match = /language-(\w+)/.exec(className || '');
       const language = match ? match[1] : '';
@@ -202,7 +252,7 @@ export const ChatInterface = () => {
   const [previewAttachment, setPreviewAttachment] = useState<{ name: string; content: string; type: 'image' | 'text'; mimeType?: string } | null>(null);
 
   // Use custom hooks - check LLM plugin health and model availability
-  const { llmConfigured, llmHealthy, standardAvailable, thinkingAvailable, isLoading: settingsLoading } = usePluginSettings();
+  const { llmConfigured, llmHealthy, standardAvailable, thinkingAvailable, toolsConfig, maxToolIterations, isLoading: settingsLoading } = usePluginSettings();
   const llmReady = llmConfigured && llmHealthy;
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -221,7 +271,7 @@ export const ChatInterface = () => {
   useEffect(() => {
     if (mcpEnabled && mcpClient) {
       mcpClient.listTools().then((response) => {
-        const tools = filterTools(mcp.convertToolsToOpenAI(response.tools));
+        const tools = filterTools(mcp.convertToolsToOpenAI(response.tools), toolsConfig);
         setMcpTools(tools);
       }).catch(() => {
         // MCP tools loading failed - continue without tools
@@ -450,7 +500,7 @@ export const ChatInterface = () => {
       const user = contextService.getUserContext();
       const dataSources = contextService.getDataSources();
 
-      const context = formatContext(dashboard, user, dataSources);
+      const context = formatContext(dashboard, user, dataSources, toolsConfig);
 
       // Create a placeholder message for the assistant
       const assistantMessage: Message = { role: 'assistant', content: '' };
@@ -469,22 +519,17 @@ export const ChatInterface = () => {
 
       const truncatedMessages = truncateMessages(newMessages, 10);
 
-      await llmService.chat(truncatedMessages, context, (fullContent, toolExecutions) => {
-        // Capture the latest values for saving after completion
+      // Shared callback for updating the assistant message in the UI
+      const updateAssistantMessage = (fullContent: string, toolExecutions?: ToolExecution[]) => {
         finalContent = fullContent;
         finalToolExecutions = toolExecutions || [];
-        // Track thinking block timing
         const trimmedContent = fullContent.trimStart();
         if (trimmedContent.startsWith('<think>') && thinkingStartTimeRef.current === null) {
-          // First time we see <think> tag, record the start time
           thinkingStartTimeRef.current = Date.now();
         }
-
         if (fullContent.includes('</think>') && thinkingStartTimeRef.current !== null && thinkingDuration === undefined) {
-          // We've received the closing tag, calculate the duration
           thinkingDuration = Math.floor((Date.now() - thinkingStartTimeRef.current) / 1000);
         }
-
         setMessages((prev) => {
           const updated = [...prev];
           const lastMessage = updated[updated.length - 1];
@@ -492,24 +537,133 @@ export const ChatInterface = () => {
             ...lastMessage,
             content: fullContent,
             thinkingSeconds: thinkingDuration,
-            toolExecutions: toolExecutions
+            toolExecutions: toolExecutions,
           };
           return updated;
         });
-      }, modelType, controller.signal, mcpClient, mcpTools);
-
-      // Save chat to history after completion
-      // Construct the final assistant message from the data we tracked during streaming
-      const finalAssistantMessage: Message = {
-        role: 'assistant',
-        content: finalContent,
-        thinkingSeconds: thinkingDuration,
-        toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined
       };
-      const finalMessages = [...newMessages, finalAssistantMessage];
-      const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
-      setCurrentSessionId(savedSession.id);
-      setSearchParams({ chat: 'true', session: savedSession.id });
+
+      // Route through the multi-agent orchestrator when MCP tools are available;
+      // fall back to the single-agent loop otherwise.
+      if (mcpClient && mcpTools.length > 0) {
+        await runOrchestration(
+          truncatedMessages,
+          context,
+          mcpTools,
+          mcpClient,
+          modelType,
+          maxToolIterations,
+          controller.signal,
+          toolsConfig,
+          (update: OrchestrationUpdate) => {
+            if (update.type === 'plan' && update.plan) {
+              // Store plan on the message — rendered as a collapsible PlanBlock,
+              // never written into content so it doesn't pollute the final answer.
+              setMessages((prev) => {
+                const updated = [...prev];
+                updated[updated.length - 1] = {
+                  ...updated[updated.length - 1],
+                  agentPlan: {
+                    reasoning: update.plan!.reasoning,
+                    steps: update.plan!.steps,
+                  },
+                  agentPlanComplete: false,
+                };
+                return updated;
+              });
+            } else if (update.type === 'step_start') {
+              // Planning is done — flip PlanBlock label to "View plan" and register
+              // an empty group for this step so it appears immediately in the UI.
+              setMessages((prev) => {
+                const updated = [...prev];
+                const last = updated[updated.length - 1];
+                updated[updated.length - 1] = {
+                  ...last,
+                  agentPlanComplete: true,
+                  stepToolExecutions: mergeStepToolExecutions(
+                    last.stepToolExecutions ?? [],
+                    update.stepId!,
+                    update.stepDescription!,
+                    [],
+                    'running'
+                  ),
+                };
+                return updated;
+              });
+            } else if (update.type === 'step_update' && update.stepId && update.toolExecutions) {
+              // Replace only this step's tool executions — all other steps are preserved.
+              setMessages((prev) => {
+                const updated = [...prev];
+                const last = updated[updated.length - 1];
+                const existing = last.stepToolExecutions ?? [];
+                const stepDesc = existing.find(s => s.stepId === update.stepId)?.stepDescription ?? update.stepId!;
+                updated[updated.length - 1] = {
+                  ...last,
+                  stepToolExecutions: mergeStepToolExecutions(
+                    existing,
+                    update.stepId!,
+                    stepDesc,
+                    update.toolExecutions!,
+                    'running'
+                  ),
+                };
+                return updated;
+              });
+            } else if (update.type === 'step_done' && update.stepId) {
+              // Mark step as done with its final tool executions snapshot.
+              setMessages((prev) => {
+                const updated = [...prev];
+                const last = updated[updated.length - 1];
+                const existing = last.stepToolExecutions ?? [];
+                const stepDesc = existing.find(s => s.stepId === update.stepId)?.stepDescription ?? update.stepId!;
+                const hasError = (update.toolExecutions ?? []).some(t => t.status === 'error');
+                updated[updated.length - 1] = {
+                  ...last,
+                  stepToolExecutions: mergeStepToolExecutions(
+                    existing,
+                    update.stepId!,
+                    stepDesc,
+                    update.toolExecutions ?? [],
+                    hasError ? 'error' : 'done'
+                  ),
+                };
+                return updated;
+              });
+            } else if (update.type === 'final' && update.content !== undefined) {
+              updateAssistantMessage(update.content, finalToolExecutions);
+            }
+          }
+        );
+      } else {
+        await llmService.chat(
+          truncatedMessages,
+          context,
+          updateAssistantMessage,
+          modelType,
+          controller.signal,
+          mcpClient,
+          mcpTools,
+          maxToolIterations
+        );
+      }
+
+      // Save chat to history after completion.
+      // Read the last message from state to capture stepToolExecutions and agentPlan
+      // set during the orchestration callback (not available in closure vars).
+      setMessages((prev) => {
+        const lastMsg = prev[prev.length - 1];
+        const finalAssistantMessage: Message = {
+          ...lastMsg,
+          content: finalContent,
+          thinkingSeconds: thinkingDuration,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : lastMsg.toolExecutions,
+        };
+        const finalMessages = [...newMessages, finalAssistantMessage];
+        const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
+        setCurrentSessionId(savedSession.id);
+        setSearchParams({ chat: 'true', session: savedSession.id });
+        return prev; // no state change — just reading
+      });
     } catch (error: any) {
       if (error.name === 'AbortError') {
         return;
@@ -600,7 +754,12 @@ ${input} `
     setIsLoading(true);
 
     try {
-      const context = await contextService.getCurrentDashboard();
+      // Fix: use formatContext (same as handleSend) to produce a properly formatted string.
+      // Previously passed raw DashboardContext object which serialised as [object Object].
+      const dashboard = await contextService.getCurrentDashboard();
+      const user = contextService.getUserContext();
+      const dataSources = contextService.getDataSources();
+      const context = formatContext(dashboard, user, dataSources, toolsConfig);
       const assistantMessage: Message = { role: 'assistant', content: '' };
       setMessages((prev) => [...prev, assistantMessage]);
 
@@ -947,6 +1106,13 @@ ${input} `
               return (
                 <div key={index} className={`${styles.message} ${msg.role === 'user' ? styles.userMessage : styles.assistantMessage} `}>
                   <div className={styles.messageContent}>
+                    {msg.role === 'assistant' && msg.agentPlan && (
+                      <PlanBlock
+                        reasoning={msg.agentPlan.reasoning}
+                        steps={msg.agentPlan.steps}
+                        isStreaming={!msg.agentPlanComplete}
+                      />
+                    )}
                     {thinkingContent !== null && (
                       <ThinkingBlock
                         content={thinkingContent}
@@ -955,7 +1121,10 @@ ${input} `
                         startTime={isThinkingStreaming ? thinkingStartTimeRef.current : null}
                       />
                     )}
-                    {msg.role === 'assistant' && msg.toolExecutions && msg.toolExecutions.length > 0 && (
+                    {msg.role === 'assistant' && msg.stepToolExecutions && msg.stepToolExecutions.length > 0 && (
+                      <StepToolCallContainer stepGroups={msg.stepToolExecutions} />
+                    )}
+                    {msg.role === 'assistant' && !msg.stepToolExecutions && msg.toolExecutions && msg.toolExecutions.length > 0 && (
                       <ToolCallContainer toolExecutions={msg.toolExecutions} theme={theme} />
                     )}
                     {mainContent && (
@@ -966,7 +1135,7 @@ ${input} `
                         isStreaming={isStreaming}
                       />
                     )}
-                    {isStreaming && thinkingContent === null && (
+                    {isStreaming && thinkingContent === null && !mainContent && (
                       <div className={styles.thinkingIndicator}>
                         <div className={styles.thinkingDots}>
                           <svg width="32" height="24" viewBox="0 0 32 24" xmlns="http://www.w3.org/2000/svg">

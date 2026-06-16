@@ -15,3 +15,6 @@ export type { DashboardContext, UserContext, DataSourceContext } from './context
 
 // Common types
 export type { ModelType, FileType, Status } from './common.types';
+
+// Plugin settings types
+export type { ToolCategoryConfig, ToolsConfig, AppPluginSettings } from './settings.types';

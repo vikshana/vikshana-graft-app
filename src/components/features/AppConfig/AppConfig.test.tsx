@@ -3,6 +3,21 @@ import { render, screen } from '@testing-library/react';
 import { PluginType } from '@grafana/data';
 import AppConfig, { AppConfigProps } from './AppConfig';
 
+jest.mock('@grafana/runtime', () => ({
+  ...jest.requireActual('@grafana/runtime'),
+  getBackendSrv: () => ({
+    get: jest.fn().mockResolvedValue({ tools: [] }),
+    post: jest.fn(),
+    fetch: jest.fn().mockReturnValue({
+      subscribe: ({ next, complete }: any) => {
+        next({ data: {} });
+        if (complete) { complete(); }
+        return { unsubscribe: jest.fn() };
+      },
+    }),
+  }),
+}));
+
 describe('Components/AppConfig', () => {
   let props: AppConfigProps;
 

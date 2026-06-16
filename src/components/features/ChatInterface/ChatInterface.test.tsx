@@ -335,6 +335,17 @@ describe('ChatInterface', () => {
     });
 
     describe('Thinking Block', () => {
+        // Renders the component and waits for the initial async health check to complete.
+        const renderComponent = async () => {
+            await act(async () => {
+                render(
+                    <MemoryRouter>
+                        <ChatInterface />
+                    </MemoryRouter>
+                );
+            });
+        };
+
         // Helper to wait for LLM health check and send a message
         const sendMessage = async (message: string) => {
             await waitFor(() => {
@@ -342,7 +353,9 @@ describe('ChatInterface', () => {
             });
             const input = screen.getByTestId('chat-input');
             fireEvent.change(input, { target: { value: message } });
-            fireEvent.click(screen.getByLabelText('Send message'));
+            await act(async () => {
+                fireEvent.click(screen.getByLabelText('Send message'));
+            });
         };
 
         it('renders thinking block when response starts with <think>', async () => {
@@ -350,11 +363,7 @@ describe('ChatInterface', () => {
                 onUpdate('<think>Processing your request...</think>Here is the answer');
             });
 
-            render(
-                <MemoryRouter>
-                    <ChatInterface />
-                </MemoryRouter>
-            );
+            await renderComponent();
 
             await sendMessage('Test');
 
@@ -370,11 +379,7 @@ describe('ChatInterface', () => {
                 onUpdate('<think>Reasoning process</think>Final answer');
             });
 
-            render(
-                <MemoryRouter>
-                    <ChatInterface />
-                </MemoryRouter>
-            );
+            await renderComponent();
 
             await sendMessage('Test');
 
@@ -398,11 +403,7 @@ describe('ChatInterface', () => {
                 });
             });
 
-            render(
-                <MemoryRouter>
-                    <ChatInterface />
-                </MemoryRouter>
-            );
+            await renderComponent();
 
             await sendMessage('Test');
 
@@ -428,11 +429,7 @@ describe('ChatInterface', () => {
                 });
             });
 
-            render(
-                <MemoryRouter>
-                    <ChatInterface />
-                </MemoryRouter>
-            );
+            await renderComponent();
 
             await sendMessage('Test');
 
@@ -450,11 +447,7 @@ describe('ChatInterface', () => {
                 onUpdate('<think>Internal reasoning here</think>Final response');
             });
 
-            render(
-                <MemoryRouter>
-                    <ChatInterface />
-                </MemoryRouter>
-            );
+            await renderComponent();
 
             await sendMessage('Test');
 
@@ -489,11 +482,7 @@ describe('ChatInterface', () => {
                 default: mockMermaid
             }));
 
-            render(
-                <MemoryRouter>
-                    <ChatInterface />
-                </MemoryRouter>
-            );
+            await renderComponent();
 
             // Trigger mermaid rendering (this part depends on how you can trigger it in the test)
             // For now, we'll assume the component renders it if we pass a message with mermaid code
@@ -519,11 +508,7 @@ describe('ChatInterface', () => {
                 });
             });
 
-            render(
-                <MemoryRouter>
-                    <ChatInterface />
-                </MemoryRouter>
-            );
+            await renderComponent();
 
             await sendMessage('Test');
 
@@ -544,11 +529,7 @@ describe('ChatInterface', () => {
                 });
             });
 
-            render(
-                <MemoryRouter>
-                    <ChatInterface />
-                </MemoryRouter>
-            );
+            await renderComponent();
 
             await sendMessage('Test');
 
@@ -585,11 +566,13 @@ describe('ChatInterface', () => {
 
             (chatHistoryService.getSession as jest.Mock).mockReturnValue(mockSession);
 
-            render(
-                <MemoryRouter initialEntries={['/?session=test-session-123']}>
-                    <ChatInterface />
-                </MemoryRouter>
-            );
+            await act(async () => {
+                render(
+                    <MemoryRouter initialEntries={['/?session=test-session-123']}>
+                        <ChatInterface />
+                    </MemoryRouter>
+                );
+            });
 
             // The thinking block should show the persisted duration (5 seconds), not 0
             await waitFor(() => {
@@ -604,11 +587,7 @@ describe('ChatInterface', () => {
                 onUpdate('Regular response without thinking');
             });
 
-            render(
-                <MemoryRouter>
-                    <ChatInterface />
-                </MemoryRouter>
-            );
+            await renderComponent();
 
             await sendMessage('Test');
 
@@ -644,11 +623,13 @@ describe('ChatInterface', () => {
                 models: {}
             });
 
-            render(
-                <MemoryRouter>
-                    <ChatInterface />
-                </MemoryRouter>
-            );
+            await act(async () => {
+                render(
+                    <MemoryRouter>
+                        <ChatInterface />
+                    </MemoryRouter>
+                );
+            });
 
             await waitFor(() => {
                 expect(screen.getByText(/LLM Plugin Not Configured/i)).toBeInTheDocument();
@@ -662,11 +643,13 @@ describe('ChatInterface', () => {
                 models: {}
             });
 
-            render(
-                <MemoryRouter>
-                    <ChatInterface />
-                </MemoryRouter>
-            );
+            await act(async () => {
+                render(
+                    <MemoryRouter>
+                        <ChatInterface />
+                    </MemoryRouter>
+                );
+            });
 
             await waitFor(() => {
                 const link = screen.getByRole('link', { name: /configure the llm plugin/i });
@@ -681,11 +664,13 @@ describe('ChatInterface', () => {
                 models: {}
             });
 
-            render(
-                <MemoryRouter>
-                    <ChatInterface />
-                </MemoryRouter>
-            );
+            await act(async () => {
+                render(
+                    <MemoryRouter>
+                        <ChatInterface />
+                    </MemoryRouter>
+                );
+            });
 
             await waitFor(() => {
                 expect(screen.getByTestId('send-message-button')).toBeDisabled();
@@ -699,11 +684,13 @@ describe('ChatInterface', () => {
                 models: {}
             });
 
-            render(
-                <MemoryRouter>
-                    <ChatInterface />
-                </MemoryRouter>
-            );
+            await act(async () => {
+                render(
+                    <MemoryRouter>
+                        <ChatInterface />
+                    </MemoryRouter>
+                );
+            });
 
             await waitFor(() => {
                 expect(screen.getByTestId('mode-button-standard')).toBeDisabled();
@@ -718,11 +705,13 @@ describe('ChatInterface', () => {
                 models: {}
             });
 
-            render(
-                <MemoryRouter>
-                    <ChatInterface />
-                </MemoryRouter>
-            );
+            await act(async () => {
+                render(
+                    <MemoryRouter>
+                        <ChatInterface />
+                    </MemoryRouter>
+                );
+            });
 
             await waitFor(() => {
                 expect(screen.getByTestId('chat-input')).toBeDisabled();
@@ -737,11 +726,13 @@ describe('ChatInterface', () => {
                 models: {}
             });
 
-            render(
-                <MemoryRouter>
-                    <ChatInterface />
-                </MemoryRouter>
-            );
+            await act(async () => {
+                render(
+                    <MemoryRouter>
+                        <ChatInterface />
+                    </MemoryRouter>
+                );
+            });
 
             await waitFor(() => {
                 expect(screen.getByText(/LLM Plugin Unavailable/i)).toBeInTheDocument();
