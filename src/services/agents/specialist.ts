@@ -84,7 +84,8 @@ function buildDataOutputNote(categories: string[]): string {
     const queryTool = hasLoki ? 'query_loki_logs' : 'query_prometheus';
     const labelDiscovery = hasLoki
         ? `- Before writing any equality matchers (e.g. detected_level="error"), first discover the REAL label values by running a broad query or calling the label-values tool. Do NOT guess label values — use only values you have actually seen returned by a tool call.`
-        : `- Before writing any label selectors (e.g. {job="api"}), first discover the actual label values by querying the Prometheus API or running a broad metric query. Do NOT guess label values.`;
+        : `- Before writing any label selectors (e.g. {job="api"}), first discover the actual label values by querying the Prometheus API or running a broad metric query. Do NOT guess label values.
+- IMPORTANT: calling list_prometheus_label_names, list_prometheus_label_values, or list_prometheus_metric_names alone is NOT sufficient — those are discovery tools only. You MUST call query_prometheus with each PromQL expression before including it in your output.`;
 
     return `
 
@@ -93,6 +94,7 @@ ${labelDiscovery}
 - You MUST call ${queryTool} for EVERY query you intend to include in your output — not just one. Run each query individually and check that it returns data.
 - Only include queries that actually returned results when you called ${queryTool}. If a query returns no data (empty result, no streams, no series), revise the expression or omit it entirely.
 - NEVER include a query in your output that you did not explicitly call ${queryTool} with and confirm returned data.
+- When you output the JSON, copy the EXACT expression string you used in the ${queryTool} call — do not rephrase, reformat, or reconstruct it from memory.
 
 Output format (required): when you have finished, respond with ONLY a JSON object matching this schema — no prose, no markdown fences:
 ${schema}
@@ -181,7 +183,11 @@ function parseDataFindings(
     const hasPrometheus = categories.includes('prometheus');
     if (!hasLoki && !hasPrometheus) { return undefined; }
 
-    // Layer 1: at least one successful query tool call must have occurred.
+    // Layer 1: at least one successful query tool call should have occurred.
+    // If the query tool was NOT called, we still allow datasource-only findings
+    // (datasourceUid + empty validatedQueries) so the dashboard agent can use the
+    // correct datasource UID even when no queries were verified. All validatedQueries
+    // will be dropped by Layer 2 anyway since executedQueries will be empty.
     const requiredTool = hasLoki ? 'query_loki_logs' : 'query_prometheus';
     const queryToolWasCalled = toolExecutions.some(
         t => t.name === requiredTool && t.status === 'success'
@@ -189,11 +195,13 @@ function parseDataFindings(
 
     if (!queryToolWasCalled) {
         console.warn(
-            `[Graft] parseDataFindings: rejecting findings for step — ` +
-            `${requiredTool} was not successfully called. ` +
-            `Queries are unvalidated and will not be passed to the dashboard agent.`
+            `[Graft] parseDataFindings: ${requiredTool} was not successfully called. ` +
+            `Attempting to extract datasource info only — validated queries will be empty. ` +
+            `The dashboard agent will receive the correct datasource UID but must write its own queries.`
         );
-        return undefined;
+        // Fall through — parse what we can. Layer 2 will filter all queries since
+        // executedQueries is empty. We still return datasource-only findings if the
+        // specialist output a valid JSON schema with a datasourceUid.
     }
 
     try {
@@ -256,7 +264,6 @@ function parseDataFindings(
             validatedQueries: filteredQueries,
         };
         return { prometheus: findings };
-
     } catch {
         return undefined;
     }

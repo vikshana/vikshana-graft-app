@@ -274,8 +274,10 @@ describe('runSpecialist', () => {
             expect(result.summary).toContain('Loki datasource');
         });
 
-        it('rejects dataFindings when query_loki_logs was NOT called (Fix 2A: ground-truth check)', async () => {
-            // Model returns JSON findings directly without making any tool calls
+        it('returns datasource-only findings when query_loki_logs was NOT called (Fix A1: datasource fallback)', async () => {
+            // Model returns JSON findings directly without making any tool calls.
+            // Layer 1 used to hard-reject; now it falls through and Layer 2 drops all
+            // queries (executedQueries is empty), leaving datasource-only findings.
             mockChatCompletions.mockResolvedValue(makeResponse(lokiJson));
 
             const result = await runSpecialist(
@@ -289,8 +291,9 @@ describe('runSpecialist', () => {
                 onUpdate
             );
 
-            // Findings must be rejected — the model claimed to validate but made no tool call
-            expect(result.dataFindings).toBeUndefined();
+            // Findings must include the datasource but with empty validatedQueries
+            expect(result.dataFindings?.loki?.datasourceUid).toBe('loki-uid');
+            expect(result.dataFindings?.loki?.validatedQueries).toHaveLength(0);
         });
 
         it('rejects dataFindings when query_loki_logs call errored (Fix 2A: only success counts)', async () => {
@@ -298,7 +301,7 @@ describe('runSpecialist', () => {
             mockChatCompletions
                 .mockResolvedValueOnce(makeResponse('', [toolCall]))
                 .mockResolvedValueOnce(makeResponse(lokiJson));
-            // Tool call fails
+            // Tool call fails — the tool execution is recorded with status 'error'
             mockMcpClient.callTool.mockRejectedValue(new Error('datasource unreachable'));
 
             const result = await runSpecialist(
@@ -312,8 +315,10 @@ describe('runSpecialist', () => {
                 onUpdate
             );
 
-            // Tool call errored — findings should be rejected
-            expect(result.dataFindings).toBeUndefined();
+            // Tool call errored — the expr was never executed, so Layer 2 drops the query.
+            // Datasource-only findings are returned (uid present, empty validatedQueries).
+            expect(result.dataFindings?.loki?.datasourceUid).toBe('loki-uid');
+            expect(result.dataFindings?.loki?.validatedQueries).toHaveLength(0);
         });
 
         it('drops queries not executed by the model (per-query filter: unverified query dropped)', async () => {
@@ -526,6 +531,73 @@ describe('runSpecialist', () => {
                 .find((m: any) => m.role === 'system')?.content ?? '';
             expect(systemMsg).toContain('equality matchers');
             expect(systemMsg).toContain('NEVER include a query');
+        });
+
+        it('Prometheus prompt explicitly warns that list_* tools alone are not sufficient (Fix A2)', async () => {
+            mockChatCompletions.mockResolvedValue(makeResponse('{}'));
+
+            await runSpecialist(
+                makeStep({ toolCategories: ['prometheus'] }),
+                'query metrics',
+                '',
+                [],
+                mockMcpClient,
+                10,
+                new AbortController().signal,
+                onUpdate
+            );
+
+            const systemMsg = mockChatCompletions.mock.calls[0][0].messages
+                .find((m: any) => m.role === 'system')?.content ?? '';
+            // Must warn that discovery tools alone are insufficient
+            expect(systemMsg).toContain('list_prometheus_label_names');
+            expect(systemMsg).toContain('NOT sufficient');
+            expect(systemMsg).toContain('query_prometheus');
+        });
+
+        it('Prometheus prompt requires copying the exact executed expr into output (Fix A2)', async () => {
+            mockChatCompletions.mockResolvedValue(makeResponse('{}'));
+
+            await runSpecialist(
+                makeStep({ toolCategories: ['prometheus'] }),
+                'query metrics',
+                '',
+                [],
+                mockMcpClient,
+                10,
+                new AbortController().signal,
+                onUpdate
+            );
+
+            const systemMsg = mockChatCompletions.mock.calls[0][0].messages
+                .find((m: any) => m.role === 'system')?.content ?? '';
+            expect(systemMsg).toContain('EXACT expression string you used');
+        });
+
+        it('returns datasource-only PrometheusFindings when query_prometheus was never called (Fix A1)', async () => {
+            const promJson = JSON.stringify({
+                datasourceUid: 'prom-uid-99',
+                datasourceName: 'Prometheus',
+                validatedQueries: [{ description: 'CPU usage', promql: 'rate(cpu_seconds_total[5m])' }],
+            });
+            // Model outputs findings without calling query_prometheus
+            mockChatCompletions.mockResolvedValue(makeResponse(promJson));
+
+            const result = await runSpecialist(
+                makeStep({ toolCategories: ['prometheus'] }),
+                'query metrics',
+                '',
+                [],
+                mockMcpClient,
+                10,
+                new AbortController().signal,
+                onUpdate
+            );
+
+            // Datasource should be preserved; all queries dropped by Layer 2
+            expect(result.dataFindings?.prometheus?.datasourceUid).toBe('prom-uid-99');
+            expect(result.dataFindings?.prometheus?.datasourceName).toBe('Prometheus');
+            expect(result.dataFindings?.prometheus?.validatedQueries).toHaveLength(0);
         });
     });
 });

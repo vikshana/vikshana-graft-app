@@ -340,6 +340,16 @@ export async function runOrchestration(
         const waveResults = await Promise.allSettled(
             wave.map(step => {
                 if (isDashboardStep(step)) {
+                    // Infer the required datasource type from the step description and
+                    // conversation. This hint is forwarded into the dashboard agent so that
+                    // when the upstream specialist produced no validated queries (empty
+                    // DataFindings), the agent still knows whether to build a metrics
+                    // dashboard (prometheus) or a logs dashboard (loki) instead of guessing.
+                    const dashHint = inferDataCategoriesForDashboard(
+                        `${step.description} ${userMessage}\n${conversationDigest}`,
+                        enabledCategories,
+                    );
+
                     // Route to the purpose-built dashboard agent with collected findings.
                     // Dashboard construction is step-intensive; give it 2× the configured limit.
                     return runDashboardAgent(
@@ -353,7 +363,9 @@ export async function runOrchestration(
                         signal,
                         (stepId, toolExecutions) => {
                             onUpdate({ type: 'step_update', stepId, toolExecutions });
-                        }
+                        },
+                        dashHint,
+                        conversationDigest,
                     );
                 }
 

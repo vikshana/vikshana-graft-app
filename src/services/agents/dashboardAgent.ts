@@ -1,6 +1,6 @@
 import { llm } from '@grafana/llm';
 import type { ToolExecution } from '../../types/llm.types';
-import type { PlanStep, SpecialistResult, DataFindings } from './types';
+import type { PlanStep, SpecialistResult, DataFindings, ToolCategory } from './types';
 import { TOOL_CATEGORIES } from '../toolFilter';
 
 const SETTINGS_PATH = '/plugins/vikshana-graft-app';
@@ -75,13 +75,64 @@ ${f.validatedQueries.map((q, i) =>
 }
 
 /**
+ * Builds a directional guidance block for the empty-findings case.
+ *
+ * When the upstream specialist produced no validated queries the dashboard
+ * agent must discover the datasource itself. If we can infer the required
+ * datasource type (Prometheus vs Loki) from the plan step + conversation, we
+ * inject an explicit directive so the agent does not default to Loki/logs when
+ * the user actually asked for metrics.
+ *
+ * preferredCategories comes from inferDataCategoriesForDashboard (step description
+ * + conversation digest), computed in the orchestrator before calling us.
+ */
+function buildEmptyFindingsGuidance(preferredCategories: ToolCategory[]): string {
+    const onlyPrometheus = preferredCategories.length === 1 && preferredCategories[0] === 'prometheus';
+    const onlyLoki = preferredCategories.length === 1 && preferredCategories[0] === 'loki';
+
+    let datasourceDirective: string;
+    if (onlyPrometheus) {
+        datasourceDirective = `IMPORTANT — the conversation context indicates this dashboard should visualize
+**Prometheus metrics**. You MUST:
+1. Call list_datasources and select a datasource of type **"prometheus"**.
+2. Write **PromQL** expressions (metric names, rate(), sum(), histogram_quantile(), etc.) for all panels.
+3. Do NOT build a logs dashboard or use a Loki datasource — this is a metrics dashboard.`;
+    } else if (onlyLoki) {
+        datasourceDirective = `IMPORTANT — the conversation context indicates this dashboard should visualize
+**Loki logs**. You MUST:
+1. Call list_datasources and select a datasource of type **"loki"**.
+2. Write **LogQL** expressions ({} stream selectors, |= filters, log_range_vector) for all panels.
+3. Do NOT build a metrics dashboard or use a Prometheus datasource — this is a logs dashboard.`;
+    } else {
+        datasourceDirective = `Select the datasource by TYPE according to the query language you will write:
+   - Log panels / LogQL ({} stream selectors) → a datasource of type "loki".
+   - Metric panels / PromQL (rate(), sum(), metric names) → a datasource of type "prometheus".`;
+    }
+
+    return `## No pre-validated queries were provided
+
+You have NO pre-validated queries from upstream agents. You MUST determine the correct datasource
+yourself before writing any panel — do not guess a UID and do not reuse a datasource of the wrong type.
+
+Mandatory steps before building data panels:
+1. Call list_datasources to see the available datasources and their types.
+2. ${datasourceDirective}
+3. Use that datasource's exact uid and type in every target: { "type": "<loki|prometheus>", "uid": "<uid>" }.
+
+NEVER attach a LogQL query to a prometheus datasource, and NEVER attach a PromQL query to a loki
+datasource — that is the single most common cause of an empty "No data" dashboard.`;
+}
+
+/**
  * System prompt for the dashboard construction agent.
  * Uses Model.LARGE for robust structural reasoning over dashboard JSON.
  */
 function buildDashboardSystemPrompt(
     stepDescription: string,
     dataFindings: DataFindings,
-    context: string
+    context: string,
+    preferredCategories: ToolCategory[] = [],
+    conversationDigest = '',
 ): string {
     const findingsBlock = formatFindingsForPrompt(dataFindings);
     const hasFindings = findingsBlock.length > 0;
@@ -93,6 +144,11 @@ function buildDashboardSystemPrompt(
         ((dataFindings.loki?.validatedQueries?.length ?? 0) > 0 ||
             (dataFindings.prometheus?.validatedQueries?.length ?? 0) > 0);
 
+    // When there are no validated queries but we DO know the correct datasource
+    // UID (because the specialist identified it even though all queries were
+    // dropped by Layer-2), emit partial findings so the agent uses the right UID.
+    const hasKnownDatasource = hasFindings && !hasValidatedQueries;
+
     return `You are a dashboard construction agent for Graft, an AI assistant embedded in Grafana.
 Your task: ${stepDescription}
 
@@ -100,25 +156,22 @@ You have access to dashboard and datasource tools ONLY. You do NOT have query to
 Do not attempt to call query_loki_logs, query_prometheus, or any list_loki/list_prometheus tools.
 All queries have been pre-validated by upstream agents — use them exactly as provided.
 
-${hasValidatedQueries ? `## Pre-validated data from upstream agents
+${conversationDigest ? `## Recent conversation (use to resolve references like "it", "that service")
+${conversationDigest}
+
+` : ''}${hasValidatedQueries ? `## Pre-validated data from upstream agents
 
 ${findingsBlock}
 
 These queries have already been confirmed to return data. Copy them verbatim into panel targets.
-Do NOT modify, paraphrase, or reconstruct them.` : `## No upstream data findings were provided
+Do NOT modify, paraphrase, or reconstruct them.` : hasKnownDatasource ? `## Datasource identified — no pre-validated queries
 
-You have NO pre-validated queries. You MUST determine the correct datasource yourself before
-writing any panel — do not guess a UID and do not reuse a datasource of the wrong type.
+The upstream specialist identified the correct datasource but all candidate queries were filtered
+out (they returned no data during validation). Use the datasource below but write your own queries.
 
-Mandatory steps before building data panels:
-1. Call list_datasources to see the available datasources and their types.
-2. Select the datasource by TYPE according to the query language you will write:
-   - Log panels / LogQL ({} stream selectors) → a datasource of type "loki".
-   - Metric panels / PromQL (rate(), sum(), metric names) → a datasource of type "prometheus".
-3. Use that datasource's exact uid and type in every target: { "type": "<loki|prometheus>", "uid": "<uid>" }.
+${findingsBlock}
 
-NEVER attach a LogQL query to a prometheus datasource, and NEVER attach a PromQL query to a loki
-datasource — that is the single most common cause of an empty "No data" dashboard.`}
+${buildEmptyFindingsGuidance(preferredCategories)}` : buildEmptyFindingsGuidance(preferredCategories)}
 
 ## Dashboard construction process (follow this order exactly)
 
@@ -209,6 +262,12 @@ ${context ? `## Current Grafana context\n${context}` : ''}`;
  * - Receives pre-validated queries from upstream data specialists via DataFindings
  * - Follows a structured multi-step construction process (skeleton → get UID → add panels)
  * - Dashboard JSON results are never compressed (required for incremental panel addition)
+ * - preferredCategories: inferred datasource type(s) from step description + conversation
+ *   (computed by inferDataCategoriesForDashboard in the orchestrator). Used to emit a
+ *   directional hint ("this dashboard needs Prometheus metrics") when findings are empty so
+ *   the agent does not default to Loki/logs for a metrics request.
+ * - conversationDigest: compact summary of recent turns so the agent can resolve references
+ *   like "it" / "those services" even when findings are empty.
  */
 export async function runDashboardAgent(
     step: PlanStep,
@@ -219,10 +278,12 @@ export async function runDashboardAgent(
     mcpClient: any,
     maxIterations: number,
     signal: AbortSignal,
-    onUpdate: (stepId: string, toolExecutions: ToolExecution[]) => void
+    onUpdate: (stepId: string, toolExecutions: ToolExecution[]) => void,
+    preferredCategories: ToolCategory[] = [],
+    conversationDigest = '',
 ): Promise<SpecialistResult> {
     const scopedTools = scopeDashboardTools(allTools);
-    const systemPrompt = buildDashboardSystemPrompt(step.description, dataFindings, context);
+    const systemPrompt = buildDashboardSystemPrompt(step.description, dataFindings, context, preferredCategories, conversationDigest);
 
     const llmMessages: any[] = [
         { role: 'system', content: systemPrompt },

@@ -189,7 +189,9 @@ describe('runOrchestration', () => {
                 expect.anything(),        // mcpClient
                 expect.anything(),        // maxIterations
                 expect.anything(),        // signal
-                expect.anything()         // onUpdate
+                expect.anything(),        // onUpdate
+                expect.any(Array),        // preferredCategories
+                expect.any(String),       // conversationDigest
             );
         });
 
@@ -209,7 +211,9 @@ describe('runOrchestration', () => {
                 expect.anything(), expect.anything(), expect.anything(),
                 expect.anything(), expect.anything(), expect.anything(),
                 40,  // Math.min(20 * 2, 100)
-                expect.anything(), expect.anything()
+                expect.anything(), expect.anything(),
+                expect.any(Array),   // preferredCategories
+                expect.any(String),  // conversationDigest
             );
         });
 
@@ -229,7 +233,9 @@ describe('runOrchestration', () => {
                 expect.anything(), expect.anything(), expect.anything(),
                 expect.anything(), expect.anything(), expect.anything(),
                 100,  // Math.min(80 * 2, 100)
-                expect.anything(), expect.anything()
+                expect.anything(), expect.anything(),
+                expect.any(Array),   // preferredCategories
+                expect.any(String),  // conversationDigest
             );
         });
 
@@ -515,7 +521,9 @@ describe('sanitisePlan (Fix 1: code-enforced plan gate)', () => {
             expect.objectContaining({ id: 'step_1_dashboard', toolCategories: ['dashboards'] }),
             expect.anything(), expect.anything(), expect.anything(),
             expect.anything(), expect.anything(), expect.anything(),
-            expect.anything(), expect.anything()
+            expect.anything(), expect.anything(),
+            expect.any(Array),   // preferredCategories
+            expect.any(String),  // conversationDigest
         );
     });
 });
@@ -662,15 +670,60 @@ describe('sanitisePlan — data step injection for lone dashboard steps', () => 
             expect.anything(), expect.anything(), expect.anything(), expect.anything()
         );
 
-        // Dashboard agent receives the loki findings produced by the injected step
+        // Dashboard agent receives the loki findings produced by the injected step,
+        // plus the inferred preferredCategories and conversation digest
         expect(mockRunDashboardAgent).toHaveBeenCalledWith(
             expect.objectContaining({ id: 'step_1', toolCategories: ['dashboards'] }),
             expect.anything(),
             expect.anything(),
             expect.objectContaining({ loki: lokiFindings }),
             expect.anything(), expect.anything(), expect.anything(),
-            expect.anything(), expect.anything()
+            expect.anything(), expect.anything(),
+            expect.any(Array),   // preferredCategories
+            expect.any(String),  // conversationDigest
         );
+    });
+
+    it('passes prometheus hint to dashboard agent when conversation is metrics-focused', async () => {
+        const metricsConvPlan: AgentPlan = {
+            complexity: 'complex',
+            reasoning: 'data then dashboard',
+            steps: [
+                { id: 'step_1', description: 'Query Prometheus metrics', toolCategories: ['prometheus'], dependsOn: [] },
+                { id: 'step_2', description: 'Create a metrics monitoring dashboard', toolCategories: ['dashboards'], dependsOn: ['step_1'] },
+            ],
+        };
+
+        mockRunPlanner.mockResolvedValue(metricsConvPlan);
+        // Prometheus step returns datasource-only findings (no validated queries — Fix A1)
+        const promDatasourceOnlyFindings = {
+            prometheus: { datasourceUid: 'prom-uid-99', datasourceName: 'Prometheus', validatedQueries: [] },
+        };
+        mockRunSpecialist.mockResolvedValue({ ...successResult('step_1'), dataFindings: promDatasourceOnlyFindings });
+        mockRunDashboardAgent.mockResolvedValue(successResult('step_2'));
+        mockRunSynthesiser.mockResolvedValue('Done.');
+
+        const messages = [
+            { role: 'user', content: 'Which services generate metrics?' },
+            { role: 'assistant', content: 'graft-plugin-frontend, opentelemetry-collector, otelcol-contrib send metrics to Prometheus.' },
+            { role: 'user', content: 'Can you create a dashboard to monitor it?' },
+        ] as Message[];
+
+        await runOrchestration(
+            messages, '', [], {}, 'standard', 10,
+            new AbortController().signal, undefined, jest.fn()
+        );
+
+        const dashboardCall = mockRunDashboardAgent.mock.calls[0];
+        const preferredCategories: string[] = dashboardCall[9];
+        const digest: string = dashboardCall[10];
+
+        // The hint should resolve to prometheus (step description contains "metrics")
+        expect(preferredCategories).toContain('prometheus');
+        expect(preferredCategories).not.toContain('loki');
+
+        // The digest should contain context from prior turns (not the current request)
+        expect(digest).toContain('graft-plugin-frontend');
     });
 });
 

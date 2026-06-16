@@ -228,7 +228,7 @@ describe('runDashboardAgent', () => {
         // System prompt should note no findings rather than crashing
         const systemMsg = mockChatCompletions.mock.calls[0][0].messages
             .find((m: any) => m.role === 'system')?.content ?? '';
-        expect(systemMsg).toContain('No upstream data findings were provided');
+        expect(systemMsg).toContain('No pre-validated queries were provided');
     });
 
     it('instructs type-based datasource selection when findings are empty', async () => {
@@ -262,5 +262,120 @@ describe('runDashboardAgent', () => {
         expect(systemMsg).toContain('get_dashboard_panel_queries');
         expect(systemMsg).toContain('FIX any mismatch before finishing');
         expect(systemMsg).toMatch(/Do NOT finish while any panel/i);
+    });
+
+    // ─── Directional hint tests (Fix B1) ─────────────────────────────────────
+
+    it('emits Prometheus directive when preferredCategories is [prometheus] and findings are empty', async () => {
+        mockChatCompletions.mockResolvedValue(makeResponse('done'));
+
+        await runDashboardAgent(
+            makeStep(), 'build a service monitoring dashboard', '', {},
+            [], mockMcpClient, 10, new AbortController().signal, onUpdate,
+            ['prometheus'], // preferredCategories
+        );
+
+        const systemMsg = mockChatCompletions.mock.calls[0][0].messages
+            .find((m: any) => m.role === 'system')?.content ?? '';
+        expect(systemMsg).toContain('Prometheus metrics');
+        expect(systemMsg).toContain('PromQL');
+        expect(systemMsg).toContain('"prometheus"');
+        expect(systemMsg).toMatch(/Do NOT build a logs dashboard/i);
+    });
+
+    it('emits Loki directive when preferredCategories is [loki] and findings are empty', async () => {
+        mockChatCompletions.mockResolvedValue(makeResponse('done'));
+
+        await runDashboardAgent(
+            makeStep(), 'build a log monitoring dashboard', '', {},
+            [], mockMcpClient, 10, new AbortController().signal, onUpdate,
+            ['loki'], // preferredCategories
+        );
+
+        const systemMsg = mockChatCompletions.mock.calls[0][0].messages
+            .find((m: any) => m.role === 'system')?.content ?? '';
+        expect(systemMsg).toContain('Loki logs');
+        expect(systemMsg).toContain('LogQL');
+        expect(systemMsg).toContain('"loki"');
+        expect(systemMsg).toMatch(/Do NOT build a metrics dashboard/i);
+    });
+
+    it('emits neutral guidance when preferredCategories is ambiguous (both/empty)', async () => {
+        mockChatCompletions.mockResolvedValue(makeResponse('done'));
+
+        await runDashboardAgent(
+            makeStep(), 'build a dashboard', '', {},
+            [], mockMcpClient, 10, new AbortController().signal, onUpdate,
+            ['loki', 'prometheus'], // ambiguous
+        );
+
+        const systemMsg = mockChatCompletions.mock.calls[0][0].messages
+            .find((m: any) => m.role === 'system')?.content ?? '';
+        // Neutral: neither a hard Prometheus nor a hard Loki directive
+        expect(systemMsg).not.toMatch(/Do NOT build a logs dashboard/i);
+        expect(systemMsg).not.toMatch(/Do NOT build a metrics dashboard/i);
+        // But still instructs type-based selection
+        expect(systemMsg).toMatch(/type.*loki/i);
+        expect(systemMsg).toMatch(/type.*prometheus/i);
+    });
+
+    it('directional hint does NOT override pre-validated findings (prometheus hint + loki findings)', async () => {
+        mockChatCompletions.mockResolvedValue(makeResponse('done'));
+
+        await runDashboardAgent(
+            makeStep(), 'build dashboard', '', lokiFindings,
+            [], mockMcpClient, 10, new AbortController().signal, onUpdate,
+            ['prometheus'], // hint says prometheus, but findings are loki
+        );
+
+        const systemMsg = mockChatCompletions.mock.calls[0][0].messages
+            .find((m: any) => m.role === 'system')?.content ?? '';
+        // Should show the pre-validated Loki findings, not the empty-findings directive
+        expect(systemMsg).toContain('loki-uid-123');
+        expect(systemMsg).toContain('Pre-validated data from upstream agents');
+        expect(systemMsg).not.toContain('No pre-validated queries were provided');
+    });
+
+    it('includes datasource uid in prompt when findings have known uid but empty queries', async () => {
+        mockChatCompletions.mockResolvedValue(makeResponse('done'));
+
+        // Datasource-only findings: uid known but no validated queries (Fix A1)
+        const datasourceOnlyFindings = {
+            prometheus: {
+                datasourceUid: 'prom-uid-456',
+                datasourceName: 'Prometheus',
+                validatedQueries: [],
+            },
+        };
+
+        await runDashboardAgent(
+            makeStep(), 'build metrics dashboard', '', datasourceOnlyFindings,
+            [], mockMcpClient, 10, new AbortController().signal, onUpdate,
+            ['prometheus'],
+        );
+
+        const systemMsg = mockChatCompletions.mock.calls[0][0].messages
+            .find((m: any) => m.role === 'system')?.content ?? '';
+        // Should show partial findings with the UID (not the generic no-findings path)
+        expect(systemMsg).toContain('prom-uid-456');
+        expect(systemMsg).toContain('Datasource identified — no pre-validated queries');
+    });
+
+    it('embeds conversation digest in the system prompt when provided', async () => {
+        mockChatCompletions.mockResolvedValue(makeResponse('done'));
+
+        const digest = 'User: Which services generate metrics?\nAssistant: graft-plugin-frontend via Prometheus.';
+
+        await runDashboardAgent(
+            makeStep(), 'build a dashboard to monitor it', '', {},
+            [], mockMcpClient, 10, new AbortController().signal, onUpdate,
+            ['prometheus'],
+            digest,
+        );
+
+        const systemMsg = mockChatCompletions.mock.calls[0][0].messages
+            .find((m: any) => m.role === 'system')?.content ?? '';
+        expect(systemMsg).toContain('graft-plugin-frontend via Prometheus');
+        expect(systemMsg).toContain('Recent conversation');
     });
 });
