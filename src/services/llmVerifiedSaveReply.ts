@@ -4,6 +4,8 @@ import {
     formatAmbiguousGraphCreateClarification,
     messageDescribesAmbiguousGraphCreate,
 } from './ambiguousGraphCreateParse';
+import { recordClarificationShown } from './graftPromptLearning';
+import { extractDashboardUidFromMessage } from './dashboardMentionParse';
 import {
     describeDefaultSaveOutcome,
     extractSuccessLineFromModel,
@@ -45,6 +47,11 @@ export function applyLlmVerifiedSaveReply(
 
     if (!verification.verified && !verification.skipped) {
         if (messageDescribesAmbiguousGraphCreate(latestUser)) {
+            recordClarificationShown(
+                'ambiguous-graph-create',
+                latestUser,
+                extractDashboardUidFromMessage(latestUser)
+            );
             return formatAmbiguousGraphCreateClarification(latestUser);
         }
         return (

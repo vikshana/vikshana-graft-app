@@ -68,6 +68,11 @@ import {
   runProgrammaticPanelJsonDuplicate,
 } from '../../../services/programmaticPanelJsonDuplicate';
 import { recordGraftFailure } from '../../../services/graftOperatorFailureLog';
+import {
+    formatLearnedSuccessNote,
+    recordClarificationShown,
+    tryLearnFromProgrammaticSuccess,
+} from '../../../services/graftPromptLearning';
 import { OperatorFailureExport } from './components/OperatorFailureExport';
 import {
   messageMentionsInfluxPanelRepair,
@@ -942,6 +947,14 @@ export const ChatInterface = () => {
       const clearPendingOnProgrammaticSuccess = (ok: boolean) => {
         if (ok) {
           clearPendingDashboardTask();
+          const learned = tryLearnFromProgrammaticSuccess({
+            userMessage: content,
+            intent: errorPathTag,
+            dashboardUid: contextService.getDashboardUid() ?? undefined,
+          });
+          if (learned) {
+            finalContent += formatLearnedSuccessNote(learned);
+          }
         }
       };
 
@@ -2212,6 +2225,11 @@ export const ChatInterface = () => {
       }
 
       if (messageDescribesAmbiguousGraphCreate(content, contextService.getDashboardUid() ?? undefined)) {
+        recordClarificationShown(
+          'ambiguous-graph-create',
+          content,
+          extractDashboardUidFromMessage(content) ?? contextService.getDashboardUid() ?? undefined
+        );
         finalContent = formatAmbiguousGraphCreateClarification(content);
         setMessages((prev) => {
           const updated = [...prev];

@@ -8,6 +8,7 @@ import {
 } from './panelCreateParse';
 import { formatDashboardMetricPanelsExamplePrompt } from './dashboardMetricPanelsParse';
 import { KNOWN_INSTRUMENTATION_DASHBOARD_UIDS } from './programmaticDashboardResolve';
+import { appendLearnedPromptHints } from './graftPromptLearning';
 
 function normalizeMessageQuotes(text: string): string {
     return text.replace(/[\u201C\u201D]/g, '"').replace(/[\u2018\u2019]/g, "'");
@@ -66,21 +67,23 @@ export function formatAmbiguousGraphCreateClarification(
     const multiPanelExample = `Create a gauge panel, time series panel, table panel, and stat panel for dashboard with UID = ${uid}.`;
     const rowExample = `Create a dashboard row called "Machine Health" and add two panels to it for dashboard with UID = ${uid}.`;
 
-    return (
+    return appendLearnedPromptHints(
         `### Need clarification\n\n` +
-        `Graft needs a **specific panel plan** before creating graphs. ` +
-        `A prompt like "create useful graphs" does not specify panel types, titles, or metrics — ` +
-        `the LLM may describe panels that are never saved.\n\n` +
-        `**Choose one of these patterns:**\n` +
-        `- **Bulk metrics** (programmatic, Prometheus \`machine_metrics\`):\n` +
-        `  \`${metricExample}\`\n` +
-        `- **Typed panels** (programmatic):\n` +
-        `  \`${multiPanelExample}\`\n` +
-        `- **Row + panels** (programmatic):\n` +
-        `  \`${rowExample}\`\n` +
-        (keysight
-            ? `- **Keysight**: use Prometheus \`machine_metrics{machine="2505-200033", field="..."}\` — not standalone metric names or Influx \`keysight_machine\`.\n`
-            : '') +
-        `\nReply with one of the examples above (edit titles/types as needed).`
+            `Graft needs a **specific panel plan** before creating graphs. ` +
+            `A prompt like "create useful graphs" does not specify panel types, titles, or metrics — ` +
+            `the LLM may describe panels that are never saved.\n\n` +
+            `**Choose one of these patterns:**\n` +
+            `- **Bulk metrics** (programmatic, Prometheus \`machine_metrics\`):\n` +
+            `  \`${metricExample}\`\n` +
+            `- **Typed panels** (programmatic):\n` +
+            `  \`${multiPanelExample}\`\n` +
+            `- **Row + panels** (programmatic):\n` +
+            `  \`${rowExample}\`\n` +
+            (keysight
+                ? `- **Keysight**: use Prometheus \`machine_metrics{machine="2505-200033", field="..."}\` — not standalone metric names or Influx \`keysight_machine\`.\n`
+                : '') +
+            `\nReply with one of the examples above (edit titles/types as needed).`,
+        'ambiguous-graph-create',
+        uid
     );
 }
