@@ -23,6 +23,8 @@ Structural rules (must follow exactly):
 - Never produce two steps with identical toolCategories. Consolidate them into a single step — a specialist can perform multiple queries within one loop.
 - Dashboard construction must always be a separate step that lists ALL data steps in its dependsOn. Never include "dashboards" and "loki"/"prometheus" in the same step's toolCategories.
 - A step with toolCategories ["dashboards"] will automatically receive the validated queries from all its dependency steps — it does not need loki or prometheus tools.
+- A dashboard that displays logs or metrics ALWAYS needs a preceding data step. If the user asks to build/create a dashboard for logs, include a "loki" step that the dashboard step depends on. For a metrics dashboard, include a "prometheus" step. Never emit a lone "dashboards" step when the dashboard will contain log or metric panels — without a data step the dashboard agent has no validated queries and will pick the wrong datasource.
+- Use the recent conversation (if provided) to resolve references like "it", "that service", or "the logs" — e.g. if earlier turns established the data lives in Loki, a follow-up "build a dashboard for monitoring it" is a complex request needing a loki step then a dashboards step.
 - Steps with no dependsOn can run in parallel.
 
 For "simple" plans, return exactly one step with no dependsOn.
@@ -45,18 +47,23 @@ Response schema (strict):
 /**
  * Calls the LLM (BASE model) to decompose the user's request into a structured plan.
  * Falls back to a single-step simple plan if the model returns invalid JSON.
+ *
+ * @param conversationDigest Optional summary of recent turns. Lets the planner
+ *   resolve references like "it"/"the logs" to the right datasource so follow-up
+ *   dashboard requests correctly include a preceding data step.
  */
 export async function runPlanner(
     userMessage: string,
     context: string,
-    enabledCategories: ToolCategory[]
+    enabledCategories: ToolCategory[],
+    conversationDigest = ''
 ): Promise<AgentPlan> {
     const categoriesStr = enabledCategories.length > 0
         ? enabledCategories.join(', ')
         : 'none (all tool categories are disabled)';
 
     const userPrompt = `Enabled tool categories: ${categoriesStr}
-
+${conversationDigest ? `\nRecent conversation (most recent last) — use this to resolve references in the request:\n${conversationDigest}\n` : ''}
 User request:
 ${userMessage}
 

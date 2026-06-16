@@ -228,6 +228,39 @@ describe('runDashboardAgent', () => {
         // System prompt should note no findings rather than crashing
         const systemMsg = mockChatCompletions.mock.calls[0][0].messages
             .find((m: any) => m.role === 'system')?.content ?? '';
-        expect(systemMsg).toContain('No upstream data findings provided');
+        expect(systemMsg).toContain('No upstream data findings were provided');
+    });
+
+    it('instructs type-based datasource selection when findings are empty', async () => {
+        mockChatCompletions.mockResolvedValue(makeResponse('done'));
+
+        await runDashboardAgent(
+            makeStep(), 'build a logs dashboard', '', {},
+            [], mockMcpClient, 10, new AbortController().signal, onUpdate
+        );
+
+        const systemMsg = mockChatCompletions.mock.calls[0][0].messages
+            .find((m: any) => m.role === 'system')?.content ?? '';
+        // Must steer the agent to discover datasources and select by type
+        expect(systemMsg).toContain('list_datasources');
+        expect(systemMsg).toMatch(/type\s+"loki"/);
+        expect(systemMsg).toMatch(/type\s+"prometheus"/);
+        // Must explicitly forbid the LogQL-on-Prometheus mistake from the bug report
+        expect(systemMsg).toContain('NEVER attach a LogQL query to a prometheus datasource');
+    });
+
+    it('requires mandatory self-correction of datasource mismatches before finishing', async () => {
+        mockChatCompletions.mockResolvedValue(makeResponse('done'));
+
+        await runDashboardAgent(
+            makeStep(), 'build dashboard', '', lokiFindings,
+            [], mockMcpClient, 10, new AbortController().signal, onUpdate
+        );
+
+        const systemMsg = mockChatCompletions.mock.calls[0][0].messages
+            .find((m: any) => m.role === 'system')?.content ?? '';
+        expect(systemMsg).toContain('get_dashboard_panel_queries');
+        expect(systemMsg).toContain('FIX any mismatch before finishing');
+        expect(systemMsg).toMatch(/Do NOT finish while any panel/i);
     });
 });

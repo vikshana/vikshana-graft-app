@@ -1,4 +1,4 @@
-import { runOrchestration, sanitisePlan } from './orchestrator';
+import { runOrchestration, sanitisePlan, buildConversationDigest, inferDataCategoriesForDashboard } from './orchestrator';
 import * as planner from './planner';
 import * as specialist from './specialist';
 import * as dashboardAgentModule from './dashboardAgent';
@@ -494,5 +494,240 @@ describe('sanitisePlan (Fix 1: code-enforced plan gate)', () => {
             expect.anything(), expect.anything(), expect.anything(),
             expect.anything(), expect.anything()
         );
+    });
+});
+
+// ─── sanitisePlan: auto-injection of data steps (Part B) ─────────────────────
+
+describe('sanitisePlan — data step injection for lone dashboard steps', () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
+        mockRunSynthesiser.mockResolvedValue('Final synthesised response.');
+        mockLlmServiceChat.mockResolvedValue('Simple response.');
+    });
+
+    const makeStep = (id: string, cats: string[], deps: string[] = [], description?: string) => ({
+        id,
+        description: description ?? `Step ${id}`,
+        toolCategories: cats as any,
+        dependsOn: deps,
+    });
+
+    const lonePlan = (description: string): AgentPlan => ({
+        complexity: 'simple',
+        reasoning: 'lone dashboard',
+        steps: [makeStep('step_1', ['dashboards'], [], description)],
+    });
+
+    it('injects a loki data step before a lone logs dashboard step', () => {
+        const result = sanitisePlan(lonePlan('Build a logs dashboard for the service'), ['loki', 'prometheus', 'dashboards']);
+
+        expect(result.steps).toHaveLength(2);
+        const dataStep = result.steps.find(s => s.id === 'step_1_data')!;
+        expect(dataStep).toBeDefined();
+        expect(dataStep.toolCategories).toEqual(['loki']);
+        expect(dataStep.dependsOn).toEqual([]);
+
+        const dashStep = result.steps.find(s => s.id === 'step_1')!;
+        expect(dashStep.toolCategories).toEqual(['dashboards']);
+        expect(dashStep.dependsOn).toContain('step_1_data');
+    });
+
+    it('injects a prometheus data step before a lone metrics dashboard step', () => {
+        const result = sanitisePlan(lonePlan('Build a CPU and latency metrics dashboard'), ['loki', 'prometheus', 'dashboards']);
+
+        const dataStep = result.steps.find(s => s.id === 'step_1_data')!;
+        expect(dataStep.toolCategories).toEqual(['prometheus']);
+    });
+
+    it('injects both data categories when the request is ambiguous', () => {
+        const result = sanitisePlan(lonePlan('Build a monitoring dashboard'), ['loki', 'prometheus', 'dashboards']);
+
+        const dataStep = result.steps.find(s => s.id === 'step_1_data')!;
+        expect(dataStep.toolCategories).toEqual(['loki', 'prometheus']);
+    });
+
+    it('respects enabled categories when injecting (loki disabled → prometheus only)', () => {
+        const result = sanitisePlan(lonePlan('Build a logs dashboard'), ['prometheus', 'dashboards']);
+
+        const dataStep = result.steps.find(s => s.id === 'step_1_data')!;
+        // Loki keyword matched but loki not enabled → falls back to enabled query categories
+        expect(dataStep.toolCategories).toEqual(['prometheus']);
+    });
+
+    it('does NOT inject when no query data categories are enabled', () => {
+        const plan = lonePlan('Build a logs dashboard');
+        const result = sanitisePlan(plan, ['dashboards', 'datasources']);
+
+        expect(result.steps).toHaveLength(1);
+        expect(result.steps[0].id).toBe('step_1');
+        expect(result).toBe(plan); // unchanged reference — nothing to inject
+    });
+
+    it('does NOT inject when the dashboard step already has a loki ancestor', () => {
+        const plan: AgentPlan = {
+            complexity: 'complex',
+            reasoning: 'already wired',
+            steps: [
+                makeStep('step_1', ['loki']),
+                makeStep('step_2', ['dashboards'], ['step_1'], 'Build a logs dashboard'),
+            ],
+        };
+        const result = sanitisePlan(plan, ['loki', 'prometheus', 'dashboards']);
+
+        expect(result.steps).toHaveLength(2);
+        expect(result).toBe(plan); // unchanged reference — no injection
+    });
+
+    it('detects a query-data ancestor transitively through a datasources step', () => {
+        const plan: AgentPlan = {
+            complexity: 'complex',
+            reasoning: 'transitive',
+            steps: [
+                makeStep('step_1', ['prometheus']),
+                makeStep('step_2', ['datasources'], ['step_1']),
+                makeStep('step_3', ['dashboards'], ['step_2'], 'Build a metrics dashboard'),
+            ],
+        };
+        const result = sanitisePlan(plan, ['loki', 'prometheus', 'dashboards']);
+
+        // step_3 reaches step_1 (prometheus) transitively → no injection
+        expect(result.steps.find(s => s.id === 'step_3_data')).toBeUndefined();
+        expect(result.steps).toHaveLength(3);
+    });
+
+    it('forces complexity to complex after injecting', () => {
+        const result = sanitisePlan(lonePlan('Build a logs dashboard'), ['loki', 'dashboards']);
+        expect(result.complexity).toBe('complex');
+    });
+
+    it('uses requestText (conversation digest) to infer datasource when description is generic', () => {
+        const plan = lonePlan('Build the dashboard'); // generic description
+        const result = sanitisePlan(plan, ['loki', 'prometheus', 'dashboards'], 'User: find services generating logs\nAssistant: logs come from Loki');
+
+        const dataStep = result.steps.find(s => s.id === 'step_1_data')!;
+        expect(dataStep.toolCategories).toEqual(['loki']);
+    });
+
+    it('runs the injected data step then dashboard step through runOrchestration', async () => {
+        const loneDashboardPlan: AgentPlan = {
+            complexity: 'simple',
+            reasoning: 'lone dashboard',
+            steps: [{ id: 'step_1', description: 'Build a logs dashboard for the service', toolCategories: ['dashboards'] as any, dependsOn: [] }],
+        };
+
+        mockRunPlanner.mockResolvedValue(loneDashboardPlan);
+        const lokiFindings = {
+            datasourceUid: 'loki-uid', datasourceName: 'Loki', labels: {},
+            validatedQueries: [{ description: 'all logs', logql: '{service_name="x"}' }],
+        };
+        mockRunSpecialist.mockResolvedValue({ ...successResult('step_1_data'), dataFindings: { loki: lokiFindings } });
+        mockRunDashboardAgent.mockResolvedValue(successResult('step_1'));
+        mockRunSynthesiser.mockResolvedValue('Done.');
+
+        const onUpdate = jest.fn();
+        await runOrchestration(
+            [{ role: 'user', content: 'build a logs dashboard' }],
+            '', [], {}, 'standard', 10,
+            new AbortController().signal, undefined, onUpdate
+        );
+
+        // Specialist runs for the injected loki data step
+        expect(mockRunSpecialist).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'step_1_data', toolCategories: ['loki'] }),
+            expect.anything(), expect.anything(), expect.anything(),
+            expect.anything(), expect.anything(), expect.anything(), expect.anything()
+        );
+
+        // Dashboard agent receives the loki findings produced by the injected step
+        expect(mockRunDashboardAgent).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'step_1', toolCategories: ['dashboards'] }),
+            expect.anything(),
+            expect.anything(),
+            expect.objectContaining({ loki: lokiFindings }),
+            expect.anything(), expect.anything(), expect.anything(),
+            expect.anything(), expect.anything()
+        );
+    });
+});
+
+// ─── buildConversationDigest (Part A) ────────────────────────────────────────
+
+describe('buildConversationDigest', () => {
+    it('returns empty string when there is only the current user message', () => {
+        expect(buildConversationDigest([{ role: 'user', content: 'build a dashboard' }])).toBe('');
+    });
+
+    it('excludes the final user message (the request being planned)', () => {
+        const digest = buildConversationDigest([
+            { role: 'user', content: 'what services generate logs?' },
+            { role: 'assistant', content: 'The logs come from Loki under unknown_service.' },
+            { role: 'user', content: 'build a dashboard for it' },
+        ]);
+        expect(digest).toContain('User: what services generate logs?');
+        expect(digest).toContain('Assistant: The logs come from Loki under unknown_service.');
+        expect(digest).not.toContain('build a dashboard for it');
+    });
+
+    it('caps the number of turns included', () => {
+        const messages: Message[] = [];
+        for (let i = 0; i < 20; i++) {
+            messages.push({ role: i % 2 === 0 ? 'user' : 'assistant', content: `msg ${i}` });
+        }
+        messages.push({ role: 'user', content: 'final request' });
+        const digest = buildConversationDigest(messages, 4);
+        expect(digest.split('\n')).toHaveLength(4);
+    });
+
+    it('truncates long turns', () => {
+        const long = 'x'.repeat(1000);
+        const digest = buildConversationDigest([
+            { role: 'assistant', content: long },
+            { role: 'user', content: 'go' },
+        ], 6, 100);
+        expect(digest.length).toBeLessThan(150);
+        expect(digest).toContain('…');
+    });
+
+    it('skips system messages and empty content', () => {
+        const digest = buildConversationDigest([
+            { role: 'system', content: 'you are graft' } as any,
+            { role: 'user', content: '' },
+            { role: 'assistant', content: 'hello' },
+            { role: 'user', content: 'next' },
+        ]);
+        expect(digest).toBe('Assistant: hello');
+    });
+});
+
+// ─── inferDataCategoriesForDashboard (Part B heuristic) ──────────────────────
+
+describe('inferDataCategoriesForDashboard', () => {
+    const all: any[] = ['loki', 'prometheus'];
+
+    it('returns loki for log-related text', () => {
+        expect(inferDataCategoriesForDashboard('build a logs dashboard', all)).toEqual(['loki']);
+        expect(inferDataCategoriesForDashboard('show log volume by level', all)).toEqual(['loki']);
+    });
+
+    it('returns prometheus for metric-related text', () => {
+        expect(inferDataCategoriesForDashboard('CPU and memory metrics', all)).toEqual(['prometheus']);
+        expect(inferDataCategoriesForDashboard('request rate and latency', all)).toEqual(['prometheus']);
+    });
+
+    it('returns both when both are mentioned', () => {
+        expect(inferDataCategoriesForDashboard('logs and metrics overview', all)).toEqual(['loki', 'prometheus']);
+    });
+
+    it('returns both enabled query categories when text is ambiguous', () => {
+        expect(inferDataCategoriesForDashboard('build a monitoring dashboard', all)).toEqual(['loki', 'prometheus']);
+    });
+
+    it('returns empty when no query categories are enabled', () => {
+        expect(inferDataCategoriesForDashboard('logs dashboard', ['dashboards', 'datasources'] as any)).toEqual([]);
+    });
+
+    it('scopes to enabled categories — loki keyword but only prometheus enabled', () => {
+        expect(inferDataCategoriesForDashboard('logs dashboard', ['prometheus'] as any)).toEqual(['prometheus']);
     });
 });

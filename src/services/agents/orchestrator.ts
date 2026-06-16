@@ -24,6 +24,35 @@ function getEnabledCategories(toolsConfig?: ToolsConfig): ToolCategory[] {
     );
 }
 
+/**
+ * Builds a compact digest of recent conversation turns for the planner.
+ *
+ * The planner otherwise only sees the latest user message. A follow-up like
+ * "build a dashboard for monitoring it" loses the context of an earlier turn
+ * that established the data lives in Loki — causing a lone dashboard step with
+ * no data dependency and, ultimately, the wrong datasource on panels.
+ *
+ * We exclude the latest user message (it is passed separately as the request)
+ * and cap both the number of turns and each turn's length to keep the prompt small.
+ */
+export function buildConversationDigest(messages: Message[], maxTurns = 6, maxCharsPerTurn = 500): string {
+    const relevant = messages.filter(m => m.role === 'user' || m.role === 'assistant');
+    // Drop the final user message — it is the request being planned.
+    if (relevant.length > 0 && relevant[relevant.length - 1].role === 'user') {
+        relevant.pop();
+    }
+    const recent = relevant.slice(-maxTurns);
+    return recent
+        .map(m => {
+            const text = (m.content ?? '').trim().replace(/\s+/g, ' ');
+            if (!text) { return ''; }
+            const truncated = text.length > maxCharsPerTurn ? text.slice(0, maxCharsPerTurn) + '…' : text;
+            return `${m.role === 'user' ? 'User' : 'Assistant'}: ${truncated}`;
+        })
+        .filter(Boolean)
+        .join('\n');
+}
+
 function buildExecutionWaves(steps: PlanStep[]): PlanStep[][] {
     const waves: PlanStep[][] = [];
     const completed = new Set<string>();
@@ -75,24 +104,71 @@ function isDashboardStep(step: PlanStep): boolean {
 /** Data-source categories that should never be mixed with dashboards in one step. */
 const DATA_CATEGORIES: ToolCategory[] = ['loki', 'prometheus', 'datasources'];
 
+/** Categories that supply validated queries (DataFindings) to the dashboard agent. */
+const QUERY_DATA_CATEGORIES: ToolCategory[] = ['loki', 'prometheus'];
+
+/** Keyword hints used to infer which datasource a dashboard step needs. */
+const LOKI_KEYWORDS = /\b(log|logs|logging|loki|logql|stderr|stdout|log\s*level|log\s*volume)\b/i;
+const PROMETHEUS_KEYWORDS = /\b(metric|metrics|prometheus|promql|cpu|memory|latency|rate|throughput|request\s*rate|error\s*rate|gauge|counter|histogram|saturation)\b/i;
+
+/**
+ * Infers which data categories a dashboard step needs, based on the step
+ * description and recent conversation. Returns only categories that are enabled.
+ *
+ * - mentions logs/loki → ['loki']
+ * - mentions metrics/prometheus → ['prometheus']
+ * - mentions both, or neither (ambiguous) → both enabled query categories
+ */
+export function inferDataCategoriesForDashboard(
+    text: string,
+    enabledCategories: ToolCategory[],
+): ToolCategory[] {
+    const enabledQuery = QUERY_DATA_CATEGORIES.filter(c => enabledCategories.includes(c));
+    if (enabledQuery.length === 0) { return []; }
+
+    const wantsLoki = LOKI_KEYWORDS.test(text) && enabledQuery.includes('loki');
+    const wantsPrometheus = PROMETHEUS_KEYWORDS.test(text) && enabledQuery.includes('prometheus');
+
+    if (wantsLoki && !wantsPrometheus) { return ['loki']; }
+    if (wantsPrometheus && !wantsLoki) { return ['prometheus']; }
+    // Both mentioned, or neither matched → cover all enabled query categories.
+    return enabledQuery;
+}
+
 /**
  * Code-enforced plan sanitiser — the poka-yoke gate between the Planner and execution.
  *
  * The Planner is instructed (prompt-only) to keep dashboard steps separate from data
- * steps. But a BASE model under pressure sometimes produces a step with mixed
- * toolCategories like ["loki", "dashboards"], which causes the dashboard agent to
- * receive empty DataFindings and default to the wrong datasource.
+ * steps and to always precede a data dashboard with a data step. But a BASE model
+ * under pressure produces two failure modes that both leave the dashboard agent with
+ * empty DataFindings and the wrong datasource on panels:
  *
- * This function detects such violations and splits them deterministically:
+ *   1. A mixed step like ["loki", "dashboards"] — split into a data step + dashboard step.
+ *   2. A lone ["dashboards"] step with no data dependency — inject a preceding data step.
+ *
+ * Example (mixed split):
  *   BEFORE: { id: "step_1", toolCategories: ["loki", "dashboards"], dependsOn: [] }
  *   AFTER:  { id: "step_1",          toolCategories: ["loki"],       dependsOn: [] }
  *           { id: "step_1_dashboard", toolCategories: ["dashboards"], dependsOn: ["step_1"] }
  *
+ * Example (injection):
+ *   BEFORE: { id: "step_1", toolCategories: ["dashboards"], dependsOn: [] }   // "build a logs dashboard"
+ *   AFTER:  { id: "step_1_data", toolCategories: ["loki"],        dependsOn: [] }
+ *           { id: "step_1",      toolCategories: ["dashboards"],  dependsOn: ["step_1_data"] }
+ *
  * Runs after every Planner call, before buildExecutionWaves.
  * No LLM call — pure structural transformation, O(n) in the number of steps.
+ *
+ * @param enabledCategories Used to scope any injected data step to enabled tools.
+ * @param requestText The user request + conversation digest, used to infer loki vs prometheus.
  */
-export function sanitisePlan(plan: AgentPlan): AgentPlan {
-    const sanitised: PlanStep[] = [];
+export function sanitisePlan(
+    plan: AgentPlan,
+    enabledCategories: ToolCategory[] = Object.keys(TOOL_CATEGORIES) as ToolCategory[],
+    requestText = '',
+): AgentPlan {
+    // ─── Pass 1: split mixed data+dashboard steps ───────────────────────────────
+    const split: PlanStep[] = [];
     let splitCount = 0;
 
     for (const step of plan.steps) {
@@ -107,7 +183,7 @@ export function sanitisePlan(plan: AgentPlan): AgentPlan {
             const dataStepId = step.id;
             const dashStepId = `${step.id}_dashboard`;
 
-            sanitised.push({
+            split.push({
                 id: dataStepId,
                 description: step.description.replace(/\s*(and\s+)?create\s+(a\s+)?dashboard.*/i, '').trim()
                     || `Gather data for: ${step.description}`,
@@ -115,7 +191,7 @@ export function sanitisePlan(plan: AgentPlan): AgentPlan {
                 dependsOn: step.dependsOn,
             });
 
-            sanitised.push({
+            split.push({
                 id: dashStepId,
                 description: `Build dashboard: ${step.description}`,
                 toolCategories: ['dashboards'],
@@ -124,18 +200,62 @@ export function sanitisePlan(plan: AgentPlan): AgentPlan {
 
             console.info(`[Graft] Plan sanitiser: split mixed step "${step.id}" into "${dataStepId}" + "${dashStepId}"`);
         } else {
-            sanitised.push(step);
+            split.push(step);
         }
     }
 
-    if (splitCount === 0) {
+    // ─── Pass 2: inject a data step for any dashboard step lacking a data dependency ─
+    // A dashboard step gets its DataFindings from upstream loki/prometheus steps. If
+    // none exist anywhere in its dependency chain, the dashboard agent has no validated
+    // queries and guesses the datasource. We inject a data step and wire the dependency.
+    const stepsById = new Map(split.map(s => [s.id, s]));
+
+    const hasQueryDataAncestor = (step: PlanStep, seen = new Set<string>()): boolean => {
+        for (const depId of step.dependsOn) {
+            if (seen.has(depId)) { continue; }
+            seen.add(depId);
+            const dep = stepsById.get(depId);
+            if (!dep) { continue; }
+            if (dep.toolCategories.some(c => QUERY_DATA_CATEGORIES.includes(c))) { return true; }
+            if (hasQueryDataAncestor(dep, seen)) { return true; }
+        }
+        return false;
+    };
+
+    const injected: PlanStep[] = [];
+    let injectCount = 0;
+
+    for (const step of split) {
+        const isDashboard = step.toolCategories.includes('dashboards');
+        if (isDashboard && !hasQueryDataAncestor(step)) {
+            const inferText = `${step.description} ${requestText}`;
+            const categories = inferDataCategoriesForDashboard(inferText, enabledCategories);
+
+            if (categories.length > 0) {
+                injectCount++;
+                const dataStepId = `${step.id}_data`;
+                injected.push({
+                    id: dataStepId,
+                    description: `Discover and validate ${categories.join(' and ')} queries for: ${step.description}`,
+                    toolCategories: categories,
+                    dependsOn: [...step.dependsOn],
+                });
+                injected.push({ ...step, dependsOn: [...step.dependsOn, dataStepId] });
+                console.info(`[Graft] Plan sanitiser: injected data step "${dataStepId}" (${categories.join(', ')}) before lone dashboard step "${step.id}"`);
+                continue;
+            }
+        }
+        injected.push(step);
+    }
+
+    if (splitCount === 0 && injectCount === 0) {
         return plan;
     }
 
     return {
         ...plan,
-        complexity: 'complex', // ensure complex path runs after splitting
-        steps: sanitised,
+        complexity: 'complex', // ensure complex path runs after restructuring
+        steps: injected,
     };
 }
 
@@ -163,10 +283,14 @@ export async function runOrchestration(
     const userMessage = userMessages[userMessages.length - 1]?.content ?? '';
 
     const enabledCategories = getEnabledCategories(toolsConfig);
+    const conversationDigest = buildConversationDigest(messages);
 
-    // Step 1: Plan — then sanitise to enforce structural rules in code
-    const rawPlan: AgentPlan = await runPlanner(userMessage, context, enabledCategories);
-    const plan = sanitisePlan(rawPlan);
+    // Step 1: Plan — give the planner recent conversation so it can resolve
+    // references (e.g. "it" → the Loki service from an earlier turn). Then sanitise
+    // to enforce structural rules in code: split mixed steps and inject a data step
+    // for any lone dashboard step so the dashboard agent always has validated queries.
+    const rawPlan: AgentPlan = await runPlanner(userMessage, context, enabledCategories, conversationDigest);
+    const plan = sanitisePlan(rawPlan, enabledCategories, `${userMessage}\n${conversationDigest}`);
     onUpdate({ type: 'plan', plan });
 
     if (signal.aborted) {

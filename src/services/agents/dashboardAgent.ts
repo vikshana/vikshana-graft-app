@@ -98,7 +98,20 @@ ${hasFindings ? `## Pre-validated data from upstream agents
 ${findingsBlock}
 
 These queries have already been confirmed to return data. Copy them verbatim into panel targets.
-Do NOT modify, paraphrase, or reconstruct them.` : 'No upstream data findings provided. Use search_dashboards and list_datasources to understand the environment before building.'}
+Do NOT modify, paraphrase, or reconstruct them.` : `## No upstream data findings were provided
+
+You have NO pre-validated queries. You MUST determine the correct datasource yourself before
+writing any panel — do not guess a UID and do not reuse a datasource of the wrong type.
+
+Mandatory steps before building data panels:
+1. Call list_datasources to see the available datasources and their types.
+2. Select the datasource by TYPE according to the query language you will write:
+   - Log panels / LogQL ({} stream selectors) → a datasource of type "loki".
+   - Metric panels / PromQL (rate(), sum(), metric names) → a datasource of type "prometheus".
+3. Use that datasource's exact uid and type in every target: { "type": "<loki|prometheus>", "uid": "<uid>" }.
+
+NEVER attach a LogQL query to a prometheus datasource, and NEVER attach a PromQL query to a loki
+datasource — that is the single most common cause of an empty "No data" dashboard.`}
 
 ## Dashboard construction process (follow this order exactly)
 
@@ -162,16 +175,19 @@ you wrote. If the count is wrong, note the discrepancy in your summary.
 ## When you are done
 
 After Step 4 (final get_dashboard_by_uid), call get_dashboard_panel_queries with the dashboard UID.
-Inspect each panel's datasource type against its query expression:
-- If a panel uses a "loki" datasource but the expr looks like PromQL (metric names, rate(), sum()),
-  flag it as a datasource mismatch in your summary.
-- If a panel uses a "prometheus" datasource but the expr looks like LogQL ({} stream selectors),
-  flag it as a datasource mismatch in your summary.
+Inspect each panel's datasource type against its query expression and FIX any mismatch before finishing:
+- If a panel uses a "prometheus" datasource but the expr is LogQL ({} stream selectors, |= filters),
+  the panel is broken. Repoint it to a "loki" datasource (find one via list_datasources if needed)
+  and call update_dashboard again with the corrected target.
+- If a panel uses a "loki" datasource but the expr is PromQL (metric names, rate(), sum()),
+  repoint it to a "prometheus" datasource and call update_dashboard again.
+- Re-run get_dashboard_panel_queries after corrections to confirm no mismatches remain.
+Do NOT finish while any panel's datasource type contradicts its query language.
 
 Respond with a summary including:
 - Dashboard title and a markdown link: [Open dashboard](/d/{uid})
 - List of panels added with their titles and the queries used
-- Any datasource mismatches detected in the panel queries
+- Any datasource mismatches you detected AND how you corrected them
 - Any panels that could not be created and why
 
 ${context ? `## Current Grafana context\n${context}` : ''}`;

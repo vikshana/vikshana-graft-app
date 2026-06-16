@@ -85,6 +85,43 @@ describe('runPlanner', () => {
         expect(userContent).toContain('prometheus');
     });
 
+    it('includes the conversation digest in the prompt when provided', async () => {
+        mockChatCompletions.mockResolvedValue(makePlanResponse({
+            complexity: 'complex',
+            reasoning: 'follow-up dashboard',
+            steps: [
+                { id: 'step_1', description: 'Query Loki', toolCategories: ['loki'], dependsOn: [] },
+                { id: 'step_2', description: 'Build dashboard', toolCategories: ['dashboards'], dependsOn: ['step_1'] },
+            ],
+        }));
+
+        await runPlanner(
+            'build a dashboard for monitoring it',
+            '',
+            ['loki', 'prometheus', 'dashboards'],
+            'User: what services generate logs?\nAssistant: The logs come from Loki under unknown_service.'
+        );
+
+        const call = mockChatCompletions.mock.calls[0][0];
+        const userContent = call.messages.find((m: any) => m.role === 'user')?.content ?? '';
+        expect(userContent).toContain('Recent conversation');
+        expect(userContent).toContain('The logs come from Loki under unknown_service.');
+    });
+
+    it('omits the conversation block when no digest is provided', async () => {
+        mockChatCompletions.mockResolvedValue(makePlanResponse({
+            complexity: 'simple',
+            reasoning: 'test',
+            steps: [{ id: 'step_1', description: 'test', toolCategories: ['loki'], dependsOn: [] }],
+        }));
+
+        await runPlanner('test', '', ['loki']);
+
+        const call = mockChatCompletions.mock.calls[0][0];
+        const userContent = call.messages.find((m: any) => m.role === 'user')?.content ?? '';
+        expect(userContent).not.toContain('Recent conversation');
+    });
+
     it('falls back to simple plan on malformed JSON from model', async () => {
         mockChatCompletions.mockResolvedValue({
             choices: [{ message: { content: 'this is not json {{{' } }],
