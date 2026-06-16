@@ -137,7 +137,8 @@ export async function runOrchestration(
         const waveResults = await Promise.allSettled(
             wave.map(step => {
                 if (isDashboardStep(step)) {
-                    // Route to the purpose-built dashboard agent with collected findings
+                    // Route to the purpose-built dashboard agent with collected findings.
+                    // Dashboard construction is step-intensive; give it 2× the configured limit.
                     return runDashboardAgent(
                         step,
                         userMessage,
@@ -145,7 +146,7 @@ export async function runOrchestration(
                         collectedFindings,
                         allTools,
                         mcpClient,
-                        maxIterations,
+                        Math.min(maxIterations * 2, 100),
                         signal,
                         (stepId, toolExecutions) => {
                             onUpdate({ type: 'step_update', stepId, toolExecutions });

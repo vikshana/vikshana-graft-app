@@ -9,7 +9,7 @@ import type { ToolsConfig, AppPluginSettings } from '../../../../types/settings.
 import { getDefaultToolsConfig } from '../../../../services/toolFilter';
 
 const PLUGIN_ID = 'vikshana-graft-app';
-const DEFAULT_MAX_ITERATIONS = 10;
+const DEFAULT_MAX_ITERATIONS = 50;
 
 /**
  * Return type for the plugin settings hook

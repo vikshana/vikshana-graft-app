@@ -147,6 +147,46 @@ describe('runOrchestration', () => {
             );
         });
 
+        it('passes 2× maxIterations (capped at 100) to the dashboard agent', async () => {
+            mockRunPlanner.mockResolvedValue(complexPlan);
+            mockRunSpecialist
+                .mockResolvedValueOnce(successResult('step_1'))
+                .mockResolvedValueOnce(successResult('step_2'));
+
+            await runOrchestration(
+                [userMsg], '', [], {}, 'standard', 20,
+                new AbortController().signal, undefined, onUpdate
+            );
+
+            // maxIterations = 20, dashboard agent should receive 40
+            expect(mockRunDashboardAgent).toHaveBeenCalledWith(
+                expect.anything(), expect.anything(), expect.anything(),
+                expect.anything(), expect.anything(), expect.anything(),
+                40,  // Math.min(20 * 2, 100)
+                expect.anything(), expect.anything()
+            );
+        });
+
+        it('caps dashboard agent iterations at 100', async () => {
+            mockRunPlanner.mockResolvedValue(complexPlan);
+            mockRunSpecialist
+                .mockResolvedValueOnce(successResult('step_1'))
+                .mockResolvedValueOnce(successResult('step_2'));
+
+            await runOrchestration(
+                [userMsg], '', [], {}, 'standard', 80,
+                new AbortController().signal, undefined, onUpdate
+            );
+
+            // maxIterations = 80, 80*2=160, capped at 100
+            expect(mockRunDashboardAgent).toHaveBeenCalledWith(
+                expect.anything(), expect.anything(), expect.anything(),
+                expect.anything(), expect.anything(), expect.anything(),
+                100,  // Math.min(80 * 2, 100)
+                expect.anything(), expect.anything()
+            );
+        });
+
         it('runs steps with no dependsOn in parallel (same wave)', async () => {
             mockRunPlanner.mockResolvedValue(complexPlan);
 
