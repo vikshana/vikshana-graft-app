@@ -277,7 +277,7 @@ export const ChatInterface = () => {
         // MCP tools loading failed - continue without tools
       });
     }
-  }, [mcpEnabled, mcpClient]);
+  }, [mcpEnabled, mcpClient, toolsConfig]);
 
   // Use rolling placeholder hook for animated text
   const rollingPlaceholder = useRollingPlaceholder();

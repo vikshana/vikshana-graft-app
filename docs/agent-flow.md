@@ -382,13 +382,18 @@ User message
   → truncateMessages (context window management)
   → formatContext (Grafana dashboard/user/datasources)
   → Planner (AgentPlan with steps and dependency graph)
+  → sanitisePlan (code gate: split mixed steps before execution)
   → Wave execution:
-      Loki specialist  →  DataFindings { datasourceUid, validatedQueries }
-      Prometheus spec  →  DataFindings { datasourceUid, validatedQueries }
+      Loki specialist  →  [ground-truth check: query_loki_logs was called?]
+                       →  [response_format: json_object follow-up if needed]
+                       →  DataFindings { datasourceUid, validatedQueries }
+      Prometheus spec  →  [same checks]
+                       →  DataFindings { datasourceUid, validatedQueries }
                        ↓
               mergeDataFindings (collectedFindings)
                        ↓
       Dashboard agent  →  panels with correct datasource UIDs
+                       →  get_dashboard_panel_queries (post-write verification)
   → Synthesiser (prose summaries → final answer)
   → linkifyDashboardUids (UID → clickable link)
   → ChatInterface message
@@ -396,38 +401,134 @@ User message
 
 ---
 
+## Harness Best Practices Applied
+
+Based on Anthropic's *Building Effective Agents* and the OpenAI Agents SDK
+guardrails documentation, the following code-enforced gates have been
+implemented. The key principle:
+
+> *"The tell that you should be using tools: if you're writing a regex to extract
+> a decision from model output, that decision should have been a tool call.
+> Parsing free-form text to recover structured intent is a sign the structure
+> belongs in the schema."* — Anthropic
+
+### Prompt-only vs. code-enforced constraints
+
+| Constraint | Before | After |
+|---|---|---|
+| Plan separation (loki ≠ dashboards in same step) | Prompt instruction only | `sanitisePlan()` code gate |
+| Query validation (model must call query tool) | Prompt instruction only | `toolExecutions` cross-check in `parseDataFindings` |
+| Findings schema compliance | Prompt instruction only | `response_format: json_object` API-level enforcement |
+| Post-write dashboard verification | Not present | `get_dashboard_panel_queries` structural check |
+
+---
+
+## Implemented Fixes
+
+### Fix 1 — Plan sanitiser (`orchestrator.ts`)
+
+`sanitisePlan()` runs as a deterministic code gate between the Planner and
+`buildExecutionWaves`. It detects any step where `toolCategories` includes both
+`'dashboards'` and a data category (`'loki'`, `'prometheus'`, `'datasources'`),
+and splits it into two steps wired by `dependsOn`:
+
+```
+BEFORE: { id: "step_1", toolCategories: ["loki", "dashboards"], dependsOn: [] }
+AFTER:  { id: "step_1",           toolCategories: ["loki"],       dependsOn: [] }
+        { id: "step_1_dashboard", toolCategories: ["dashboards"], dependsOn: ["step_1"] }
+```
+
+This is the "poka-yoke" pattern — constraining the input space so mistakes are
+structurally impossible, regardless of what the Planner emits.
+
+**Source:** `src/services/agents/orchestrator.ts` — `sanitisePlan()`
+
+---
+
+### Fix 2A — Ground-truth tool call check (`specialist.ts`)
+
+`parseDataFindings()` now accepts `toolExecutions` as a third argument and
+checks the actual execution record before accepting any findings:
+
+```ts
+const queryToolWasCalled = toolExecutions.some(
+    t => t.name === requiredTool && t.status === 'success'
+);
+if (!queryToolWasCalled) { return undefined; }
+```
+
+This implements the Anthropic principle that `stop_reason` (and by extension,
+the harness's own tool execution record) is the authoritative signal — not the
+model's prose claims. A model that says "I validated the query" without a
+corresponding successful tool call is rejected at the code level.
+
+**Source:** `src/services/agents/specialist.ts` — `parseDataFindings()`
+
+---
+
+### Fix 2B — API-level schema enforcement (`specialist.ts`)
+
+After the tool-calling loop, if a data step's response doesn't look like JSON,
+a follow-up call is made using `response_format: { type: 'json_object' }`:
+
+```ts
+const jsonResponse = await llm.chatCompletions({
+    model: llm.Model.BASE,
+    messages: [...llmMessages, followUpRequest],
+    response_format: { type: 'json_object' },
+});
+```
+
+This moves schema compliance from the prompt layer ("respond with ONLY JSON")
+to the API layer (grammar-constrained sampling), as recommended by Anthropic's
+strict tool use and OpenAI's Structured Outputs documentation.
+
+**Source:** `src/services/agents/specialist.ts` — post-loop follow-up call
+
+---
+
+### Fix 3 — Post-write panel verification (`dashboardAgent.ts`)
+
+The dashboard agent's "When you are done" instructions now include a structural
+verification step: call `get_dashboard_panel_queries` after writing all panels,
+inspect each panel's datasource type against its query expression, and flag any
+mismatches in the summary.
+
+This is a structural check (did the JSON persist correctly, with the right
+datasource type?), not a data-quality check. It catches serialisation errors
+and datasource confusion without requiring query tools.
+
+**Source:** `src/services/agents/dashboardAgent.ts` — system prompt
+
+---
+
 ## Known Issues
 
 ### 1. Planner rule violation → empty DataFindings
 
-The planner sometimes produces `["loki", "dashboards"]` in a single step,
+~~The planner sometimes produces `["loki", "dashboards"]` in a single step,
 violating the structural rule that separates data querying from dashboard
-construction. Because `isDashboardStep` uses `.includes('dashboards')`, the
-step routes to the Dashboard Agent with no prior data specialist having run.
-`collectedFindings` is empty, the agent receives no datasource UIDs, and
-typically picks the wrong datasource for the panel queries.
+construction.~~
 
-**Planned fix:** Code-level plan sanitiser in the orchestrator that detects
-mixed-category steps and splits them into a data step + dashboard step before
-execution begins.
+**Fixed** by `sanitisePlan()` in `orchestrator.ts`. Mixed steps are now
+deterministically split before execution regardless of what the Planner emits.
 
 ### 2. Query validation is prompt-based, not code-enforced
 
-The specialist is instructed to call `query_loki_logs` (or `query_prometheus`)
-before including a query in its `validatedQueries` output. There is no code
-check that this actually happened. Under iteration pressure, the BASE model
-sometimes skips the validation call and includes untested queries, which then
-produce "No data" panels.
+~~The specialist is instructed to call `query_loki_logs` before including a
+query in its output. There is no code check that this happened.~~
 
-**Planned fix:** Post-specialist verification that at least one successful query
-tool call occurred before accepting the findings.
+**Fixed** by the `toolExecutions` cross-check in `parseDataFindings()` (Fix 2A)
+and the `response_format: json_object` follow-up call (Fix 2B). Unvalidated
+queries are rejected at the code level before being passed to the dashboard agent.
 
 ### 3. Dashboard agent cannot re-validate queries
 
-The Dashboard Agent has no query tools and cannot independently verify that the
-expressions it receives in `DataFindings` actually return data. It relies
-entirely on the specialist's output. If findings are empty or contain incorrect
-queries, the dashboard will show "No data".
+The Dashboard Agent has no query tools and cannot independently verify that
+the expressions it receives in `DataFindings` actually return data. It relies
+entirely on the specialist's output.
 
-This is a consequence of the tool scope restriction (which is correct and
-prevents context explosion) combined with the issues above.
+This is correct by design (tool scope restriction prevents context explosion).
+Fix 2A and 2B address the upstream validation quality. The post-write panel
+verification (Fix 3) provides structural confirmation that the written JSON is
+consistent, but cannot confirm that queries return data at runtime.

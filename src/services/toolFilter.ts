@@ -36,6 +36,7 @@ export const TOOL_CATEGORIES: Record<keyof ToolsConfig, string[]> = {
         'list_datasources',
         'get_datasource_by_name',
         'get_datasource_by_uid',
+        'get_datasource',
     ],
 };
 

@@ -102,7 +102,7 @@ const DISCOVERED_CATEGORIES: DiscoveredCategory[] = [
     key: 'utility',
     label: 'Utility',
     tier: 'oss',
-    tools: ['generate_deeplink', 'get_datasource', 'get_panel_image', 'get_query_examples', 'get_resource_description'],
+    tools: ['generate_deeplink', 'get_panel_image', 'get_query_examples', 'get_resource_description'],
   },
   // ── Cloud / Enterprise ────────────────────────────────────────────────────
   {
@@ -171,7 +171,7 @@ const AgentConfig = ({ plugin }: AgentConfigProps) => {
 
         const unknown = [...presentNames].filter(n => !ALL_CATEGORISED_TOOLS.has(n));
         setUnknownTools(unknown);
-        setUnknownEnabled(Object.fromEntries(unknown.map(n => [n, true])));
+        setUnknownEnabled(Object.fromEntries(unknown.map(n => [n, false])));
       })
       .catch(() => { /* MCP unreachable — known categories still shown */ });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -423,11 +423,11 @@ const AgentConfig = ({ plugin }: AgentConfigProps) => {
                 <div className={s.toolBody}>
                   <p className={s.unknownNote}>
                     These tools were returned by the MCP server but are not yet categorised.
-                    They are enabled by default.
+                    They are disabled by default — enable individually if needed.
                   </p>
                   {renderToolList(
                     unknownTools,
-                    (n) => unknownEnabled[n] !== false,
+                    (n) => unknownEnabled[n] === true,
                     false,
                     (n, v) => setUnknownEnabled(prev => ({ ...prev, [n]: v })),
                     'other'

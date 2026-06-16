@@ -1,4 +1,4 @@
-import { runOrchestration } from './orchestrator';
+import { runOrchestration, sanitisePlan } from './orchestrator';
 import * as planner from './planner';
 import * as specialist from './specialist';
 import * as dashboardAgentModule from './dashboardAgent';
@@ -93,6 +93,52 @@ describe('runOrchestration', () => {
             expect(onUpdate).toHaveBeenCalledWith(
                 expect.objectContaining({ type: 'plan', plan: simplePlan })
             );
+        });
+
+        it('emits step_start with step description before llmService.chat', async () => {
+            mockRunPlanner.mockResolvedValue(simplePlan);
+
+            await runOrchestration(
+                [userMsg], '', [], null, 'standard', 10,
+                new AbortController().signal, undefined, onUpdate
+            );
+
+            expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({
+                type: 'step_start',
+                stepId: simplePlan.steps[0].id,
+                stepDescription: simplePlan.steps[0].description,
+            }));
+        });
+
+        it('emits final event with the result after llmService.chat resolves', async () => {
+            mockRunPlanner.mockResolvedValue(simplePlan);
+
+            await runOrchestration(
+                [userMsg], '', [], null, 'standard', 10,
+                new AbortController().signal, undefined, onUpdate
+            );
+
+            expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({
+                type: 'final',
+                content: 'Simple response.',
+            }));
+        });
+
+        it('step_start is emitted before final', async () => {
+            mockRunPlanner.mockResolvedValue(simplePlan);
+
+            const updateOrder: string[] = [];
+            onUpdate.mockImplementation((u: any) => updateOrder.push(u.type));
+
+            await runOrchestration(
+                [userMsg], '', [], null, 'standard', 10,
+                new AbortController().signal, undefined, onUpdate
+            );
+
+            const stepStartIdx = updateOrder.indexOf('step_start');
+            const finalIdx = updateOrder.indexOf('final');
+            expect(stepStartIdx).toBeGreaterThanOrEqual(0);
+            expect(finalIdx).toBeGreaterThan(stepStartIdx);
         });
     });
 
@@ -318,5 +364,135 @@ describe('runOrchestration', () => {
                 )
             ).rejects.toThrow('Aborted');
         });
+    });
+});
+
+// ─── sanitisePlan unit tests ────────────────────────────────────────────────
+
+describe('sanitisePlan (Fix 1: code-enforced plan gate)', () => {
+    const makeStep = (id: string, cats: string[], deps: string[] = []) => ({
+        id,
+        description: `Step ${id}`,
+        toolCategories: cats as any,
+        dependsOn: deps,
+    });
+
+    it('returns plan unchanged when no steps mix loki and dashboards', () => {
+        const plan = {
+            complexity: 'complex' as const,
+            reasoning: 'test',
+            steps: [
+                makeStep('step_1', ['loki']),
+                makeStep('step_2', ['dashboards'], ['step_1']),
+            ],
+        };
+        const result = sanitisePlan(plan);
+        expect(result.steps).toHaveLength(2);
+        expect(result).toBe(plan); // same reference — no copy made
+    });
+
+    it('splits a mixed ["loki", "dashboards"] step into two', () => {
+        const plan = {
+            complexity: 'complex' as const,
+            reasoning: 'test',
+            steps: [makeStep('step_1', ['loki', 'dashboards'])],
+        };
+        const result = sanitisePlan(plan);
+
+        expect(result.steps).toHaveLength(2);
+        expect(result.steps[0].id).toBe('step_1');
+        expect(result.steps[0].toolCategories).toEqual(['loki']);
+        expect(result.steps[0].dependsOn).toEqual([]);
+
+        expect(result.steps[1].id).toBe('step_1_dashboard');
+        expect(result.steps[1].toolCategories).toEqual(['dashboards']);
+        expect(result.steps[1].dependsOn).toContain('step_1');
+    });
+
+    it('preserves original dependsOn on the data step after split', () => {
+        const plan = {
+            complexity: 'complex' as const,
+            reasoning: 'test',
+            steps: [
+                makeStep('step_0', ['datasources']),
+                makeStep('step_1', ['prometheus', 'dashboards'], ['step_0']),
+            ],
+        };
+        const result = sanitisePlan(plan);
+        const dataStep = result.steps.find(s => s.id === 'step_1')!;
+        expect(dataStep.dependsOn).toContain('step_0');
+        // Does NOT contain step_1_dashboard (only upstream deps)
+        expect(dataStep.dependsOn).not.toContain('step_1_dashboard');
+
+        const dashStep = result.steps.find(s => s.id === 'step_1_dashboard')!;
+        expect(dashStep.dependsOn).toContain('step_0');
+        expect(dashStep.dependsOn).toContain('step_1');
+    });
+
+    it('forces complexity to complex after splitting a simple plan', () => {
+        const plan = {
+            complexity: 'simple' as const,
+            reasoning: 'test',
+            steps: [makeStep('step_1', ['loki', 'dashboards'])],
+        };
+        const result = sanitisePlan(plan);
+        expect(result.complexity).toBe('complex');
+    });
+
+    it('handles multiple mixed steps in the same plan', () => {
+        const plan = {
+            complexity: 'complex' as const,
+            reasoning: 'test',
+            steps: [
+                makeStep('step_1', ['loki', 'dashboards']),
+                makeStep('step_2', ['prometheus', 'dashboards']),
+            ],
+        };
+        const result = sanitisePlan(plan);
+        expect(result.steps).toHaveLength(4);
+        expect(result.steps.map(s => s.id)).toEqual([
+            'step_1', 'step_1_dashboard', 'step_2', 'step_2_dashboard',
+        ]);
+    });
+
+    it('sanitised plan is executed correctly through runOrchestration', async () => {
+        // The planner emits a mixed step — sanitiser should split it before execution
+        const mixedPlan: AgentPlan = {
+            complexity: 'complex',
+            reasoning: 'Mixed step test',
+            steps: [{ id: 'step_1', description: 'Fetch Loki and build dashboard', toolCategories: ['loki', 'dashboards'] as any, dependsOn: [] }],
+        };
+
+        const mockRunPlanner = planner.runPlanner as jest.Mock;
+        const mockRunSpecialist = specialist.runSpecialist as jest.Mock;
+        const mockRunDashboardAgent = dashboardAgentModule.runDashboardAgent as jest.Mock;
+        const mockRunSynthesiser = synthesiser.runSynthesiser as jest.Mock;
+
+        mockRunPlanner.mockResolvedValue(mixedPlan);
+        mockRunSpecialist.mockResolvedValue(successResult('step_1'));
+        mockRunDashboardAgent.mockResolvedValue(successResult('step_1_dashboard'));
+        mockRunSynthesiser.mockResolvedValue('Final answer.');
+
+        const onUpdate = jest.fn();
+        await runOrchestration(
+            [{ role: 'user', content: 'build dashboard' }],
+            '', [], {}, 'standard', 10,
+            new AbortController().signal, undefined, onUpdate
+        );
+
+        // Specialist should have been called for the data step (loki only)
+        expect(mockRunSpecialist).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'step_1', toolCategories: ['loki'] }),
+            expect.anything(), expect.anything(), expect.anything(),
+            expect.anything(), expect.anything(), expect.anything(), expect.anything()
+        );
+
+        // Dashboard agent should have been called for the split dashboard step
+        expect(mockRunDashboardAgent).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'step_1_dashboard', toolCategories: ['dashboards'] }),
+            expect.anything(), expect.anything(), expect.anything(),
+            expect.anything(), expect.anything(), expect.anything(),
+            expect.anything(), expect.anything()
+        );
     });
 });

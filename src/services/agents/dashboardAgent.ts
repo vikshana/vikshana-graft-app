@@ -41,23 +41,34 @@ function formatFindingsForPrompt(dataFindings: DataFindings): string {
 
     if (dataFindings.loki) {
         const f = dataFindings.loki;
+        const dsJson = `{"type": "loki", "uid": "${f.datasourceUid}"}`;
         sections.push(`## Loki Data Source
 Datasource UID: ${f.datasourceUid}
 Datasource name: ${f.datasourceName}
-Discovered labels: ${JSON.stringify(f.labels, null, 2)}
+Datasource JSON (copy exactly into every Loki panel target): ${dsJson}
 
-Validated queries (use these EXACTLY as the expr in panel targets):
-${f.validatedQueries.map((q, i) => `${i + 1}. Description: ${q.description}\n   LogQL: ${q.logql}`).join('\n')}`);
+Validated queries — for each query, copy BOTH the expr AND the datasource JSON into the panel target:
+${f.validatedQueries.map((q, i) =>
+`${i + 1}. Description: ${q.description}
+   LogQL expr: ${q.logql}
+   Datasource JSON: ${dsJson}`
+).join('\n')}`);
     }
 
     if (dataFindings.prometheus) {
         const f = dataFindings.prometheus;
+        const dsJson = `{"type": "prometheus", "uid": "${f.datasourceUid}"}`;
         sections.push(`## Prometheus Data Source
 Datasource UID: ${f.datasourceUid}
 Datasource name: ${f.datasourceName}
+Datasource JSON (copy exactly into every Prometheus panel target): ${dsJson}
 
-Validated queries (use these EXACTLY as the expr in panel targets):
-${f.validatedQueries.map((q, i) => `${i + 1}. Description: ${q.description}\n   PromQL: ${q.promql}`).join('\n')}`);
+Validated queries — for each query, copy BOTH the expr AND the datasource JSON into the panel target:
+${f.validatedQueries.map((q, i) =>
+`${i + 1}. Description: ${q.description}
+   PromQL expr: ${q.promql}
+   Datasource JSON: ${dsJson}`
+).join('\n')}`);
     }
 
     return sections.join('\n\n');
@@ -127,7 +138,12 @@ you wrote. If the count is wrong, note the discrepancy in your summary.
 
 ## Panel construction rules
 
-- datasource field in each target: { "type": "<loki|prometheus>", "uid": "<datasourceUid>" }
+- datasource field in each target: copy the EXACT "Datasource JSON" shown next to each query above.
+  Do not look up datasource UIDs yourself — they are already provided for each query.
+- CRITICAL: LogQL expressions MUST use a datasource of type "loki". PromQL expressions MUST use a
+  datasource of type "prometheus". NEVER use a prometheus datasource for a LogQL query, and NEVER
+  use a loki datasource for a PromQL query. If you are unsure, check the query language:
+  LogQL uses {} stream selectors. PromQL uses metric names and functions like rate(), sum(), etc.
 - Use the EXACT expr values from the validated queries above — copy them character-for-character.
 - Panel types: "logs" for log panels, "timeseries" for time-series metrics, "stat" for single values, "bargauge" for bar charts.
 - Each panel must have: id (sequential integer), title, type, gridPos, targets array.
@@ -145,9 +161,17 @@ you wrote. If the count is wrong, note the discrepancy in your summary.
 
 ## When you are done
 
+After Step 4 (final get_dashboard_by_uid), call get_dashboard_panel_queries with the dashboard UID.
+Inspect each panel's datasource type against its query expression:
+- If a panel uses a "loki" datasource but the expr looks like PromQL (metric names, rate(), sum()),
+  flag it as a datasource mismatch in your summary.
+- If a panel uses a "prometheus" datasource but the expr looks like LogQL ({} stream selectors),
+  flag it as a datasource mismatch in your summary.
+
 Respond with a summary including:
 - Dashboard title and a markdown link: [Open dashboard](/d/{uid})
 - List of panels added with their titles and the queries used
+- Any datasource mismatches detected in the panel queries
 - Any panels that could not be created and why
 
 ${context ? `## Current Grafana context\n${context}` : ''}`;
