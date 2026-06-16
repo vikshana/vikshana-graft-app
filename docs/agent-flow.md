@@ -62,17 +62,21 @@ flowchart TD
                     SPECIALIST["Model: BASE\nScoped tools:\nloki / prometheus /\ndatasources only"]
                     SPECIALIST --> SPEC_TOOLS[Tool-calling loop\nmax iterations]
                     SPEC_TOOLS --> EXEC_RECORD["Build ExecutedQueryRecord\nexpr → nonEmpty per\nsuccessful query tool call"]
-                    EXEC_RECORD --> SPEC_OUTPUT{parseDataFindings\nLayer 1: query tool called?\nLayer 2: per-query filter}
-                    SPEC_OUTPUT -- all checks pass --> SPEC_RESULT["SpecialistResult\n+ dataFindings\n{datasourceUid, validatedQueries\n(only confirmed non-empty)}"]
-                    SPEC_OUTPUT -- gate failed or\nall queries empty --> SPEC_RESULT_NO_FINDINGS["SpecialistResult\ndataFindings = undefined\nor empty validatedQueries"]
+                    EXEC_RECORD --> SPEC_OUTPUT{parseDataFindings\nLayer 1: query tool called?\n(warn; fall through for uid)\nLayer 2: per-query filter}
+                    SPEC_OUTPUT -- queries validated --> SPEC_RESULT["SpecialistResult\n+ dataFindings\n{datasourceUid, validatedQueries\n(only confirmed non-empty)}"]
+                    SPEC_OUTPUT -- no query tool but\nuid known (Fix A1) --> SPEC_RESULT_DSONLY["SpecialistResult\n+ dataFindings\n{datasourceUid, validatedQueries=[]}"]
+                    SPEC_OUTPUT -- no json / no uid --> SPEC_RESULT_NO_FINDINGS["SpecialistResult\ndataFindings = undefined"]
                 end
 
                 subgraph Dashboard Agent
                     DASHBOARD_AGENT["Model: LARGE\nScoped tools:\ndashboards + datasources\nNO query tools"]
-                    DASHBOARD_AGENT --> FINDINGS_CHECK{DataFindings with\nvalidatedQueries > 0?}
+                    DASHBOARD_AGENT --> HINT_INJECT["Receive preferredCategories\n+ conversationDigest\nfrom orchestrator"]
+                    HINT_INJECT --> FINDINGS_CHECK{DataFindings with\nvalidatedQueries > 0?}
                     FINDINGS_CHECK -- Yes --> PROMPT_WITH_FINDINGS["System prompt includes:\n- Datasource UID per query\n- Datasource JSON per query\n- Pre-validated exprs (confirmed non-empty)"]
-                    FINDINGS_CHECK -- No / empty --> PROMPT_FALLBACK["Fallback:\nlist_datasources\nselect by type\n(loki for LogQL, prometheus for PromQL)"]
+                    FINDINGS_CHECK -- Known uid\nbut empty queries --> PROMPT_PARTIAL["Partial findings:\ndatasource uid shown\n+ preferredCategories directive"]
+                    FINDINGS_CHECK -- No findings --> PROMPT_FALLBACK["Fallback with direction:\nlist_datasources\n+ preferredCategories directive\n(e.g. 'must use prometheus')\n+ conversationDigest context"]
                     PROMPT_WITH_FINDINGS --> DASH_LOOP[Tool-calling loop\nmax iterations × 2]
+                    PROMPT_PARTIAL --> DASH_LOOP
                     PROMPT_FALLBACK --> DASH_LOOP
                     DASH_LOOP --> VERIFY["get_dashboard_panel_queries\nFIX any datasource mismatch\nbefore finishing"]
                     VERIFY --> DASH_RESULT["SpecialistResult\n(no dataFindings)"]
@@ -80,6 +84,7 @@ flowchart TD
             end
 
             SPEC_RESULT --> MERGE["mergeDataFindings\naccumulate across waves\nloki / prometheus findings"]
+            SPEC_RESULT_DSONLY --> MERGE
             SPEC_RESULT_NO_FINDINGS --> MERGE
             DASH_RESULT --> ALL_RESULTS
 
@@ -678,6 +683,60 @@ The fix threads the error string end-to-end:
 
 ---
 
+### Fix 7 — Directional hint + conversation digest into the dashboard agent (`dashboardAgent.ts`, `orchestrator.ts`)
+
+**Problem observed:** When the Prometheus specialist produced no validated queries
+(e.g. only ran `list_prometheus_*` discovery tools, triggering the empty-findings
+fallback), the dashboard agent had no directional signal. `userMessage` was only
+*"Can you create a dashboard to monitor it?"* — zero Prometheus/metrics context.
+The agent defaulted to Loki/logs and built a logs dashboard for `unknown_service`.
+
+**Fix:** The orchestrator now computes two additional inputs before calling the
+dashboard agent:
+
+1. **`preferredCategories`** — `inferDataCategoriesForDashboard(step.description + userMessage + conversationDigest, enabledCategories)`. For a metrics-focused conversation this resolves to `['prometheus']`.
+2. **`conversationDigest`** — the same digest already computed for the planner (recent turns, excluding the current user message).
+
+Both are forwarded as new optional parameters to `runDashboardAgent` (trailing, with defaults, so all existing call sites are backward-compatible).
+
+Inside `buildDashboardSystemPrompt`, in the **empty/partial-findings branch**:
+- `preferredCategories === ['prometheus']` → emits a hard directive: *"This dashboard must visualize Prometheus metrics. Use type "prometheus". Do NOT build a logs dashboard."*
+- `preferredCategories === ['loki']` → symmetric Loki directive.
+- Ambiguous (both/neither) → neutral type-selection guidance (unchanged).
+- The conversation digest is always embedded as a "## Recent conversation" block for reference resolution ("it", "those services").
+
+**Source:** `src/services/agents/dashboardAgent.ts` — `buildEmptyFindingsGuidance()`, `buildDashboardSystemPrompt()`, `runDashboardAgent()`;
+`src/services/agents/orchestrator.ts` — dashboard step routing in `runOrchestration()`
+
+---
+
+### Fix 8 — Datasource-only fallback findings (`specialist.ts`)
+
+**Problem observed:** When the specialist only ran discovery tools (`list_prometheus_label_names` etc.) without calling `query_prometheus`, the old Layer-1 hard-reject returned `undefined` from `parseDataFindings`. The dashboard agent received `collectedFindings = {}` and had no datasource UID at all — even though the specialist had identified the correct Prometheus datasource.
+
+**Fix:** Layer 1 is softened from a hard reject to a warning + fall-through. The function now always attempts to parse the specialist's JSON output. Since `executedQueries` is empty (no `query_prometheus` calls were recorded), Layer 2 drops all `validatedQueries`. The result is **datasource-only findings**: `{ prometheus: { datasourceUid: "...", datasourceName: "...", validatedQueries: [] } }`.
+
+The dashboard agent handles this via a new `hasKnownDatasource` branch: it shows the datasource UID in the system prompt alongside the directional guidance from Fix 7, so the agent uses the correct UID without having to call `list_datasources` from scratch.
+
+**Source:** `src/services/agents/specialist.ts` — `parseDataFindings()` Layer 1;
+`src/services/agents/dashboardAgent.ts` — `hasKnownDatasource` branch in `buildDashboardSystemPrompt()`
+
+---
+
+### Fix 9 — Stricter Prometheus specialist prompt (`specialist.ts`)
+
+The Prometheus variant of `buildDataOutputNote` now explicitly warns that
+`list_prometheus_label_names`, `list_prometheus_label_values`, and
+`list_prometheus_metric_names` are **discovery-only** tools — calling them is not
+sufficient. The model must call `query_prometheus` for every expression it intends
+to include in its output. It is also instructed to copy the **exact expression
+string** it used in the `query_prometheus` call into the JSON output, to prevent
+Layer-2 normaliser misses caused by reformatting.
+
+**Source:** `src/services/agents/specialist.ts` — `buildDataOutputNote()`
+
+---
+
 ## Known Issues
 
 ### 1. Planner rule violation → empty DataFindings
@@ -708,9 +767,9 @@ output queries it validated once, and pad findings with unverified narrow querie
 (e.g. `detected_level="error"`) that return no data.~~
 
 **Fixed** by the two-layer validation gate in `parseDataFindings()` (Fix 3):
-Layer 1 rejects findings when no query tool was called; Layer 2 filters individual
-queries against the `ExecutedQueryRecord`, keeping only expressions that were
-actually run and returned non-empty data.
+Layer 1 warns when no query tool was called (and falls through, yielding datasource-only
+findings per Fix 8); Layer 2 filters individual queries against the `ExecutedQueryRecord`,
+keeping only expressions that were actually run and returned non-empty data.
 
 ### 4. Dashboard agent cannot re-validate queries
 
@@ -723,3 +782,24 @@ Fix 3's per-query filter addresses the upstream validation quality. The mandator
 post-write verification (Fix 5) provides structural confirmation that the written
 JSON is consistent (correct datasource type for each query language), but cannot
 confirm that queries return data at runtime.
+
+### 5. Prometheus specialist runs only discovery tools → metrics request builds logs dashboard
+
+~~When the Prometheus specialist only called `list_prometheus_label_names` /
+`list_prometheus_label_values` (skipping `query_prometheus`), all findings were
+hard-rejected by Layer-1. The dashboard agent received empty `DataFindings` and
+no directional signal, so it defaulted to Loki/logs (residual context from earlier
+turns). A request like "Can you create a dashboard to monitor it?" produced 9 panels
+wired to the Loki datasource for `unknown_service`.~~
+
+**Fixed** by three compounding changes (Fixes 7, 8, 9):
+- **Fix 7** (directional hint + digest): The orchestrator computes `inferDataCategoriesForDashboard`
+  from the step description + conversation and forwards it as `preferredCategories` to
+  the dashboard agent. The dashboard agent now emits a hard "use Prometheus / PromQL" directive
+  when the hint resolves to `['prometheus']`, regardless of whether findings are empty.
+- **Fix 8** (datasource-only fallback): Layer-1 in `parseDataFindings` falls through instead
+  of hard-rejecting, preserving the datasource UID even when no query tool was called.
+  The dashboard agent shows the UID and the directional hint together.
+- **Fix 9** (stricter Prometheus prompt): `buildDataOutputNote` now explicitly warns that
+  `list_prometheus_*` tools are discovery-only and that `query_prometheus` must be called
+  for every output expression.
