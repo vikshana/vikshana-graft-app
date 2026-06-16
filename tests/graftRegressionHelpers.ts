@@ -46,16 +46,18 @@ export async function openFreshGraftChat(page: Page): Promise<void> {
 
     await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 20_000 });
 
-    // Restored sessions open in chat view — try Back, but chat input works in either mode.
-    for (let attempt = 0; attempt < 2; attempt++) {
+    // Restored sessions open in chat view — Back resets to landing (handleReset).
+    for (let attempt = 0; attempt < 3; attempt++) {
         if (await page.getByTestId('landing-title').isVisible().catch(() => false)) {
             break;
         }
         const backButton = page.getByTestId('back-button');
         if (await backButton.isVisible().catch(() => false)) {
             await backButton.click();
-            await page.waitForTimeout(400);
+            await expect(page.getByTestId('landing-title')).toBeVisible({ timeout: 15_000 });
+            break;
         }
+        await page.waitForTimeout(400);
     }
 
     await expect(page.getByTestId('chat-input')).toBeVisible();
@@ -72,19 +74,13 @@ export async function openFreshGraftChat(page: Page): Promise<void> {
 }
 
 export async function sendGraftPrompt(page: Page, prompt: string): Promise<number> {
-    const startHeadingCount = await page.locator('main h3').count();
-
     const input = page.getByTestId('chat-input');
+    await expect(input).toBeEnabled({ timeout: 20_000 });
     await input.fill(prompt);
-
-    const landingSend = page.getByTestId('send-message-button');
-    if (await landingSend.isVisible().catch(() => false)) {
-        await landingSend.click();
-        await expect(page.getByTestId('landing-title')).not.toBeVisible();
-        return startHeadingCount;
-    }
-
+    // Snapshot after fill so a late reply from the prior turn is not mistaken for this one.
+    const startHeadingCount = await page.locator('main h3').count();
     await input.press('Enter');
+
     return startHeadingCount;
 }
 

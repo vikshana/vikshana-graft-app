@@ -106,27 +106,6 @@ test.describe('Graft regression E2E (mutating)', () => {
         await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
     });
 
-    test('bulk-gauge-panel-rename', async ({ page }) => {
-        if (!bulkGaugeCase) {
-            throw new Error('bulk-gauge-panel-rename E2E case missing');
-        }
-        test.setTimeout(bulkGaugeCase.replyTimeoutMs + 60_000);
-
-        await openFreshGraftChat(page);
-        const startCopyCount = await sendGraftPrompt(page, bulkGaugeCase.prompt);
-        const reply = await waitForAssistantReply(page, {
-            timeoutMs: bulkGaugeCase.replyTimeoutMs,
-            startCopyCount,
-        });
-
-        assertReplyExpectations(
-            reply,
-            bulkGaugeCase.expectReplyContains,
-            bulkGaugeCase.expectReplyNotContains
-        );
-        await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
-    });
-
     test('multi-panel-create-types', async ({ page }) => {
         if (!multiPanelCase) {
             throw new Error('multi-panel-create-types E2E case missing');
@@ -149,6 +128,27 @@ test.describe('Graft regression E2E (mutating)', () => {
             reply,
             multiPanelCase.expectReplyContains,
             multiPanelCase.expectReplyNotContains
+        );
+        await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
+    });
+
+    test('bulk-gauge-panel-rename', async ({ page }) => {
+        if (!bulkGaugeCase) {
+            throw new Error('bulk-gauge-panel-rename E2E case missing');
+        }
+        test.setTimeout(bulkGaugeCase.replyTimeoutMs + 60_000);
+
+        await openFreshGraftChat(page);
+        const startCopyCount = await sendGraftPrompt(page, bulkGaugeCase.prompt);
+        const reply = await waitForAssistantReply(page, {
+            timeoutMs: bulkGaugeCase.replyTimeoutMs,
+            startCopyCount,
+        });
+
+        assertReplyExpectations(
+            reply,
+            bulkGaugeCase.expectReplyContains,
+            bulkGaugeCase.expectReplyNotContains
         );
         await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
     });
