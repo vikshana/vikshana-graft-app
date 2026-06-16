@@ -39,10 +39,11 @@ function mergeStepToolExecutions(
   stepId: string,
   stepDescription: string,
   toolExecutions: ToolExecution[],
-  status: StepToolExecutions['status']
+  status: StepToolExecutions['status'],
+  error?: string
 ): StepToolExecutions[] {
   const idx = existing.findIndex(s => s.stepId === stepId);
-  const entry: StepToolExecutions = { stepId, stepDescription, toolExecutions, status };
+  const entry: StepToolExecutions = { stepId, stepDescription, toolExecutions, status, error };
   if (idx === -1) {
     return [...existing, entry];
   }
@@ -616,7 +617,7 @@ export const ChatInterface = () => {
                 const last = updated[updated.length - 1];
                 const existing = last.stepToolExecutions ?? [];
                 const stepDesc = existing.find(s => s.stepId === update.stepId)?.stepDescription ?? update.stepId!;
-                const hasError = (update.toolExecutions ?? []).some(t => t.status === 'error');
+                const hasError = (update.toolExecutions ?? []).some(t => t.status === 'error') || !!update.error;
                 updated[updated.length - 1] = {
                   ...last,
                   stepToolExecutions: mergeStepToolExecutions(
@@ -624,7 +625,8 @@ export const ChatInterface = () => {
                     update.stepId!,
                     stepDesc,
                     update.toolExecutions ?? [],
-                    hasError ? 'error' : 'done'
+                    hasError ? 'error' : 'done',
+                    update.error
                   ),
                 };
                 return updated;

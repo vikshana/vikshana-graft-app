@@ -82,10 +82,17 @@ function buildDataOutputNote(categories: string[]): string {
 
     const schema = hasLoki ? LOKI_OUTPUT_SCHEMA : PROMETHEUS_OUTPUT_SCHEMA;
     const queryTool = hasLoki ? 'query_loki_logs' : 'query_prometheus';
+    const labelDiscovery = hasLoki
+        ? `- Before writing any equality matchers (e.g. detected_level="error"), first discover the REAL label values by running a broad query or calling the label-values tool. Do NOT guess label values — use only values you have actually seen returned by a tool call.`
+        : `- Before writing any label selectors (e.g. {job="api"}), first discover the actual label values by querying the Prometheus API or running a broad metric query. Do NOT guess label values.`;
 
     return `
 
-Query validation rule: before including any query in your output, you MUST call ${queryTool} with that expression to confirm it returns data. Only include queries that return results. If a query returns no data, revise the expression until it does or omit it.
+Query validation rules (MUST follow exactly):
+${labelDiscovery}
+- You MUST call ${queryTool} for EVERY query you intend to include in your output — not just one. Run each query individually and check that it returns data.
+- Only include queries that actually returned results when you called ${queryTool}. If a query returns no data (empty result, no streams, no series), revise the expression or omit it entirely.
+- NEVER include a query in your output that you did not explicitly call ${queryTool} with and confirm returned data.
 
 Output format (required): when you have finished, respond with ONLY a JSON object matching this schema — no prose, no markdown fences:
 ${schema}
@@ -94,14 +101,72 @@ If no queries could be validated, return the schema with an empty validatedQueri
 }
 
 /**
+ * Normalises a query expression for comparison: lowercase, collapse whitespace.
+ * Used to match the expr the model executed against the expr it output in findings.
+ */
+function normaliseExpr(expr: string): string {
+    return expr.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Attempts to parse a Loki query result and determine if it is non-empty.
+ * A result is non-empty when it contains at least one stream/value entry.
+ */
+function isLokiResultNonEmpty(raw: string): boolean {
+    try {
+        const parsed = JSON.parse(raw);
+        // MCP tool result is wrapped in content array: [{type:'text', text:'...'}]
+        const text = Array.isArray(parsed)
+            ? (parsed[0]?.text ?? parsed[0]?.content ?? '')
+            : (parsed?.text ?? parsed?.content ?? raw);
+        const inner = typeof text === 'string' ? JSON.parse(text) : text;
+        // Loki HTTP API: { data: { result: [...] } }
+        const result = inner?.data?.result ?? inner?.result ?? inner;
+        return Array.isArray(result) && result.length > 0;
+    } catch {
+        // If we can't parse the result, assume non-empty (conservative — don't drop it).
+        return true;
+    }
+}
+
+/**
+ * Attempts to parse a Prometheus query result and determine if it is non-empty.
+ */
+function isPrometheusResultNonEmpty(raw: string): boolean {
+    try {
+        const parsed = JSON.parse(raw);
+        const text = Array.isArray(parsed)
+            ? (parsed[0]?.text ?? parsed[0]?.content ?? '')
+            : (parsed?.text ?? parsed?.content ?? raw);
+        const inner = typeof text === 'string' ? JSON.parse(text) : text;
+        // Prometheus HTTP API: { data: { result: [...] } }
+        const result = inner?.data?.result ?? inner?.result ?? inner;
+        return Array.isArray(result) && result.length > 0;
+    } catch {
+        return true;
+    }
+}
+
+/**
+ * Record of a successfully-executed query tool call, keyed by the normalised expression.
+ * `nonEmpty` is true when the result contained at least one stream/series.
+ */
+type ExecutedQueryRecord = Map<string, boolean>;
+
+/**
  * Code-enforced query validation gate (per Anthropic best practices).
  *
  * The specialist is prompted to call query_loki_logs / query_prometheus before
- * including a query in its output. But the model can skip this under pressure.
+ * including a query in its output AND for every individual query it will output.
+ * But the model can skip validation for some queries under pressure (e.g. it validates
+ * one broad query then pads the findings with plausible-but-unverified narrow queries
+ * like detected_level="error" that produce empty panels).
  *
- * This function checks the actual toolExecutions record — the ground truth from
- * the environment — and returns undefined if no successful query tool call was
- * made. This prevents unvalidated queries from flowing to the dashboard agent.
+ * This function enforces two layers:
+ *   1. Gate: at least one successful query tool call must exist (existing check).
+ *   2. Per-query filter: each entry in validatedQueries is kept only if its
+ *      expression was actually executed AND returned non-empty data. Unverified or
+ *      empty-returning queries are silently dropped.
  *
  * "stop_reason is the authoritative signal, not the model's prose claims."
  *   — Anthropic, Building Effective Agents
@@ -109,15 +174,14 @@ If no queries could be validated, return the schema with an empty validatedQueri
 function parseDataFindings(
     content: string,
     categories: string[],
-    toolExecutions: ToolExecution[]
+    toolExecutions: ToolExecution[],
+    executedQueries: ExecutedQueryRecord
 ): DataFindings | undefined {
     const hasLoki = categories.includes('loki');
     const hasPrometheus = categories.includes('prometheus');
     if (!hasLoki && !hasPrometheus) { return undefined; }
 
-    // Ground-truth check: at least one successful query tool call must have occurred.
-    // If the model claimed to validate queries but the toolExecutions show no such
-    // call succeeded, reject the findings.
+    // Layer 1: at least one successful query tool call must have occurred.
     const requiredTool = hasLoki ? 'query_loki_logs' : 'query_prometheus';
     const queryToolWasCalled = toolExecutions.some(
         t => t.name === requiredTool && t.status === 'success'
@@ -153,12 +217,35 @@ function parseDataFindings(
             return undefined;
         }
 
+        // Layer 2: per-query filter — keep only queries that were actually executed
+        // and returned non-empty data. This prevents the model from padding findings
+        // with plausible-but-unverified narrow queries (e.g. detected_level="error")
+        // that it never ran and that produce "No data" panels.
+        const exprField = hasLoki ? 'logql' : 'promql';
+        const filteredQueries = (parsed.validatedQueries as any[]).filter(q => {
+            const expr = q?.[exprField];
+            if (!expr || typeof expr !== 'string') { return false; }
+            const norm = normaliseExpr(expr);
+            const nonEmpty = executedQueries.get(norm);
+            if (nonEmpty === undefined) {
+                // Query was never executed — drop it
+                console.warn(`[Graft] parseDataFindings: dropping unexecuted query: ${expr}`);
+                return false;
+            }
+            if (!nonEmpty) {
+                // Query was executed but returned no data — drop it
+                console.warn(`[Graft] parseDataFindings: dropping empty-result query: ${expr}`);
+                return false;
+            }
+            return true;
+        });
+
         if (hasLoki) {
             const findings: LokiFindings = {
                 datasourceUid: parsed.datasourceUid,
                 datasourceName: parsed.datasourceName ?? '',
                 labels: parsed.labels ?? {},
-                validatedQueries: parsed.validatedQueries ?? [],
+                validatedQueries: filteredQueries,
             };
             return { loki: findings };
         }
@@ -166,7 +253,7 @@ function parseDataFindings(
         const findings: PrometheusFindings = {
             datasourceUid: parsed.datasourceUid,
             datasourceName: parsed.datasourceName ?? '',
-            validatedQueries: parsed.validatedQueries ?? [],
+            validatedQueries: filteredQueries,
         };
         return { prometheus: findings };
 
@@ -229,8 +316,16 @@ If a tool returns an error, explain what failed briefly and continue if possible
     ];
 
     const toolExecutions: ToolExecution[] = [];
+    // Per-query execution record: normalised expr → whether the result was non-empty.
+    // Built as tools are called; used by parseDataFindings to filter findings.
+    const executedQueries: ExecutedQueryRecord = new Map();
     let fullContent = '';
     let iteration = 0;
+
+    // Determine which query tools to track for this step
+    const isLokiStep = step.toolCategories.includes('loki');
+    const isPrometheusStep = step.toolCategories.includes('prometheus');
+    const queryToolName = isLokiStep ? 'query_loki_logs' : isPrometheusStep ? 'query_prometheus' : null;
 
     try {
         let response = await llm.chatCompletions({
@@ -283,6 +378,23 @@ If a tool returns an error, explain what failed briefly and continue if possible
                         (t: ToolExecution) => t.name === toolCall.function.name && t.status === 'pending'
                     );
                     if (idx !== -1) { toolExecutions[idx].status = 'success'; }
+
+                    // Track executed query expressions for the per-query validation gate.
+                    // We record whether the result was non-empty so parseDataFindings can
+                    // drop findings entries whose queries returned no data.
+                    if (toolCall.function.name === queryToolName) {
+                        const expr: string = args?.expr ?? args?.query ?? '';
+                        if (expr) {
+                            const norm = normaliseExpr(expr);
+                            const nonEmpty = isLokiStep
+                                ? isLokiResultNonEmpty(rawResult)
+                                : isPrometheusResultNonEmpty(rawResult);
+                            // If the same expr is run multiple times, preserve non-empty over empty.
+                            if (!executedQueries.has(norm) || nonEmpty) {
+                                executedQueries.set(norm, nonEmpty);
+                            }
+                        }
+                    }
                 } catch (err: any) {
                     rawResult = `Error: ${err.message}`;
                     llmMessages.push({
@@ -335,7 +447,10 @@ If a tool returns an error, explain what failed briefly and continue if possible
 
         // Fix 2B: For data steps, request structured JSON output explicitly.
         // Only applies when the loop completed normally (not exhausted).
-        // If the loop ended with prose, make a follow-up call with response_format: json_object.
+        // If the loop ended with prose, make a follow-up call to coerce JSON output.
+        // NOTE: response_format is NOT used here — the Grafana LLM proxy does not
+        // support it (ChatCompletionsRequest has no such field). parseDataFindings
+        // extracts JSON from prose via fence/brace detection, which is sufficient.
         const isDataStep = step.toolCategories.some(c => c === 'loki' || c === 'prometheus');
         if (isDataStep && fullContent && iteration < maxIterations) {
             const looksLikeJson = fullContent.trim().startsWith('{') || fullContent.includes('datasourceUid');
@@ -352,7 +467,6 @@ If a tool returns an error, explain what failed briefly and continue if possible
                                 content: `Now output your findings as a JSON object matching this schema exactly:\n${schema}\nOutput only the JSON object, nothing else.`,
                             },
                         ],
-                        response_format: { type: 'json_object' },
                     } as any);
                     const jsonContent = jsonResponse.choices?.[0]?.message?.content;
                     if (jsonContent) {
@@ -369,9 +483,9 @@ If a tool returns an error, explain what failed briefly and continue if possible
         }
 
         // For data steps, parse the JSON findings and build a human-readable summary.
-        // Passes toolExecutions as ground truth — findings are rejected if no
-        // successful query tool call was recorded (Fix 2A: code-enforced validation).
-        const dataFindings = parseDataFindings(fullContent, step.toolCategories, toolExecutions);
+        // Passes toolExecutions as ground truth (layer 1: query tool was called) and
+        // executedQueries as the per-query validation record (layer 2: each query returned data).
+        const dataFindings = parseDataFindings(fullContent, step.toolCategories, toolExecutions, executedQueries);
         const summary = dataFindings
             ? buildSummaryFromFindings(dataFindings, step.description)
             : (fullContent || `Step "${step.description}" completed with ${toolExecutions.length} tool call(s).`);

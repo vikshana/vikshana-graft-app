@@ -298,6 +298,29 @@ describe('runOrchestration', () => {
             expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ type: 'step_done', stepId: 'step_1' }));
         });
 
+        it('step_done carries error from a failed step so the UI can display it', async () => {
+            mockRunPlanner.mockResolvedValue({
+                complexity: 'complex',
+                reasoning: 'test',
+                steps: [{ id: 'step_1', description: 'Fetch', toolCategories: ['loki'], dependsOn: [] }],
+            });
+            const failResult: SpecialistResult = {
+                stepId: 'step_1', status: 'error', summary: 'Failed.', error: '400 Bad Request: json_schema not supported', toolExecutions: [],
+            };
+            mockRunSpecialist.mockResolvedValue(failResult);
+
+            await runOrchestration(
+                [userMsg], '', [], {}, 'standard', 10,
+                new AbortController().signal, undefined, onUpdate
+            );
+
+            expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({
+                type: 'step_done',
+                stepId: 'step_1',
+                error: '400 Bad Request: json_schema not supported',
+            }));
+        });
+
         it('emits final update with synthesiser content', async () => {
             mockRunPlanner.mockResolvedValue({
                 complexity: 'complex',

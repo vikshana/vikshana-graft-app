@@ -109,4 +109,6 @@ export interface OrchestrationUpdate {
     stepDescription?: string;
     toolExecutions?: ToolExecution[];
     content?: string;
+    /** Step-level error message — set on step_done when the step threw before any tool calls */
+    error?: string;
 }

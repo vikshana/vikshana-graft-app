@@ -397,7 +397,12 @@ export async function runOrchestration(
             collectedFindings = mergeDataFindings(collectedFindings, result.dataFindings);
 
             allResults.push(result);
-            onUpdate({ type: 'step_done', stepId: result.stepId, toolExecutions: result.toolExecutions });
+            onUpdate({
+                type: 'step_done',
+                stepId: result.stepId,
+                toolExecutions: result.toolExecutions,
+                error: result.error,
+            });
         }
     }
 

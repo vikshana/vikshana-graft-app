@@ -49,6 +49,8 @@ export interface StepToolExecutions {
     toolExecutions: ToolExecution[];
     /** 'running' while the specialist is executing, 'done' when it finishes */
     status: 'running' | 'done' | 'error';
+    /** Step-level error message, present when status is 'error' and toolExecutions is empty */
+    error?: string;
 }
 
 /**

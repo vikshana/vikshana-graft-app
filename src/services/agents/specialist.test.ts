@@ -237,21 +237,24 @@ describe('runSpecialist', () => {
     });
 
     describe('dataFindings — code-enforced validation (Fix 2A + 2B)', () => {
+        const lokiExpr = '{job="api"} |= "error"';
         const lokiJson = JSON.stringify({
             datasourceUid: 'loki-uid',
             datasourceName: 'Loki',
             labels: { job: ['api'] },
-            validatedQueries: [{ description: 'errors', logql: '{job="api"} |= "error"' }],
+            validatedQueries: [{ description: 'errors', logql: lokiExpr }],
         });
+        // Non-empty Loki result (at least one stream entry)
+        // Empty Loki result (empty streams)
 
-        it('accepts LokiFindings when query_loki_logs was successfully called', async () => {
-            // First call returns a tool call (query_loki_logs), second returns findings JSON
-            const toolCall = makeToolCall('query_loki_logs', 'tc1');
+        it('accepts LokiFindings when query_loki_logs was successfully called with matching expr and returned data', async () => {
+            // First call returns a tool call (query_loki_logs) with the matching expr, second returns findings JSON
+            const toolCall = makeToolCall('query_loki_logs', 'tc1', JSON.stringify({ expr: lokiExpr }));
             mockChatCompletions
                 .mockResolvedValueOnce(makeResponse('', [toolCall]))
                 .mockResolvedValueOnce(makeResponse(lokiJson));
             mockMcpClient.callTool.mockResolvedValue({
-                content: [{ type: 'text', text: '[{"streams":[]}]' }],
+                content: [{ type: 'text', text: JSON.stringify({ data: { result: [{ stream: {}, values: [] }] } }) }],
             });
 
             const result = await runSpecialist(
@@ -291,7 +294,7 @@ describe('runSpecialist', () => {
         });
 
         it('rejects dataFindings when query_loki_logs call errored (Fix 2A: only success counts)', async () => {
-            const toolCall = makeToolCall('query_loki_logs', 'tc1');
+            const toolCall = makeToolCall('query_loki_logs', 'tc1', JSON.stringify({ expr: lokiExpr }));
             mockChatCompletions
                 .mockResolvedValueOnce(makeResponse('', [toolCall]))
                 .mockResolvedValueOnce(makeResponse(lokiJson));
@@ -313,14 +316,99 @@ describe('runSpecialist', () => {
             expect(result.dataFindings).toBeUndefined();
         });
 
-        it('makes json_object follow-up call when model responds with prose (Fix 2B)', async () => {
-            // First call: tool call, Second call: prose instead of JSON, Third: json_object follow-up
-            const toolCall = makeToolCall('query_loki_logs', 'tc1');
+        it('drops queries not executed by the model (per-query filter: unverified query dropped)', async () => {
+            // Model executes a DIFFERENT expr than what it outputs in findings
+            const executedExpr = '{job="api"}';
+            const toolCall = makeToolCall('query_loki_logs', 'tc1', JSON.stringify({ expr: executedExpr }));
+            const findingsWithUnverified = JSON.stringify({
+                datasourceUid: 'loki-uid',
+                datasourceName: 'Loki',
+                labels: {},
+                validatedQueries: [
+                    { description: 'all logs', logql: executedExpr },
+                    { description: 'errors only', logql: lokiExpr }, // never executed
+                ],
+            });
+            mockChatCompletions
+                .mockResolvedValueOnce(makeResponse('', [toolCall]))
+                .mockResolvedValueOnce(makeResponse(findingsWithUnverified));
+            mockMcpClient.callTool.mockResolvedValue({ content: [{ type: 'text', text: JSON.stringify({ data: { result: [{ stream: {}, values: [] }] } }) }] });
+
+            const result = await runSpecialist(
+                makeStep({ toolCategories: ['loki'] }),
+                'find logs',
+                '',
+                [{ type: 'function', function: { name: 'query_loki_logs' } }],
+                mockMcpClient,
+                10,
+                new AbortController().signal,
+                onUpdate
+            );
+
+            // Only the executed query should survive; the unexecuted one should be dropped
+            expect(result.dataFindings?.loki?.validatedQueries).toHaveLength(1);
+            expect(result.dataFindings?.loki?.validatedQueries?.[0].logql).toBe(executedExpr);
+        });
+
+        it('drops queries whose execution returned empty data (per-query filter: empty-result dropped)', async () => {
+            // Model executes the query but result is empty
+            const toolCall = makeToolCall('query_loki_logs', 'tc1', JSON.stringify({ expr: lokiExpr }));
+            mockChatCompletions
+                .mockResolvedValueOnce(makeResponse('', [toolCall]))
+                .mockResolvedValueOnce(makeResponse(lokiJson));
+            // Empty result — no streams
+            mockMcpClient.callTool.mockResolvedValue({ content: [{ type: 'text', text: JSON.stringify({ data: { result: [] } }) }] });
+
+            const result = await runSpecialist(
+                makeStep({ toolCategories: ['loki'] }),
+                'find errors',
+                '',
+                [{ type: 'function', function: { name: 'query_loki_logs' } }],
+                mockMcpClient,
+                10,
+                new AbortController().signal,
+                onUpdate
+            );
+
+            // Query was executed but returned no data — drop it
+            expect(result.dataFindings?.loki?.validatedQueries).toHaveLength(0);
+        });
+
+        it('preserves non-empty over empty when the same expr is executed multiple times', async () => {
+            // Model executes same expr twice: first returns empty, second returns data
+            const toolCall1 = makeToolCall('query_loki_logs', 'tc1', JSON.stringify({ expr: lokiExpr }));
+            const toolCall2 = makeToolCall('query_loki_logs', 'tc2', JSON.stringify({ expr: lokiExpr }));
+            mockChatCompletions
+                .mockResolvedValueOnce(makeResponse('', [toolCall1]))
+                .mockResolvedValueOnce(makeResponse('', [toolCall2]))
+                .mockResolvedValueOnce(makeResponse(lokiJson));
+            mockMcpClient.callTool
+                .mockResolvedValueOnce({ content: [{ type: 'text', text: JSON.stringify({ data: { result: [] } }) }] })  // first: empty
+                .mockResolvedValueOnce({ content: [{ type: 'text', text: JSON.stringify({ data: { result: [{ stream: {}, values: [] }] } }) }] }); // second: non-empty
+
+            const result = await runSpecialist(
+                makeStep({ toolCategories: ['loki'] }),
+                'find errors',
+                '',
+                [{ type: 'function', function: { name: 'query_loki_logs' } }],
+                mockMcpClient,
+                10,
+                new AbortController().signal,
+                onUpdate
+            );
+
+            // Non-empty wins — query should be kept
+            expect(result.dataFindings?.loki?.validatedQueries).toHaveLength(1);
+        });
+
+        it('makes plain follow-up call (no response_format) when model responds with prose (Fix 2B)', async () => {
+            // First call: tool call, Second call: prose instead of JSON, Third: plain follow-up
+            const toolCall = makeToolCall('query_loki_logs', 'tc1', JSON.stringify({ expr: lokiExpr }));
             mockChatCompletions
                 .mockResolvedValueOnce(makeResponse('', [toolCall]))
                 .mockResolvedValueOnce(makeResponse('I found the Loki labels.'))  // prose, not JSON
-                .mockResolvedValueOnce(makeResponse(lokiJson)); // json_object follow-up
-            mockMcpClient.callTool.mockResolvedValue({ content: [{ type: 'text', text: '{}' }] });
+                .mockResolvedValueOnce(makeResponse(lokiJson)); // plain follow-up
+            mockMcpClient.callTool.mockResolvedValue({ content: [{ type: 'text', text: JSON.stringify({ data: { result: [{ stream: {}, values: [] }] } }) }] });
 
             const result = await runSpecialist(
                 makeStep({ toolCategories: ['loki'] }),
@@ -333,10 +421,10 @@ describe('runSpecialist', () => {
                 onUpdate
             );
 
-            // Third call should have response_format: json_object
+            // Third call should NOT have response_format (that field causes 400 on the Grafana LLM proxy)
             expect(mockChatCompletions).toHaveBeenCalledTimes(3);
             const thirdCall = mockChatCompletions.mock.calls[2][0];
-            expect(thirdCall.response_format).toEqual({ type: 'json_object' });
+            expect(thirdCall.response_format).toBeUndefined();
             // Findings should be parsed from the follow-up response
             expect(result.dataFindings?.loki?.datasourceUid).toBe('loki-uid');
         });
@@ -359,12 +447,12 @@ describe('runSpecialist', () => {
         });
 
         it('returns undefined dataFindings when response is not valid JSON and follow-up also fails', async () => {
-            const toolCall = makeToolCall('query_loki_logs', 'tc1');
+            const toolCall = makeToolCall('query_loki_logs', 'tc1', JSON.stringify({ expr: lokiExpr }));
             mockChatCompletions
                 .mockResolvedValueOnce(makeResponse('', [toolCall]))
                 .mockResolvedValueOnce(makeResponse('Could not find any Loki labels.'))
                 .mockResolvedValueOnce(makeResponse('still not json'));
-            mockMcpClient.callTool.mockResolvedValue({ content: [] });
+            mockMcpClient.callTool.mockResolvedValue({ content: [{ type: 'text', text: JSON.stringify({ data: { result: [] } }) }] });
 
             const result = await runSpecialist(
                 makeStep({ toolCategories: ['loki'] }),
@@ -398,7 +486,7 @@ describe('runSpecialist', () => {
             const systemMsg = mockChatCompletions.mock.calls[0][0].messages
                 .find((m: any) => m.role === 'system')?.content ?? '';
             expect(systemMsg).toContain('query_loki_logs');
-            expect(systemMsg).toContain('Query validation rule');
+            expect(systemMsg).toContain('Query validation rules');
         });
 
         it('does NOT inject query validation for non-data steps', async () => {
@@ -417,7 +505,27 @@ describe('runSpecialist', () => {
 
             const systemMsg = mockChatCompletions.mock.calls[0][0].messages
                 .find((m: any) => m.role === 'system')?.content ?? '';
-            expect(systemMsg).not.toContain('Query validation rule');
+            expect(systemMsg).not.toContain('Query validation rules');
+        });
+
+        it('prompt instructs model to discover label values before writing equality matchers', async () => {
+            mockChatCompletions.mockResolvedValue(makeResponse('{}'));
+
+            await runSpecialist(
+                makeStep({ toolCategories: ['loki'] }),
+                'query logs',
+                '',
+                [],
+                mockMcpClient,
+                10,
+                new AbortController().signal,
+                onUpdate
+            );
+
+            const systemMsg = mockChatCompletions.mock.calls[0][0].messages
+                .find((m: any) => m.role === 'system')?.content ?? '';
+            expect(systemMsg).toContain('equality matchers');
+            expect(systemMsg).toContain('NEVER include a query');
         });
     });
 });

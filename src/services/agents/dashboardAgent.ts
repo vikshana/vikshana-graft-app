@@ -85,6 +85,13 @@ function buildDashboardSystemPrompt(
 ): string {
     const findingsBlock = formatFindingsForPrompt(dataFindings);
     const hasFindings = findingsBlock.length > 0;
+    // Findings exist but every query was filtered out (none returned data in the
+    // specialist's validation run). Treat the same as no findings — the dashboard
+    // agent must discover the datasource and write only queries it can verify.
+    const hasValidatedQueries =
+        hasFindings &&
+        ((dataFindings.loki?.validatedQueries?.length ?? 0) > 0 ||
+            (dataFindings.prometheus?.validatedQueries?.length ?? 0) > 0);
 
     return `You are a dashboard construction agent for Graft, an AI assistant embedded in Grafana.
 Your task: ${stepDescription}
@@ -93,7 +100,7 @@ You have access to dashboard and datasource tools ONLY. You do NOT have query to
 Do not attempt to call query_loki_logs, query_prometheus, or any list_loki/list_prometheus tools.
 All queries have been pre-validated by upstream agents — use them exactly as provided.
 
-${hasFindings ? `## Pre-validated data from upstream agents
+${hasValidatedQueries ? `## Pre-validated data from upstream agents
 
 ${findingsBlock}
 

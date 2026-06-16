@@ -139,6 +139,13 @@ const StepGroup: React.FC<{
                     ))}
                 </div>
             )}
+
+            {/* Step-level error — shown when the step errored before making any tool calls */}
+            {isExpanded && group.toolExecutions.length === 0 && group.status === 'error' && (
+                <div className={styles.stepErrorDetails}>
+                    {group.error ?? 'Step failed with an unknown error.'}
+                </div>
+            )}
         </div>
     );
 };
@@ -269,6 +276,16 @@ const getStyles = (theme: GrafanaTheme2) => ({
         flex: 1;
     `,
     toolCallErrorDetails: css`
+        padding: 8px 12px;
+        border-top: 1px solid ${theme.colors.border.weak};
+        background: ${theme.colors.background.secondary};
+        color: ${theme.colors.error.text};
+        font-size: 12px;
+        font-family: ${theme.typography.fontFamilyMonospace};
+        white-space: pre-wrap;
+        word-break: break-word;
+    `,
+    stepErrorDetails: css`
         padding: 8px 12px;
         border-top: 1px solid ${theme.colors.border.weak};
         background: ${theme.colors.background.secondary};
