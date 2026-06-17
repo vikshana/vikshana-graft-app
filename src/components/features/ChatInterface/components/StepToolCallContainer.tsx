@@ -76,6 +76,7 @@ const StepGroup: React.FC<{
     // updates because the collapse only fires on the running → done/error edge.
     useEffect(() => {
         if (prevStatus.current === 'running' && group.status !== 'running') {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setIsExpanded(false);
         }
         prevStatus.current = group.status;
@@ -88,6 +89,7 @@ const StepGroup: React.FC<{
     );
     useEffect(() => {
         if (errorIndices.size > prevErrorCount.current) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setExpandedTools(prev => {
                 const next = new Set(prev);
                 errorIndices.forEach(i => next.add(i));

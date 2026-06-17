@@ -277,7 +277,7 @@ const AgentConfig = ({ plugin }: AgentConfigProps) => {
         )}
         <div className={s.toolList} data-testid={`tool-list-${categoryKey}`}>
           {filtered.length === 0 && (
-            <span className={s.noResults}>No tools match "{search}"</span>
+            <span className={s.noResults}>No tools match &quot;{search}&quot;</span>
           )}
           {filtered.map(toolName => (
             <div key={toolName} className={s.toolRow}>
