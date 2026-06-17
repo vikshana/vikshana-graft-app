@@ -78,6 +78,20 @@ test('ChatInterface header should be sticky', async ({ page, mockLLMHealth, wait
     await expect(header).toHaveCSS('top', '40px');
 });
 
+test('ChatInterface settings button navigates to plugin configuration', async ({ page, waitForPortal }) => {
+    await page.goto('/a/vikshana-graft-app');
+    await expect(page.getByTestId('landing-title')).toBeVisible({ timeout: 15000 });
+    await waitForPortal();
+
+    const settingsBtn = page.getByTestId('settings-button');
+    await expect(settingsBtn).toBeVisible();
+
+    await settingsBtn.click();
+
+    await expect(page).toHaveURL(/\/plugins\/vikshana-graft-app/);
+    await expect(page).toHaveURL(/page=configuration/);
+});
+
 test('ChatHistory should allow pinning and unpinning conversations', async ({ page, waitForPortal }) => {
     await page.goto('/a/vikshana-graft-app');
     await page.evaluate(() => {
@@ -340,4 +354,125 @@ test('ChatHistory should display persisted thinking duration when loading conver
 
     await thinkingHeader.click();
     await expect(page.getByText('Complex reasoning process here')).not.toBeVisible();
+});
+
+test('PlanBlock renders and toggles when loaded from history', async ({ page, waitForPortal }) => {
+    await page.goto('/a/vikshana-graft-app');
+    await page.evaluate(() => {
+        const now = Date.now();
+        const mockSession = {
+            id: 'test-plan-session',
+            title: 'Build a monitoring dashboard',
+            messages: [
+                { role: 'user', content: 'Build a monitoring dashboard' },
+                {
+                    role: 'assistant',
+                    content: 'Here is your dashboard.',
+                    agentPlan: {
+                        reasoning: 'Query Prometheus first, then build the dashboard.',
+                        steps: [
+                            { id: 'step_1', description: 'Discover Prometheus metrics', toolCategories: ['prometheus'], dependsOn: [] },
+                            { id: 'step_2', description: 'Create monitoring dashboard', toolCategories: ['dashboards'], dependsOn: ['step_1'] },
+                        ],
+                    },
+                    agentPlanComplete: true,
+                }
+            ],
+            createdAt: now,
+            updatedAt: now,
+            isPinned: false
+        };
+        localStorage.setItem('graft_chat_history', JSON.stringify([mockSession]));
+    });
+
+    await page.goto('/a/vikshana-graft-app/history');
+    await expect(page.getByTestId('history-search-input')).toBeVisible({ timeout: 15000 });
+    await waitForPortal();
+
+    const sessionCard = page.getByTestId('session-card').filter({ hasText: 'Build a monitoring dashboard' }).first();
+    await expect(sessionCard).toBeVisible({ timeout: 10000 });
+    await sessionCard.click();
+
+    // PlanBlock should be visible and collapsed by default
+    const planHeader = page.getByTestId('plan-block-header');
+    await expect(planHeader).toBeVisible({ timeout: 10000 });
+    await expect(planHeader).toContainText('View plan');
+
+    // Content not visible while collapsed
+    await expect(page.getByTestId('plan-block-content')).not.toBeVisible();
+
+    // Click to expand
+    await planHeader.click();
+    const planContent = page.getByTestId('plan-block-content');
+    await expect(planContent).toBeVisible();
+    await expect(planContent).toContainText('Query Prometheus first');
+
+    // Both step descriptions should be visible
+    const stepItems = page.getByTestId('plan-step-item');
+    await expect(stepItems).toHaveCount(2);
+    await expect(stepItems.first()).toContainText('Discover Prometheus metrics');
+    await expect(stepItems.nth(1)).toContainText('Create monitoring dashboard');
+
+    // Click again to collapse
+    await planHeader.click();
+    await expect(page.getByTestId('plan-block-content')).not.toBeVisible();
+});
+
+test('StepToolCallContainer renders and toggles when loaded from history', async ({ page, waitForPortal }) => {
+    await page.goto('/a/vikshana-graft-app');
+    await page.evaluate(() => {
+        const now = Date.now();
+        const mockSession = {
+            id: 'test-steps-session',
+            title: 'Query Prometheus data',
+            messages: [
+                { role: 'user', content: 'Query Prometheus data' },
+                {
+                    role: 'assistant',
+                    content: 'Done — found CPU and memory metrics.',
+                    stepToolExecutions: [
+                        {
+                            stepId: 'step_1',
+                            stepDescription: 'Discover Prometheus metrics',
+                            status: 'done',
+                            toolExecutions: [
+                                { name: 'list_prometheus_label_names', status: 'success' },
+                                { name: 'query_prometheus', status: 'success' },
+                            ],
+                        },
+                    ],
+                }
+            ],
+            createdAt: now,
+            updatedAt: now,
+            isPinned: false
+        };
+        localStorage.setItem('graft_chat_history', JSON.stringify([mockSession]));
+    });
+
+    await page.goto('/a/vikshana-graft-app/history');
+    await expect(page.getByTestId('history-search-input')).toBeVisible({ timeout: 15000 });
+    await waitForPortal();
+
+    const sessionCard = page.getByTestId('session-card').filter({ hasText: 'Query Prometheus data' }).first();
+    await expect(sessionCard).toBeVisible({ timeout: 10000 });
+    await sessionCard.click();
+
+    // Step group header should be visible
+    const stepHeader = page.getByTestId('step-group-header-step_1');
+    await expect(stepHeader).toBeVisible({ timeout: 10000 });
+    await expect(stepHeader).toContainText('Discover Prometheus metrics');
+    await expect(stepHeader).toContainText('2 tools');
+
+    // Steps loaded from history start expanded (no running→done transition occurred)
+    await expect(page.getByText('list_prometheus_label_names')).toBeVisible();
+    await expect(page.getByText('query_prometheus')).toBeVisible();
+
+    // Click to collapse
+    await stepHeader.click();
+    await expect(page.getByText('list_prometheus_label_names')).not.toBeVisible();
+
+    // Click to expand again
+    await stepHeader.click();
+    await expect(page.getByText('list_prometheus_label_names')).toBeVisible();
 });

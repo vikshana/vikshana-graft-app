@@ -16,10 +16,11 @@ export const PlanBlock: React.FC<PlanBlockProps> = ({ reasoning, steps, isStream
     const styles = useStyles2(getStyles);
 
     return (
-        <div className={styles.planBlockWrapper}>
+        <div className={styles.planBlockWrapper} data-testid="plan-block">
             <div
                 className={styles.planHeader}
                 onClick={() => setIsExpanded(!isExpanded)}
+                data-testid="plan-block-header"
             >
                 <Icon name={isExpanded ? 'angle-down' : 'angle-right'} />
                 <span className={styles.planLabel}>
@@ -28,11 +29,11 @@ export const PlanBlock: React.FC<PlanBlockProps> = ({ reasoning, steps, isStream
             </div>
 
             {isExpanded && (
-                <div className={styles.planContent}>
+                <div className={styles.planContent} data-testid="plan-block-content">
                     <p className={styles.planReasoning}>{reasoning}</p>
                     <ol className={styles.planStepList}>
                         {steps.map((step) => (
-                            <li key={step.id} className={styles.planStepItem}>
+                            <li key={step.id} className={styles.planStepItem} data-testid="plan-step-item">
                                 <span className={styles.planStepDescription}>{step.description}</span>
                                 {step.toolCategories.length > 0 && (
                                     <span className={styles.planStepCategories}>

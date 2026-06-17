@@ -108,11 +108,12 @@ const StepGroup: React.FC<{
     const { icon, label } = stepStatusIcon(group);
 
     return (
-        <div className={styles.stepGroup}>
+        <div className={styles.stepGroup} data-testid={`step-group-${group.stepId}`}>
             {/* Step header */}
             <div
                 className={`${styles.stepHeader} ${styles[`stepHeader_${label}` as keyof ReturnType<typeof getStyles>] ?? ''}`}
                 onClick={() => setIsExpanded(e => !e)}
+                data-testid={`step-group-header-${group.stepId}`}
             >
                 <Icon name={isExpanded ? 'angle-down' : 'angle-right'} />
                 <span className={styles.stepStatusIcon}>{icon}</span>
@@ -142,7 +143,7 @@ const StepGroup: React.FC<{
 
             {/* Step-level error — shown when the step errored before making any tool calls */}
             {isExpanded && group.toolExecutions.length === 0 && group.status === 'error' && (
-                <div className={styles.stepErrorDetails}>
+                <div className={styles.stepErrorDetails} data-testid={`step-group-error-${group.stepId}`}>
                     {group.error ?? 'Step failed with an unknown error.'}
                 </div>
             )}
