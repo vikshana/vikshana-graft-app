@@ -49,7 +49,7 @@ export const TOOL_CATEGORIES: Record<keyof ToolsConfig, string[]> = {
  */
 export function getDefaultToolsConfig(): ToolsConfig {
     const config = {} as ToolsConfig;
-    for (const [category, tools] of Object.entries(TOOL_CATEGORIES) as Array<[keyof ToolsConfig, Array<string>]>) {
+    for (const [category, tools] of Object.entries(TOOL_CATEGORIES) as Array<[keyof ToolsConfig, string[]]>) {
         config[category] = {
             enabled: true,
             tools: Object.fromEntries(tools.map(t => [t, true])),

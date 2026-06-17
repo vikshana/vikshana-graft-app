@@ -136,7 +136,7 @@ describe('getDefaultToolsConfig', () => {
 
     it('enables all tools within each category', () => {
         const config = getDefaultToolsConfig();
-        for (const [cat, tools] of Object.entries(TOOL_CATEGORIES) as Array<[keyof ToolsConfig, Array<string>]>) {
+        for (const [cat, tools] of Object.entries(TOOL_CATEGORIES) as Array<[keyof ToolsConfig, string[]]>) {
             for (const toolName of tools) {
                 expect(config[cat].tools[toolName]).toBe(true);
             }
