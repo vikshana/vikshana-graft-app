@@ -6,10 +6,12 @@ import { test, expect } from './fixtures';
 // no LLM or MCP mock — they exercise pure form interactions.
 
 test.describe('Agent config tab', () => {
-    test.beforeEach(async ({ page }) => {
+    test.beforeEach(async ({ page, waitForPortal }) => {
         await page.goto('/plugins/vikshana-graft-app?page=agent');
         // Wait for the page to load — the OSS tier header is always present
         await expect(page.getByTestId('tier-header-oss')).toBeVisible({ timeout: 15000 });
+        // Dismiss any Enterprise trial/license overlays that intercept pointer events
+        await waitForPortal();
     });
 
     test('shows the OSS tier section with the four fixed categories', async ({ page }) => {
@@ -26,19 +28,19 @@ test.describe('Agent config tab', () => {
         const lokiHeader = page.getByTestId('tool-category-header-loki');
         await expect(lokiHeader).toBeVisible();
 
-        // Click to expand
-        await lokiHeader.click();
+        // Click to expand — force in case Grafana overlays (nav, banners) intercept
+        await lokiHeader.click({ force: true });
         const toolList = page.getByTestId('tool-list-loki');
         await expect(toolList).toBeVisible();
 
         // Click again to collapse
-        await lokiHeader.click();
+        await lokiHeader.click({ force: true });
         await expect(toolList).not.toBeVisible();
     });
 
     test('expanded category shows per-tool checkboxes', async ({ page }) => {
         // Expand the prometheus category
-        await page.getByTestId('tool-category-header-prometheus').click();
+        await page.getByTestId('tool-category-header-prometheus').click({ force: true });
         const toolList = page.getByTestId('tool-list-prometheus');
         await expect(toolList).toBeVisible();
 
@@ -49,10 +51,10 @@ test.describe('Agent config tab', () => {
 
     test('disabling a category disables its per-tool checkboxes', async ({ page }) => {
         // Expand loki first
-        await page.getByTestId('tool-category-header-loki').click();
+        await page.getByTestId('tool-category-header-loki').click({ force: true });
         await expect(page.getByTestId('tool-list-loki')).toBeVisible();
 
-        // Uncheck the category-level checkbox — use force since the label may intercept
+        // Uncheck the category-level checkbox — force since label may intercept
         const catCheckbox = page.getByTestId('tool-category-checkbox-loki');
         await expect(catCheckbox).toBeChecked();
         await catCheckbox.click({ force: true });
@@ -91,7 +93,7 @@ test.describe('Agent config tab', () => {
         const saveResponse = page.waitForResponse(
             resp => resp.url().includes('/api/plugins/vikshana-graft-app/settings') && resp.request().method() === 'POST'
         );
-        await page.getByRole('button', { name: /Save/i }).click();
+        await page.getByRole('button', { name: /Save/i }).click({ force: true });
         const resp = await saveResponse;
         expect(resp.ok()).toBe(true);
     });
