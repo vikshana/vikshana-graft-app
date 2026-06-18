@@ -67,7 +67,9 @@ export function getDefaultToolsConfig(): ToolsConfig {
  * - If config is undefined, all tools pass through (safe default for fresh installs).
  * - A tool is excluded only if it is explicitly present in a category's tools map
  *   AND that category is disabled, OR the tool's per-tool flag is false.
- * - Tools not found in any category pass through by default.
+ * - Tools not found in any configured category are blocked by default.
+ *   The AgentConfig UI shows unrecognised tools as disabled-by-default; this
+ *   keeps the runtime consistent with the UI expectation.
  */
 export function filterTools(tools: any[], config?: ToolsConfig): any[] {
     if (!config) {
@@ -92,7 +94,9 @@ export function filterTools(tools: any[], config?: ToolsConfig): any[] {
             return catConfig.tools[name] === true;
         }
 
-        // Tool not found in any configured category — pass through
-        return true;
+        // Tool not found in any configured category — block by default.
+        // Unrecognised tools are shown as disabled in the AgentConfig UI;
+        // matching that behaviour here prevents silent exposure of new MCP tools.
+        return false;
     });
 }

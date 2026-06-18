@@ -233,15 +233,35 @@ export function sanitisePlan(
 
             if (categories.length > 0) {
                 injectCount++;
-                const dataStepId = `${step.id}_data`;
-                injected.push({
-                    id: dataStepId,
-                    description: `Discover and validate ${categories.join(' and ')} queries for: ${step.description}`,
-                    toolCategories: categories,
-                    dependsOn: [...step.dependsOn],
-                });
-                injected.push({ ...step, dependsOn: [...step.dependsOn, dataStepId] });
-                console.info(`[Graft] Plan sanitiser: injected data step "${dataStepId}" (${categories.join(', ')}) before lone dashboard step "${step.id}"`);
+
+                if (categories.length === 1) {
+                    // Single datasource type — one data step, one dashboard step.
+                    const dataStepId = `${step.id}_data`;
+                    injected.push({
+                        id: dataStepId,
+                        description: `Discover and validate ${categories[0]} queries for: ${step.description}`,
+                        toolCategories: categories,
+                        dependsOn: [...step.dependsOn],
+                    });
+                    injected.push({ ...step, dependsOn: [...step.dependsOn, dataStepId] });
+                    console.info(`[Graft] Plan sanitiser: injected data step "${dataStepId}" (${categories[0]}) before lone dashboard step "${step.id}"`);
+                } else {
+                    // Ambiguous — both datasource types needed. Inject one step per type
+                    // so runSpecialist can emit the correct single-schema findings for each.
+                    const dataStepIds: string[] = [];
+                    for (const cat of categories) {
+                        const dataStepId = `${step.id}_data_${cat}`;
+                        dataStepIds.push(dataStepId);
+                        injected.push({
+                            id: dataStepId,
+                            description: `Discover and validate ${cat} queries for: ${step.description}`,
+                            toolCategories: [cat],
+                            dependsOn: [...step.dependsOn],
+                        });
+                        console.info(`[Graft] Plan sanitiser: injected data step "${dataStepId}" (${cat}) before lone dashboard step "${step.id}"`);
+                    }
+                    injected.push({ ...step, dependsOn: [...step.dependsOn, ...dataStepIds] });
+                }
                 continue;
             }
         }
@@ -316,7 +336,8 @@ export async function runOrchestration(
             modelType,
             signal,
             mcpClient,
-            allTools
+            allTools,
+            maxIterations
         );
 
         onUpdate({ type: 'final', content: result });

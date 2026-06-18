@@ -132,7 +132,10 @@ function buildDiscoveredConfig(
     const saved = savedTools?.[cat.key];
     result[cat.key] = saved ?? {
       enabled: true,
-      tools: Object.fromEntries(cat.tools.map(t => [t, true])),
+      // Only include tools that are actually present in the live MCP tool list.
+      // Using cat.tools (the full hardcoded list) would create toggles for tools
+      // that don't exist, making the config section misleading.
+      tools: Object.fromEntries(presentInCat.map(t => [t, true])),
     };
   }
   return result;
@@ -171,7 +174,9 @@ const AgentConfig = ({ plugin }: AgentConfigProps) => {
 
         const unknown = [...presentNames].filter(n => !ALL_CATEGORISED_TOOLS.has(n));
         setUnknownTools(unknown);
-        setUnknownEnabled(Object.fromEntries(unknown.map(n => [n, false])));
+        // Load persisted unknown-tool toggles from saved config (stored under _unknown key)
+        const savedUnknown = jsonData?.tools?.['_unknown']?.tools ?? {};
+        setUnknownEnabled(Object.fromEntries(unknown.map(n => [n, savedUnknown[n] === true])));
       })
       .catch(() => { /* MCP unreachable — known categories still shown */ });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -230,12 +235,27 @@ const AgentConfig = ({ plugin }: AgentConfigProps) => {
     setIsSaving(true);
     setSaveStatus(null);
     try {
+      // Build the unknown-tools config entry so enabled/disabled toggles persist.
+      // Unknown tools are disabled by default; only ones the user explicitly enabled
+      // should be set to true.
+      const unknownCatConfig: ToolCategoryConfig | undefined =
+        unknownTools.length > 0
+          ? {
+              enabled: Object.values(unknownEnabled).some(Boolean),
+              tools: Object.fromEntries(unknownTools.map(n => [n, unknownEnabled[n] === true])),
+            }
+          : undefined;
+
       await updatePlugin(plugin.meta.id, {
         enabled,
         pinned,
         jsonData: {
           ...jsonData,
-          tools: { ...tools, ...discoveredTools },
+          tools: {
+            ...tools,
+            ...discoveredTools,
+            ...(unknownCatConfig ? { _unknown: unknownCatConfig } : {}),
+          },
           maxToolIterations: Math.min(100, Math.max(1, maxToolIterations)),
         },
       });
@@ -371,7 +391,10 @@ const AgentConfig = ({ plugin }: AgentConfigProps) => {
           renderCategoryCard(
             cat.key,
             cat.label,
-            cat.tools.filter(t => discoveredTools[cat.key]?.tools[t] !== undefined || true),
+            // Only show tools that are present in the live MCP tool list
+            // (discoveredTools[cat.key].tools contains only present tools
+            // after the buildDiscoveredConfig fix; filter to those here).
+            cat.tools.filter(t => discoveredTools[cat.key]?.tools[t] !== undefined),
             (n) => discoveredTools[cat.key]?.tools[n] !== false,
             discoveredTools[cat.key]?.enabled ?? true,
             (v) => toggleDiscovered(cat.key, v),

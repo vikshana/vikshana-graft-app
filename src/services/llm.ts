@@ -194,9 +194,19 @@ export const llmService = {
                         }
                     }
 
-                    // Compress tool results from this iteration before the next LLM call
-                    // The model already saw the full content — subsequent iterations only need a summary
+                    // Compress prior tool results before the next LLM call to manage
+                    // context window growth. Dashboard-related tools whose results must
+                    // be passed verbatim to the next call (e.g. get_dashboard_by_uid →
+                    // update_dashboard) are excluded from compression.
+                    const NO_COMPRESS = new Set([
+                        'get_dashboard_by_uid',
+                        'get_dashboard_panel_queries',
+                        'get_dashboard_property',
+                        'get_dashboard_summary',
+                        'update_dashboard',
+                    ]);
                     for (const toolCall of toolCalls) {
+                        if (NO_COMPRESS.has(toolCall.function.name)) { continue; }
                         const msgIdx = findLastIndex(
                             llmMessages,
                             (m: llm.Message) => (m as any).tool_call_id === toolCall.id

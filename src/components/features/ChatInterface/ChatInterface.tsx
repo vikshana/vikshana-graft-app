@@ -248,6 +248,9 @@ export const ChatInterface = () => {
   const abortControllerRef = useRef<AbortController | null>(null);
   const processedPromptRef = useRef<string | null>(null);
   const thinkingStartTimeRef = useRef<number | null>(null);
+  // Tracks the latest messages array without creating a render dependency.
+  // Used by the post-chat save callback to read state without a setMessages updater.
+  const latestMessagesRef = useRef<Message[]>(messages);
   const [selectedFiles, setSelectedFiles] = useState<Array<{ name: string; content: string; type: 'image' | 'text'; mimeType?: string }>>([]);
   const [modelType, setModelType] = useState<'standard' | 'thinking'>('standard');
   const [previewAttachment, setPreviewAttachment] = useState<{ name: string; content: string; type: 'image' | 'text'; mimeType?: string } | null>(null);
@@ -289,6 +292,12 @@ export const ChatInterface = () => {
   const greetingMessage = getGreetingMessage(userName);
 
   // Auto-select the only available model when settings load
+  // Keep latestMessagesRef in sync on every render so the post-chat save
+  // callback can read the final messages state without a setMessages updater.
+  useEffect(() => {
+    latestMessagesRef.current = messages;
+  });
+
   useEffect(() => {
     if (!settingsLoading && llmReady) {
       // If only one model is available, auto-select it
@@ -593,6 +602,8 @@ export const ChatInterface = () => {
               });
             } else if (update.type === 'step_update' && update.stepId && update.toolExecutions) {
               // Replace only this step's tool executions — all other steps are preserved.
+              // Also stream incremental content if the simple-path passes it (content is
+              // the partial assistant text emitted by llmService.chat before final).
               setMessages((prev) => {
                 const updated = [...prev];
                 const last = updated[updated.length - 1];
@@ -600,6 +611,7 @@ export const ChatInterface = () => {
                 const stepDesc = existing.find(s => s.stepId === update.stepId)?.stepDescription ?? update.stepId!;
                 updated[updated.length - 1] = {
                   ...last,
+                  ...(update.content !== undefined ? { content: update.content } : {}),
                   stepToolExecutions: mergeStepToolExecutions(
                     existing,
                     update.stepId!,
@@ -650,22 +662,20 @@ export const ChatInterface = () => {
       }
 
       // Save chat to history after completion.
-      // Read the last message from state to capture stepToolExecutions and agentPlan
-      // set during the orchestration callback (not available in closure vars).
-      setMessages((prev) => {
-        const lastMsg = prev[prev.length - 1];
-        const finalAssistantMessage: Message = {
-          ...lastMsg,
-          content: finalContent,
-          thinkingSeconds: thinkingDuration,
-          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : lastMsg.toolExecutions,
-        };
-        const finalMessages = [...newMessages, finalAssistantMessage];
-        const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
-        setCurrentSessionId(savedSession.id);
-        setSearchParams({ chat: 'true', session: savedSession.id });
-        return prev; // no state change — just reading
-      });
+      // Read latestMessagesRef (not setMessages) to get the final state without
+      // running side-effects inside a state updater (which React may invoke more
+      // than once under StrictMode / concurrent rendering).
+      const lastMsg = latestMessagesRef.current[latestMessagesRef.current.length - 1];
+      const finalAssistantMessage: Message = {
+        ...lastMsg,
+        content: finalContent,
+        thinkingSeconds: thinkingDuration,
+        toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : lastMsg?.toolExecutions,
+      };
+      const finalMessages = [...newMessages, finalAssistantMessage];
+      const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
+      setCurrentSessionId(savedSession.id);
+      setSearchParams({ chat: 'true', session: savedSession.id });
     } catch (error: any) {
       if (error.name === 'AbortError') {
         return;

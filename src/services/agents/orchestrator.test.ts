@@ -571,11 +571,21 @@ describe('sanitisePlan — data step injection for lone dashboard steps', () => 
         expect(dataStep.toolCategories).toEqual(['prometheus']);
     });
 
-    it('injects both data categories when the request is ambiguous', () => {
+    it('injects two separate data steps (one per category) when the request is ambiguous', () => {
         const result = sanitisePlan(lonePlan('Build a monitoring dashboard'), ['loki', 'prometheus', 'dashboards']);
 
-        const dataStep = result.steps.find(s => s.id === 'step_1_data')!;
-        expect(dataStep.toolCategories).toEqual(['loki', 'prometheus']);
+        // Ambiguous → two separate steps, one per category (each produces its own schema)
+        const lokiStep = result.steps.find(s => s.id === 'step_1_data_loki')!;
+        const promStep = result.steps.find(s => s.id === 'step_1_data_prometheus')!;
+        expect(lokiStep).toBeDefined();
+        expect(lokiStep.toolCategories).toEqual(['loki']);
+        expect(promStep).toBeDefined();
+        expect(promStep.toolCategories).toEqual(['prometheus']);
+
+        // Dashboard step depends on both data steps
+        const dashStep = result.steps.find(s => s.id === 'step_1')!;
+        expect(dashStep.dependsOn).toContain('step_1_data_loki');
+        expect(dashStep.dependsOn).toContain('step_1_data_prometheus');
     });
 
     it('respects enabled categories when injecting (loki disabled → prometheus only)', () => {

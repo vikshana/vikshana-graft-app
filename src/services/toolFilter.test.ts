@@ -58,14 +58,18 @@ describe('filterTools', () => {
             expect(result.map(t => t.function.name)).toContain('query_prometheus_histogram');
         });
 
-        it('passes through tools not in any config category (unrecognised tools)', () => {
+        it('blocks tools not in any config category (default-deny for unrecognised tools)', () => {
+            // Previously this was default-allow; changed to default-deny so the runtime
+            // matches the AgentConfig UI which shows unrecognised tools as disabled.
             const config = getDefaultToolsConfig();
             const tools = [
                 tool('query_loki_logs'),
                 tool('some_future_tool_not_in_categories'),
             ];
             const result = filterTools(tools, config);
-            expect(result.map(t => t.function.name)).toContain('some_future_tool_not_in_categories');
+            expect(result.map(t => t.function.name)).not.toContain('some_future_tool_not_in_categories');
+            // Known tools still pass through normally
+            expect(result.map(t => t.function.name)).toContain('query_loki_logs');
         });
 
         it('filters tools in dynamic discovered categories (e.g. alerting)', () => {
@@ -106,14 +110,14 @@ describe('filterTools', () => {
             expect(result.map(t => t.function.name)).toContain('list_cloudwatch_metrics');
         });
 
-        it('tool not in any config category passes through even with dynamic categories present', () => {
+        it('tool not in any config category is blocked (default-deny) even with dynamic categories present', () => {
             const config: ToolsConfig = {
                 ...getDefaultToolsConfig(),
                 alerting: { enabled: true, tools: { alerting_manage_routing: true } },
             };
             const tools = [tool('some_brand_new_tool')];
             const result = filterTools(tools, config);
-            expect(result).toHaveLength(1);
+            expect(result).toHaveLength(0);
         });
 
         it('handles tools with no function.name gracefully', () => {

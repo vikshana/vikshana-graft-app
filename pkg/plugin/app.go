@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
@@ -142,16 +143,25 @@ func (a *App) handleTools(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Grafana rewrites plugin resource URLs — the X-Forwarded-Host header
-	// carries the original Grafana base URL. Fall back to localhost.
-	grafanaURL := "http://localhost:3000"
-	if host := r.Header.Get("X-Forwarded-Host"); host != "" {
-		scheme := "http"
-		if r.Header.Get("X-Forwarded-Proto") == "https" {
-			scheme = "https"
-		}
-		grafanaURL = fmt.Sprintf("%s://%s", scheme, host)
+	// Derive the Grafana base URL from r.Host (the actual TCP host the plugin
+	// backend is talking to), not from X-Forwarded-Host. X-Forwarded-Host is a
+	// client-controlled header that can be spoofed; using it to build the target
+	// URL would enable SSRF against arbitrary hosts.
+	//
+	// r.Host is set by the Grafana backend when it calls the plugin resource
+	// endpoint and reliably reflects the real Grafana server address.
+	//
+	// We still read X-Forwarded-Proto for the scheme, but only to choose between
+	// http and https — not to change the host.
+	scheme := "http"
+	if r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
 	}
+	host := r.Host
+	if host == "" {
+		host = "localhost:3000"
+	}
+	grafanaURL := fmt.Sprintf("%s://%s", scheme, host)
 
 	mcpURL := fmt.Sprintf("%s/api/plugins/grafana-llm-app/resources/mcp/grafana", grafanaURL)
 
@@ -172,7 +182,7 @@ func (a *App) handleTools(w http.ResponseWriter, r *http.Request) {
 		mcpReq.AddCookie(cookie)
 	}
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(mcpReq)
 	if err != nil {
 		http.Error(w, "Failed to reach MCP server", http.StatusBadGateway)
