@@ -1,42 +1,102 @@
-/**
- * Allowlist of MCP tools relevant to Loki log querying, Prometheus metrics,
- * and dashboard building. All other tools (alerting, oncall, pyroscope,
- * clickhouse, cloudwatch, elasticsearch, annotations, admin, etc.) are excluded
- * to reduce input token usage per API call.
- */
-const ALLOWED_TOOLS = new Set([
-    // Loki
-    'query_loki_logs',
-    'query_loki_patterns',
-    'query_loki_stats',
-    'list_loki_label_names',
-    'list_loki_label_values',
-    // Prometheus
-    'query_prometheus',
-    'query_prometheus_histogram',
-    'list_prometheus_label_names',
-    'list_prometheus_label_values',
-    'list_prometheus_metric_names',
-    'list_prometheus_metric_metadata',
-    // Dashboards
-    'get_dashboard_by_uid',
-    'get_dashboard_summary',
-    'get_dashboard_panel_queries',
-    'get_dashboard_property',
-    'update_dashboard',
-    'search_dashboards',
-    'search_folders',
-    'create_folder',
-    // Datasources (required context for queries)
-    'list_datasources',
-    'get_datasource_by_name',
-    'get_datasource_by_uid',
-]);
+import type { ToolsConfig } from '../types/settings.types';
 
 /**
- * Filters MCP tools to only those in the allowed set.
- * Reduces tool token usage from ~14,800 to ~5,300 tokens per API call.
+ * Canonical mapping of category name → tool names.
+ * This is the single source of truth used by both the filter logic
+ * and the config page UI. Names must match what grafana-llm-app's
+ * MCP server exposes via tools/list.
  */
-export function filterTools(tools: any[]): any[] {
-    return tools.filter(t => ALLOWED_TOOLS.has(t.function?.name));
+export const TOOL_CATEGORIES: Record<keyof ToolsConfig, string[]> = {
+    loki: [
+        'query_loki_logs',
+        'query_loki_patterns',
+        'query_loki_stats',
+        'list_loki_label_names',
+        'list_loki_label_values',
+    ],
+    prometheus: [
+        'query_prometheus',
+        'query_prometheus_histogram',
+        'list_prometheus_label_names',
+        'list_prometheus_label_values',
+        'list_prometheus_metric_names',
+        'list_prometheus_metric_metadata',
+    ],
+    dashboards: [
+        'get_dashboard_by_uid',
+        'get_dashboard_summary',
+        'get_dashboard_panel_queries',
+        'get_dashboard_property',
+        'update_dashboard',
+        'search_dashboards',
+        'search_folders',
+        'create_folder',
+    ],
+    datasources: [
+        'list_datasources',
+        'get_datasource_by_name',
+        'get_datasource_by_uid',
+        'get_datasource',
+    ],
+};
+
+// Note: TOOL_TO_CATEGORY reverse lookup removed — filterTools now scans all
+// config keys directly, supporting both fixed and dynamic discovered categories.
+
+/**
+ * Returns a default ToolsConfig with all categories and tools enabled.
+ * Used to initialise the config page for fresh installs.
+ */
+export function getDefaultToolsConfig(): ToolsConfig {
+    const config = {} as ToolsConfig;
+    for (const [category, tools] of Object.entries(TOOL_CATEGORIES) as Array<[keyof ToolsConfig, string[]]>) {
+        config[category] = {
+            enabled: true,
+            tools: Object.fromEntries(tools.map(t => [t, true])),
+        };
+    }
+    return config;
+}
+
+/**
+ * Filters an OpenAI-format tool list based on the user's ToolsConfig.
+ *
+ * Scans ALL keys in config (both the 4 fixed categories and any dynamic
+ * discovered categories such as 'alerting', 'cloudwatch', 'oncall').
+ *
+ * - If config is undefined, all tools pass through (safe default for fresh installs).
+ * - A tool is excluded only if it is explicitly present in a category's tools map
+ *   AND that category is disabled, OR the tool's per-tool flag is false.
+ * - Tools not found in any configured category are blocked by default.
+ *   The AgentConfig UI shows unrecognised tools as disabled-by-default; this
+ *   keeps the runtime consistent with the UI expectation.
+ */
+export function filterTools(tools: any[], config?: ToolsConfig): any[] {
+    if (!config) {
+        return tools;
+    }
+
+    return tools.filter(t => {
+        const name: string = t.function?.name;
+        if (!name) {
+            return false;
+        }
+
+        // Search all config keys (fixed + dynamic) for this tool name
+        for (const catConfig of Object.values(config)) {
+            if (!Object.prototype.hasOwnProperty.call(catConfig.tools, name)) {
+                continue;
+            }
+            // Tool found in this category
+            if (!catConfig.enabled) {
+                return false;
+            }
+            return catConfig.tools[name] === true;
+        }
+
+        // Tool not found in any configured category — block by default.
+        // Unrecognised tools are shown as disabled in the AgentConfig UI;
+        // matching that behaviour here prevents silent exposure of new MCP tools.
+        return false;
+    });
 }

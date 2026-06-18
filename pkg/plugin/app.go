@@ -1,9 +1,13 @@
 package plugin
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
@@ -101,6 +105,7 @@ func NewApp(_ context.Context, settings backend.AppInstanceSettings) (instancemg
 
 func (a *App) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/settings", a.handleSettings)
+	mux.HandleFunc("/tools", a.handleTools)
 	mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"message": "ok"}`))
@@ -126,6 +131,108 @@ func (a *App) handleSettings(w http.ResponseWriter, r *http.Request) {
 // Dispose tells plugin SDK that plugin wants to clean up resources.
 func (a *App) Dispose() {
 	// cleanup
+}
+
+// handleTools proxies a tools/list request to the grafana-llm-app MCP server
+// and returns a simplified list of { name, description } objects.
+// This allows the config page (which has no MCP React context) to fetch
+// the live tool list for the Tool Access configuration UI.
+func (a *App) handleTools(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Derive the Grafana base URL from r.Host (the actual TCP host the plugin
+	// backend is talking to), not from X-Forwarded-Host. X-Forwarded-Host is a
+	// client-controlled header that can be spoofed; using it to build the target
+	// URL would enable SSRF against arbitrary hosts.
+	//
+	// r.Host is set by the Grafana backend when it calls the plugin resource
+	// endpoint and reliably reflects the real Grafana server address.
+	//
+	// We still read X-Forwarded-Proto for the scheme, but only to choose between
+	// http and https — not to change the host.
+	scheme := "http"
+	if r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	host := r.Host
+	if host == "" {
+		host = "localhost:3000"
+	}
+	grafanaURL := fmt.Sprintf("%s://%s", scheme, host)
+
+	mcpURL := fmt.Sprintf("%s/api/plugins/grafana-llm-app/resources/mcp/grafana", grafanaURL)
+
+	// Standard MCP JSON-RPC tools/list request
+	reqBody := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
+	mcpReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, mcpURL, bytes.NewReader(reqBody))
+	if err != nil {
+		http.Error(w, "Failed to build MCP request", http.StatusInternalServerError)
+		return
+	}
+	mcpReq.Header.Set("Content-Type", "application/json")
+
+	// Forward the caller's auth cookie/token so Grafana accepts the request
+	if authHeader := r.Header.Get("Authorization"); authHeader != "" {
+		mcpReq.Header.Set("Authorization", authHeader)
+	}
+	for _, cookie := range r.Cookies() {
+		mcpReq.AddCookie(cookie)
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(mcpReq)
+	if err != nil {
+		http.Error(w, "Failed to reach MCP server", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		http.Error(w, "Failed to read MCP response", http.StatusInternalServerError)
+		return
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		http.Error(w, fmt.Sprintf("MCP server returned %d", resp.StatusCode), http.StatusBadGateway)
+		return
+	}
+
+	// Parse the JSON-RPC response and extract just name + description per tool
+	var rpcResp struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &rpcResp); err != nil {
+		http.Error(w, "Failed to parse MCP response", http.StatusInternalServerError)
+		return
+	}
+
+	type toolInfo struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	tools := make([]toolInfo, 0, len(rpcResp.Result.Tools))
+	for _, t := range rpcResp.Result.Tools {
+		tools = append(tools, toolInfo{Name: t.Name, Description: t.Description})
+	}
+
+	out, err := json.Marshal(map[string]interface{}{"tools": tools})
+	if err != nil {
+		http.Error(w, "Failed to serialise response", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(out)
 }
 
 // CheckHealth handles health checks sent from Grafana to the plugin.

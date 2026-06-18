@@ -18,18 +18,8 @@ import { validatePromptYaml, dumpPromptYaml } from '../../../utils/promptValidat
 import { CategoryDef } from '../../../types/prompt.types';
 import { PRE_CONFIGURED_PROMPTS } from '../../../data/prompts';
 import { promptLibraryService } from '../../../services/promptLibrary';
+import type { AppPluginSettings } from '../../../types/settings.types';
 
-/**
- * Plugin settings stored in Grafana
- * Model configuration has been moved to Grafana LLM plugin - only prompt library remains
- */
-type AppPluginSettings = {
-  promptLibrary?: CategoryDef[];
-};
-
-/**
- * Component state
- */
 type State = {
   promptLibrary: CategoryDef[];
 };
@@ -39,6 +29,7 @@ export interface AppConfigProps extends PluginConfigPageProps<AppPluginMeta<AppP
 const AppConfig = ({ plugin }: AppConfigProps) => {
   const s = useStyles2(getStyles);
   const { enabled, pinned, jsonData } = plugin.meta;
+
   const [state, setState] = useState<State>({
     promptLibrary: jsonData?.promptLibrary || [],
   });
@@ -50,21 +41,21 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
 
   const onPromptFileLoad = (event: React.FormEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0];
-    if (!file) {
-      return;
-    }
+    if (!file) { return; }
 
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const content = e.target?.result as string;
         const parsed = validatePromptYaml(content);
-        setState({
-          ...state,
-          promptLibrary: parsed,
-        });
+        setState({ promptLibrary: parsed });
         setPromptUploadError(null);
-        setPromptUploadSuccess(`Successfully loaded ${parsed.length} categories with ${parsed.reduce((acc: number, cat: CategoryDef) => acc + cat.subCategories.reduce((sAcc: number, sub: any) => sAcc + sub.prompts.length, 0), 0)} prompts.`);
+        const totalPrompts = parsed.reduce(
+          (acc: number, cat: CategoryDef) =>
+            acc + cat.subCategories.reduce((sAcc: number, sub: any) => sAcc + sub.prompts.length, 0),
+          0
+        );
+        setPromptUploadSuccess(`Successfully loaded ${parsed.length} categories with ${totalPrompts} prompts.`);
       } catch (err: any) {
         setPromptUploadError(err.message || 'Failed to parse YAML file');
         setPromptUploadSuccess(null);
@@ -75,26 +66,19 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
 
   const onDownloadPrompts = () => {
     let promptsToExport: CategoryDef[];
-
     if (state.promptLibrary && state.promptLibrary.length > 0) {
-      // Use uploaded prompts
       promptsToExport = state.promptLibrary;
     } else {
-      // Convert default prompts to CategoryDef format
       promptsToExport = Object.entries(PRE_CONFIGURED_PROMPTS).map(([categoryName, subCats]) => ({
         id: categoryName.toLowerCase().replace(/\s+/g, '_'),
         name: categoryName.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
         subCategories: Object.entries(subCats).map(([subCatName, prompts]) => ({
           id: subCatName.toLowerCase().replace(/\s+/g, '_'),
           name: subCatName.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
-          prompts: prompts.map((content, idx) => ({
-            name: `Prompt ${idx + 1}`,
-            content
-          }))
-        }))
+          prompts: prompts.map((content, idx) => ({ name: `Prompt ${idx + 1}`, content })),
+        })),
       }));
     }
-
     try {
       const yamlContent = dumpPromptYaml(promptsToExport);
       const blob = new Blob([yamlContent], { type: 'application/x-yaml' });
@@ -117,15 +101,16 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     setSaveStatus(null);
 
     try {
+      // Merge with existing jsonData to preserve Agent tab settings
       await updatePlugin(plugin.meta.id, {
         enabled,
         pinned,
         jsonData: {
+          ...jsonData,
           promptLibrary: state.promptLibrary,
         },
       });
 
-      // Update the promptLibraryService with the new prompts
       if (state.promptLibrary && state.promptLibrary.length > 0) {
         promptLibraryService.setConfiguredPrompts(state.promptLibrary);
       }
@@ -143,23 +128,22 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
 
   return (
     <form onSubmit={(e) => { e.preventDefault(); onSubmit(); }}>
-      {/* LLM Plugin Information Banner */}
       <Alert severity="info" title="Model Configuration">
         Model configuration (Standard and Deep Research) is managed through the{' '}
         <a href="/plugins/grafana-llm-app" style={{ textDecoration: 'underline' }}>
           Grafana LLM Plugin
         </a>
-        . This page only configures the Prompt Library.
+        . Tool access and agent behaviour are configured on the{' '}
+        <a href={`/plugins/${plugin.meta.id}?page=agent`} style={{ textDecoration: 'underline' }}>
+          Agent tab
+        </a>
+        .
       </Alert>
 
-      {/* Prompt Library Configuration */}
       <FieldSet label="Prompt Library Configuration" className={s.marginTop}>
         <Field label="Upload Prompt Library" description="Upload a YAML file containing prompt categories and prompts">
           <div data-testid="prompt-library-upload-container">
-            <FileUpload
-              onFileUpload={onPromptFileLoad}
-              accept=".yaml,.yml"
-            />
+            <FileUpload onFileUpload={onPromptFileLoad} accept=".yaml,.yml" />
             <div style={{ marginTop: '16px' }}>
               <Button variant="secondary" onClick={onDownloadPrompts} type="button">
                 Download Current Config
@@ -168,18 +152,19 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
           </div>
         </Field>
         {promptUploadError && (
-          <Alert severity="error" title="Upload Failed">
-            {promptUploadError}
-          </Alert>
+          <Alert severity="error" title="Upload Failed">{promptUploadError}</Alert>
         )}
         {promptUploadSuccess && (
-          <Alert severity="success" title="Upload Successful">
-            {promptUploadSuccess}
-          </Alert>
+          <Alert severity="success" title="Upload Successful">{promptUploadSuccess}</Alert>
         )}
         {state.promptLibrary && state.promptLibrary.length > 0 && !promptUploadSuccess && (
           <div style={{ marginBottom: '16px' }}>
-            Currently loaded: {state.promptLibrary.length} categories with {state.promptLibrary.reduce((acc: number, cat: CategoryDef) => acc + cat.subCategories.reduce((sAcc: number, sub: any) => sAcc + sub.prompts.length, 0), 0)} prompts.
+            Currently loaded: {state.promptLibrary.length} categories with{' '}
+            {state.promptLibrary.reduce(
+              (acc: number, cat: CategoryDef) =>
+                acc + cat.subCategories.reduce((sAcc: number, sub: any) => sAcc + sub.prompts.length, 0),
+              0
+            )} prompts.
           </div>
         )}
       </FieldSet>
@@ -187,10 +172,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       <div className={s.marginTop}>
         {saveStatus && (
           <div style={{ marginBottom: '16px' }}>
-            <Alert
-              severity={saveStatus}
-              title={saveStatus === 'success' ? 'Success' : 'Error'}
-            >
+            <Alert severity={saveStatus} title={saveStatus === 'success' ? 'Success' : 'Error'}>
               {saveMessage}
             </Alert>
           </div>
@@ -206,14 +188,10 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
 export default AppConfig;
 
 const getStyles = (theme: GrafanaTheme2) => ({
-  colorWeak: css`
-    color: ${theme.colors.text.secondary};
-  `,
   marginTop: css`
     margin-top: ${theme.spacing(3)};
   `,
 });
-
 
 const updatePlugin = async (pluginId: string, data: Partial<PluginMeta>) => {
   const response = await getBackendSrv().fetch({
@@ -221,6 +199,5 @@ const updatePlugin = async (pluginId: string, data: Partial<PluginMeta>) => {
     method: 'POST',
     data,
   });
-
   return lastValueFrom(response);
 };
