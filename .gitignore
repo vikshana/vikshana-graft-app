@@ -55,3 +55,8 @@ ci/
 
 # Temporary files
 .temp/
+
+# UI verification screenshots (ephemeral, per-session evidence)
+/output/*.jpeg
+/output/*.png
+/output/*.webp
