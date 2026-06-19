@@ -192,6 +192,7 @@ describe('runOrchestration', () => {
                 expect.anything(),        // onUpdate
                 expect.any(Array),        // preferredCategories
                 expect.any(String),       // conversationDigest
+                expect.any(String),       // schemaCapabilityHint
             );
         });
 
@@ -214,6 +215,7 @@ describe('runOrchestration', () => {
                 expect.anything(), expect.anything(),
                 expect.any(Array),   // preferredCategories
                 expect.any(String),  // conversationDigest
+                expect.any(String),  // schemaCapabilityHint
             );
         });
 
@@ -236,6 +238,7 @@ describe('runOrchestration', () => {
                 expect.anything(), expect.anything(),
                 expect.any(Array),   // preferredCategories
                 expect.any(String),  // conversationDigest
+                expect.any(String),  // schemaCapabilityHint
             );
         });
 
@@ -524,6 +527,7 @@ describe('sanitisePlan (Fix 1: code-enforced plan gate)', () => {
             expect.anything(), expect.anything(),
             expect.any(Array),   // preferredCategories
             expect.any(String),  // conversationDigest
+            expect.any(String),  // schemaCapabilityHint
         );
     });
 });
@@ -691,6 +695,7 @@ describe('sanitisePlan — data step injection for lone dashboard steps', () => 
             expect.anything(), expect.anything(),
             expect.any(Array),   // preferredCategories
             expect.any(String),  // conversationDigest
+            expect.any(String),  // schemaCapabilityHint
         );
     });
 

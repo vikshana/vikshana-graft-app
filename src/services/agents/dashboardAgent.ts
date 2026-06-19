@@ -1,8 +1,13 @@
 import { llm } from '@grafana/llm';
 import type { ToolExecution } from '../../types/llm.types';
-import type { PlanStep, SpecialistResult, DataFindings, ToolCategory } from './types';
+import type {
+    PlanStep, SpecialistResult, DataFindings, ToolCategory,
+    ValidatedLokiQuery, ValidatedPrometheusQuery, DashboardSchemaCapability,
+    PanelThreshold,
+} from './types';
 import { TOOL_CATEGORIES } from '../toolFilter';
 import { normalizeToolArgs } from '../toolUtils';
+import { enrichDataFindings } from './dashboardEnrichment';
 
 const SETTINGS_PATH = '/plugins/vikshana-graft-app';
 
@@ -33,9 +38,17 @@ function scopeDashboardTools(allTools: any[]): any[] {
     return allTools.filter(t => allowed.has(t.function?.name));
 }
 
+// ─── Findings formatter ───────────────────────────────────────────────────────
+
+/** Render a thresholds array as compact JSON for the prompt. */
+function renderThresholds(thresholds: PanelThreshold[]): string {
+    return JSON.stringify(thresholds.map(t => ({ value: t.value, color: t.color })));
+}
+
 /**
- * Formats DataFindings into a clear, structured block for the dashboard agent's
- * system prompt. This is the primary input it uses to build panel queries.
+ * Formats DataFindings into a structured block for the dashboard agent's system prompt.
+ * Now includes presentation metadata (unit, suggestedViz, metricType, thresholds)
+ * and the full labels map for template variable generation.
  */
 function formatFindingsForPrompt(dataFindings: DataFindings): string {
     const sections: string[] = [];
@@ -43,50 +56,61 @@ function formatFindingsForPrompt(dataFindings: DataFindings): string {
     if (dataFindings.loki) {
         const f = dataFindings.loki;
         const dsJson = `{"type": "loki", "uid": "${f.datasourceUid}"}`;
+
+        // Render labels for variable generation
+        const labelsBlock = Object.keys(f.labels ?? {}).length > 0
+            ? `\nDiscovered labels (use for template variables):\n` +
+              Object.entries(f.labels).map(([k, vs]) => `  ${k}: ${vs.slice(0, 5).join(', ')}`).join('\n')
+            : '';
+
         sections.push(`## Loki Data Source
 Datasource UID: ${f.datasourceUid}
 Datasource name: ${f.datasourceName}
 Datasource JSON (copy exactly into every Loki panel target): ${dsJson}
-
-Validated queries — for each query, copy BOTH the expr AND the datasource JSON into the panel target:
-${f.validatedQueries.map((q, i) =>
-`${i + 1}. Description: ${q.description}
+${labelsBlock}
+Validated queries — copy BOTH expr AND datasource JSON into each panel target:
+${f.validatedQueries.map((q: ValidatedLokiQuery, i) => {
+    const meta: string[] = [];
+    if (q.suggestedViz) { meta.push(`suggestedViz: ${q.suggestedViz}`); }
+    if (q.unit) { meta.push(`unit: ${q.unit}`); }
+    return `${i + 1}. Description: ${q.description}
    LogQL expr: ${q.logql}
-   Datasource JSON: ${dsJson}`
-).join('\n')}`);
+   Datasource JSON: ${dsJson}${meta.length > 0 ? `\n   Presentation: ${meta.join(', ')}` : ''}`;
+}).join('\n')}`);
     }
 
     if (dataFindings.prometheus) {
         const f = dataFindings.prometheus;
         const dsJson = `{"type": "prometheus", "uid": "${f.datasourceUid}"}`;
+
+        const labelsBlock = Object.keys(f.labels ?? {}).length > 0
+            ? `\nDiscovered labels (use for template variables):\n` +
+              Object.entries(f.labels).map(([k, vs]) => `  ${k}: ${vs.slice(0, 5).join(', ')}`).join('\n')
+            : '';
+
         sections.push(`## Prometheus Data Source
 Datasource UID: ${f.datasourceUid}
 Datasource name: ${f.datasourceName}
 Datasource JSON (copy exactly into every Prometheus panel target): ${dsJson}
-
-Validated queries — for each query, copy BOTH the expr AND the datasource JSON into the panel target:
-${f.validatedQueries.map((q, i) =>
-`${i + 1}. Description: ${q.description}
+${labelsBlock}
+Validated queries — copy BOTH expr AND datasource JSON into each panel target:
+${f.validatedQueries.map((q: ValidatedPrometheusQuery, i) => {
+    const meta: string[] = [];
+    if (q.suggestedViz) { meta.push(`suggestedViz: ${q.suggestedViz}`); }
+    if (q.unit) { meta.push(`unit: ${q.unit}`); }
+    if (q.metricType) { meta.push(`metricType: ${q.metricType}`); }
+    if (q.thresholds) { meta.push(`thresholds: ${renderThresholds(q.thresholds)}`); }
+    return `${i + 1}. Description: ${q.description}
    PromQL expr: ${q.promql}
-   Datasource JSON: ${dsJson}`
-).join('\n')}`);
+   Datasource JSON: ${dsJson}${meta.length > 0 ? `\n   Presentation: ${meta.join(', ')}` : ''}`;
+}).join('\n')}`);
     }
 
     return sections.join('\n\n');
 }
 
-/**
- * Builds a directional guidance block for the empty-findings case.
- *
- * When the upstream specialist produced no validated queries the dashboard
- * agent must discover the datasource itself. If we can infer the required
- * datasource type (Prometheus vs Loki) from the plan step + conversation, we
- * inject an explicit directive so the agent does not default to Loki/logs when
- * the user actually asked for metrics.
- *
- * preferredCategories comes from inferDataCategoriesForDashboard (step description
- * + conversation digest), computed in the orchestrator before calling us.
- */
+// ─── Empty-findings guidance ──────────────────────────────────────────────────
+
 function buildEmptyFindingsGuidance(preferredCategories: ToolCategory[]): string {
     const onlyPrometheus = preferredCategories.length === 1 && preferredCategories[0] === 'prometheus';
     const onlyLoki = preferredCategories.length === 1 && preferredCategories[0] === 'loki';
@@ -124,31 +148,334 @@ NEVER attach a LogQL query to a prometheus datasource, and NEVER attach a PromQL
 datasource — that is the single most common cause of an empty "No data" dashboard.`;
 }
 
-/**
- * System prompt for the dashboard construction agent.
- * Uses Model.LARGE for robust structural reasoning over dashboard JSON.
- */
+// ─── V1 quality rules ─────────────────────────────────────────────────────────
+
+function buildV1DashboardRules(layoutHint?: string): string {
+    // Derive row grouping strategy from layout hint
+    const rowStrategy = layoutHint === 'RED'
+        ? `Organize panels into rows by signal type:
+  - Row "Request Rate" — request/throughput timeseries panels (full width or paired)
+  - Row "Errors" — error rate / error count panels
+  - Row "Duration / Latency" — latency timeseries and histogram quantile panels
+  - Row "Logs" (if applicable) — log panels at the bottom`
+        : layoutHint === 'USE'
+        ? `Organize panels into rows by resource:
+  - One row per resource type (CPU, Memory, Network, Disk)
+  - Within each row: Utilization | Saturation | Errors`
+        : layoutHint === 'golden-signals'
+        ? `Organize panels into rows by signal:
+  - Row "Latency", Row "Traffic", Row "Errors", Row "Saturation"`
+        : `Group related panels into rows. Create one row per logical service, component, or signal type.
+  Each row should have a descriptive title. Related panels (e.g. request rate + error rate for the same service)
+  belong in the same row.`;
+
+    return `## Dashboard schema: Classic v1 (panels[]/templating.list)
+
+## Dashboard skeleton (Step 1 — create this first)
+Call update_dashboard with this skeleton. Choose a time range appropriate to the data:
+{
+  "dashboard": {
+    "title": "<descriptive title reflecting the service/scope being monitored>",
+    "description": "<1-2 sentence description of what this dashboard monitors>",
+    "uid": "",
+    "id": null,
+    "panels": [],
+    "schemaVersion": 38,
+    "time": { "from": "now-1h", "to": "now" },
+    "timepicker": {},
+    "refresh": "30s",
+    "tags": ["<service-name>", "<env>"],
+    "templating": { "list": [] },
+    "annotations": { "list": [] }
+  },
+  "folderId": 0,
+  "overwrite": false
+}
+
+## Step 2 — Get assigned UID
+Call get_dashboard_by_uid with the uid returned by update_dashboard.
+Also read isV2 from the response — if true, you are on a V2-capable Grafana and
+could use the v2 schema for future dashboards, but continue with v1 for this one.
+IMPORTANT: note the UID immediately and include [Open dashboard](/d/{uid}) in your final response.
+
+## Step 3 — Build template variables FIRST (before panels)
+If labels were provided in the findings above, create query variables in templating.list.
+For each meaningful label (e.g. job, instance, namespace, service):
+{
+  "name": "<label_name>",
+  "type": "query",
+  "label": "<Human Label>",
+  "datasource": { "type": "<loki|prometheus>", "uid": "<datasourceUid>" },
+  "query": "label_values(<metric_or_stream>, <label_name>)",
+  "refresh": 2,
+  "includeAll": true,
+  "multi": true,
+  "allValue": ".*",
+  "sort": 1
+}
+Then update panel queries to use the variable: replace fixed label values with $<label_name>
+and use \${<label_name>:regex} inside regex matchers or LogQL stream selectors.
+
+## Step 4 — Build ALL panels in a single update
+Build the complete panels array including all row panels and data panels, then call update_dashboard
+ONCE with the full dashboard JSON. Do NOT call get_dashboard_by_uid before each panel.
+
+${rowStrategy}
+
+## Panel construction rules
+
+### Row panels (create one per logical group BEFORE the group's data panels)
+{ "type": "row", "title": "<Row Title>", "id": <id>, "collapsed": false,
+  "gridPos": { "h": 1, "w": 24, "x": 0, "y": <y> }, "panels": [] }
+
+### Panel layout (24-column grid)
+- Stats row at top: w:6, h:4 per panel (fits 4 across)
+- Log panels: w:24, h:8 (full width — logs need space)
+- Paired panels (e.g. rate + errors): w:12, h:8 each, x:0 and x:12
+- Single timeseries: w:24, h:8 (full width) or w:12 paired
+- Heatmaps: w:12 or w:24, h:8
+- Always increment y to place each panel/row below the previous one
+- Never overlap: ensure y + h of one panel = y of the next at the same x
+
+### Visualization type selection
+Use "suggestedViz" from the presentation metadata above. If not provided:
+- "timeseries" for time-varying metrics (rates, counts over time)
+- "stat" for single current values (uptime, version, current error count)
+- "gauge" for bounded ratios/percentages (0–1 or 0–100)
+- "bargauge" for comparing values across labels (per-service breakdown)
+- "heatmap" for histogram _bucket metrics — set dataFormat:"tsbuckets", yAxis.unit, and use "le" as the legend
+- "table" for multi-column label breakdowns
+- "logs" for raw Loki log streams — set options.dedupStrategy="none", options.showTime=true
+- "timeseries" for LogQL metric queries (rate(), count_over_time(), etc.)
+
+### Units (fieldConfig.defaults.unit)
+REQUIRED on every data panel. Use the "unit" from presentation metadata above. If not provided:
+- "s" for _seconds/_duration metrics
+- "ms" for _milliseconds metrics
+- "bytes" for _bytes metrics
+- "percent" for 0–100 percentage metrics, "percentunit" for 0–1 ratios
+- "reqps" for rate() on _total/_count metrics
+- "short" for dimensionless counts / generic numbers
+Set on the panel as: "fieldConfig": { "defaults": { "unit": "<unit>" } }
+
+### Thresholds (stat/gauge/bargauge panels)
+REQUIRED for stat, gauge, and bargauge panels. Use the "thresholds" from presentation metadata if provided.
+Default: green (base) → orange (80%) → red (90%). Encode as:
+"fieldConfig": {
+  "defaults": {
+    "unit": "<unit>",
+    "thresholds": {
+      "mode": "absolute",
+      "steps": [{"value": null, "color": "green"}, {"value": 80, "color": "orange"}, {"value": 90, "color": "red"}]
+    },
+    "color": { "mode": "thresholds" }
+  }
+}
+For error rates (0–1): steps null→green, 0.01→orange, 0.05→red
+For utilization (0–1): steps null→green, 0.75→orange, 0.90→red
+
+### Panel descriptions
+REQUIRED on every panel. Set "description": "<what this panel shows and why it matters>".
+This appears as a tooltip (ⓘ) when the user hovers the panel title.
+
+### Legend format (required on every target)
+- Loki: use label matchers from the expr, e.g. "{{job}} {{level}}". Static string if no labels.
+- Prometheus: use label names from PromQL, e.g. "{{job}}" or "{{instance}}". Static if scalar.
+- Never omit legendFormat. Never use "" or "{{__name__}}".
+
+### Datasource correctness
+CRITICAL: LogQL → loki datasource. PromQL → prometheus datasource. Never cross them.
+
+## Step 5 — Verify
+Call get_dashboard_by_uid. Confirm panel count and that rows are present.
+Then call get_dashboard_panel_queries and fix any datasource-type mismatch before finishing.
+
+## Step 6 — Quality self-audit
+Call get_dashboard_summary and verify:
+- Every data panel has a unit set (not empty)
+- stat/gauge/bargauge panels have thresholds
+- Every panel has a description
+- Row panels are present grouping the data panels
+If any panel fails a check and the iteration budget allows, call update_dashboard to patch it.
+
+## Final response
+Include:
+- Dashboard title and [Open dashboard](/d/{uid})
+- Panels created with their titles, visualization types, and queries
+- Template variables added (if any)
+- Any datasource mismatches found and corrected
+- Any quality issues patched`;
+}
+
+// ─── V2 quality rules (dormant — requires mcp-grafana ≥ v0.16.0) ─────────────
+
+function buildV2DashboardRules(layoutHint?: string): string {
+    const tabStrategy = layoutHint === 'RED'
+        ? `Create tabs for: "Request Rate", "Errors", "Duration", and (if applicable) "Logs".`
+        : layoutHint === 'USE'
+        ? `Create one tab per resource type (CPU, Memory, Network, Disk).`
+        : layoutHint === 'golden-signals'
+        ? `Create tabs for: "Latency", "Traffic", "Errors", "Saturation".`
+        : `Create one tab per logical service or signal type. Group related panels within each tab.`;
+
+    return `## Dashboard schema: V2 (elements/layout/variables)
+NOTE: This Grafana supports the V2 dashboard schema (app-platform API).
+The update_dashboard tool will route V2 bodies (those with top-level "elements"/"layout") through
+the Kubernetes API. If the write fails with "Kubernetes-capable Grafana is required", fall back
+to the Classic v1 schema immediately (rebuild with panels[] instead of elements/layout).
+
+## V2 Structure
+V2 dashboards use a fundamentally different shape from v1:
+- Panels live in "elements" — a map keyed by element name, NOT a panels[] array
+- "layout" references elements and defines tabs/rows/grid positioning
+- Variables in "variables[]" (not "templating.list")
+- Time range in "timeSettings" (not "time"/"refresh")
+
+## V2 Skeleton (Step 1)
+Call update_dashboard with this body (top-level "elements"/"layout" signals V2 to the MCP server):
+{
+  "dashboard": {
+    "title": "<descriptive title>",
+    "description": "<what this dashboard monitors>",
+    "tags": ["<service>"],
+    "elements": {},
+    "layout": {
+      "kind": "TabsLayout",
+      "spec": { "tabs": [] }
+    },
+    "variables": [],
+    "timeSettings": { "from": "now-1h", "to": "now", "autoRefresh": "30s" }
+  },
+  "overwrite": false
+}
+
+## Step 2 — Build variables
+For each meaningful label add to "variables":
+{
+  "kind": "QueryVariable",
+  "spec": {
+    "name": "<label>",
+    "label": "<Human Label>",
+    "query": "label_values(<metric>, <label>)",
+    "datasource": { "type": "<prometheus|loki>", "uid": "<uid>" },
+    "includeAll": true,
+    "multi": true,
+    "allValue": ".*",
+    "refresh": "onDashboardLoad"
+  }
+}
+
+## Step 3 — Build panels in elements map
+Each panel is a named entry in "elements":
+"elements": {
+  "<panel-name>": {
+    "kind": "Panel",
+    "spec": {
+      "id": <sequential int>,
+      "title": "<Panel Title>",
+      "description": "<what this panel shows>",
+      "vizConfig": {
+        "kind": "<TimeSeriesPanel|StatPanel|GaugePanelcfg|BarGaugePanel|HeatmapPanel|TablePanel|LogsPanel>",
+        "spec": {
+          "fieldConfig": {
+            "defaults": {
+              "unit": "<unit>",
+              "thresholds": { "mode": "absolute", "steps": [{"value": null, "color": "green"}, ...] },
+              "color": { "mode": "thresholds" }
+            }
+          }
+        }
+      },
+      "data": {
+        "kind": "QueryGroup",
+        "spec": {
+          "queries": [
+            {
+              "kind": "PanelQuery",
+              "spec": {
+                "refId": "A",
+                "query": {
+                  "kind": "prometheus",
+                  "group": "prometheus",
+                  "datasource": { "name": "<datasourceUid>" },
+                  "spec": { "expr": "<PromQL or LogQL expression>", "legendFormat": "{{job}}" }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
+NOTE: datasource type is "group" (the datasource plugin id), uid goes in "datasource.name" (V2 convention).
+
+## Step 4 — Build layout with tabs
+${tabStrategy}
+
+"layout": {
+  "kind": "TabsLayout",
+  "spec": {
+    "tabs": [
+      {
+        "kind": "TabsLayoutTab",
+        "spec": {
+          "title": "<Tab Title>",
+          "layout": {
+            "kind": "GridLayout",
+            "spec": {
+              "items": [
+                {
+                  "kind": "GridLayoutItem",
+                  "spec": {
+                    "x": 0, "y": 0, "width": 12, "height": 8,
+                    "element": { "kind": "ElementReference", "name": "<panel-name>" }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  }
+}
+
+## Quality rules (same as v1)
+- Unit on every data panel (fieldConfig.defaults.unit)
+- Thresholds on stat/gauge panels
+- Description on every panel
+- Variable queries with includeAll
+- Correct datasource grouping per query language
+
+## Fallback
+If update_dashboard fails with "Kubernetes-capable Grafana is required" or "k8s client is not available",
+the V2 schema cannot be saved on this Grafana. Immediately rebuild the dashboard using the Classic v1
+schema (panels[], templating.list, time/refresh) and call update_dashboard again.`;
+}
+
+// ─── Main system prompt builder ───────────────────────────────────────────────
+
 function buildDashboardSystemPrompt(
     stepDescription: string,
     dataFindings: DataFindings,
     context: string,
     preferredCategories: ToolCategory[] = [],
     conversationDigest = '',
+    schemaCapability: DashboardSchemaCapability = 'v1',
 ): string {
     const findingsBlock = formatFindingsForPrompt(dataFindings);
     const hasFindings = findingsBlock.length > 0;
-    // Findings exist but every query was filtered out (none returned data in the
-    // specialist's validation run). Treat the same as no findings — the dashboard
-    // agent must discover the datasource and write only queries it can verify.
     const hasValidatedQueries =
         hasFindings &&
         ((dataFindings.loki?.validatedQueries?.length ?? 0) > 0 ||
             (dataFindings.prometheus?.validatedQueries?.length ?? 0) > 0);
-
-    // When there are no validated queries but we DO know the correct datasource
-    // UID (because the specialist identified it even though all queries were
-    // dropped by Layer-2), emit partial findings so the agent uses the right UID.
     const hasKnownDatasource = hasFindings && !hasValidatedQueries;
+
+    const layoutHint = dataFindings.layoutHint;
+    const schemaRules = schemaCapability === 'v2-capable'
+        ? buildV2DashboardRules(layoutHint)
+        : buildV1DashboardRules(layoutHint);
 
     return `You are a dashboard construction agent for Graft, an AI assistant embedded in Grafana.
 Your task: ${stepDescription}
@@ -174,101 +501,83 @@ ${findingsBlock}
 
 ${buildEmptyFindingsGuidance(preferredCategories)}` : buildEmptyFindingsGuidance(preferredCategories)}
 
-## Dashboard construction process (follow this order exactly)
-
-Step 1 — Create an empty dashboard skeleton:
-Call update_dashboard with:
-{
-  "dashboard": {
-    "title": "<descriptive title>",
-    "uid": "",
-    "id": null,
-    "panels": [],
-    "schemaVersion": 38,
-    "time": { "from": "now-1h", "to": "now" },
-    "timepicker": {},
-    "refresh": "30s",
-    "tags": [],
-    "templating": { "list": [] },
-    "annotations": { "list": [] }
-  },
-  "folderId": 0,
-  "overwrite": false
-}
-
-Step 2 — Get the assigned UID:
-Call get_dashboard_by_uid with the uid returned by update_dashboard.
-IMPORTANT: as soon as you have the UID, note it down — you will include it in your final response
-as a markdown link: [Open dashboard](/d/{uid}). Do this even if subsequent steps fail.
-
-Step 3 — Add all panels in a single update:
-Build the complete panels array (one object per validated query), then call update_dashboard ONCE
-with the full dashboard JSON including all panels. Do NOT call get_dashboard_by_uid before each
-panel — build the entire panels array first, then write it in one call.
-
-Step 4 — Verify:
-Call get_dashboard_by_uid one final time. Confirm the panel count matches the number of panels
-you wrote. If the count is wrong, note the discrepancy in your summary.
-
-## Panel construction rules
-
-- datasource field in each target: copy the EXACT "Datasource JSON" shown next to each query above.
-  Do not look up datasource UIDs yourself — they are already provided for each query.
-- CRITICAL: LogQL expressions MUST use a datasource of type "loki". PromQL expressions MUST use a
-  datasource of type "prometheus". NEVER use a prometheus datasource for a LogQL query, and NEVER
-  use a loki datasource for a PromQL query. If you are unsure, check the query language:
-  LogQL uses {} stream selectors. PromQL uses metric names and functions like rate(), sum(), etc.
-- Use the EXACT expr values from the validated queries above — copy them character-for-character.
-- Panel types: "logs" for log panels, "timeseries" for time-series metrics, "stat" for single values, "bargauge" for bar charts.
-- Each panel must have: id (sequential integer), title, type, gridPos, targets array.
-- gridPos: use { "h": 8, "w": 12, "x": 0, "y": 0 } for the first panel and increment x/y to tile panels without overlap.
-- For Loki log panels: set options.dedupStrategy = "none", options.showTime = true.
-- For Loki stat/metric panels: use a metric query type rather than log type.
-- legendFormat (required on every target):
-  - For Loki queries: inspect the LogQL expression for label matchers (e.g. {job="api", level="error"}).
-    Use the most meaningful label(s) as the legend, e.g. "{{job}} - {{level}}".
-    If the query aggregates across all streams with no specific label, use a descriptive static string like "Log rate".
-    If there are multiple targets in the same panel each returning different data, use labels that distinguish them — never leave all targets with the same legendFormat string.
-  - For Prometheus queries: use label names from the PromQL expression, e.g. "{{job}}" or "{{instance}} {{job}}".
-    If the query produces a single scalar result, use a descriptive static string.
-  - Never omit legendFormat. Never set it to an empty string or the default "{{__name__}}".
-
-## When you are done
-
-After Step 4 (final get_dashboard_by_uid), call get_dashboard_panel_queries with the dashboard UID.
-Inspect each panel's datasource type against its query expression and FIX any mismatch before finishing:
-- If a panel uses a "prometheus" datasource but the expr is LogQL ({} stream selectors, |= filters),
-  the panel is broken. Repoint it to a "loki" datasource (find one via list_datasources if needed)
-  and call update_dashboard again with the corrected target.
-- If a panel uses a "loki" datasource but the expr is PromQL (metric names, rate(), sum()),
-  repoint it to a "prometheus" datasource and call update_dashboard again.
-- Re-run get_dashboard_panel_queries after corrections to confirm no mismatches remain.
-Do NOT finish while any panel's datasource type contradicts its query language.
-
-Respond with a summary including:
-- Dashboard title and a markdown link: [Open dashboard](/d/{uid})
-- List of panels added with their titles and the queries used
-- Any datasource mismatches you detected AND how you corrected them
-- Any panels that could not be created and why
+${schemaRules}
 
 ${context ? `## Current Grafana context\n${context}` : ''}`;
 }
 
+// ─── UID extraction helper ────────────────────────────────────────────────────
+
+function extractDashboardUid(rawResult: string): string | undefined {
+    try {
+        const parsed = JSON.parse(rawResult);
+        const blocks: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
+        for (const block of blocks) {
+            if (typeof block !== 'object' || block === null) { continue; }
+            const b = block as Record<string, unknown>;
+            if (typeof b['uid'] === 'string' && b['uid']) { return b['uid'] as string; }
+            if (typeof b['text'] === 'string') {
+                try {
+                    const inner = JSON.parse(b['text'] as string) as Record<string, unknown>;
+                    if (typeof inner['uid'] === 'string' && inner['uid']) { return inner['uid'] as string; }
+                } catch { /* not JSON */ }
+            }
+        }
+    } catch { /* not parseable */ }
+    return undefined;
+}
+
+// ─── isV2 probe ───────────────────────────────────────────────────────────────
+
+/**
+ * Reads isV2/apiVersion from a get_dashboard_by_uid tool result.
+ * Returns the resolved target schema: 'v2' if the server confirmed V2 capability,
+ * 'v1' otherwise. Used for the authoritative capability probe after skeleton creation.
+ */
+function resolveSchemaFromProbeResult(rawResult: string, heuristic: DashboardSchemaCapability): DashboardSchemaCapability {
+    try {
+        const parsed = JSON.parse(rawResult);
+        // get_dashboard_by_uid returns { dashboard, meta, apiVersion, isV2 }
+        // (mcp-grafana ≥ v0.16.0). On older servers this key is absent → v1.
+        const blocks: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
+        for (const block of blocks) {
+            if (typeof block !== 'object' || block === null) { continue; }
+            const b = block as Record<string, unknown>;
+            // Try direct isV2 field (v0.16.0+)
+            if (typeof b['isV2'] === 'boolean') {
+                // isV2 on the response means the server can handle V2;
+                // if heuristic says v2-capable, use v2
+                return heuristic === 'v2-capable' ? 'v2-capable' : 'v1';
+            }
+            // Try text-block JSON (content array wrapping)
+            if (typeof b['text'] === 'string') {
+                try {
+                    const inner = JSON.parse(b['text'] as string) as Record<string, unknown>;
+                    if (typeof inner['isV2'] === 'boolean') {
+                        return heuristic === 'v2-capable' ? 'v2-capable' : 'v1';
+                    }
+                } catch { /* not JSON */ }
+            }
+        }
+    } catch { /* not parseable */ }
+    // No isV2 field → old server (v0.11.4) → v1 only
+    return 'v1';
+}
+
+// ─── Main agent entry point ───────────────────────────────────────────────────
+
 /**
  * Purpose-built dashboard creation/editing agent.
  *
- * Differences from the generic specialist:
+ * Key behaviours:
  * - Uses Model.LARGE for robust dashboard JSON construction
  * - Tool scope limited to dashboards + datasources (never queries data directly)
- * - Receives pre-validated queries from upstream data specialists via DataFindings
- * - Follows a structured multi-step construction process (skeleton → get UID → add panels)
- * - Dashboard JSON results are never compressed (required for incremental panel addition)
- * - preferredCategories: inferred datasource type(s) from step description + conversation
- *   (computed by inferDataCategoriesForDashboard in the orchestrator). Used to emit a
- *   directional hint ("this dashboard needs Prometheus metrics") when findings are empty so
- *   the agent does not default to Loki/logs for a metrics request.
- * - conversationDigest: compact summary of recent turns so the agent can resolve references
- *   like "it" / "those services" even when findings are empty.
+ * - Enriches DataFindings with deterministic unit/viz/threshold metadata before prompting
+ * - Builds a v1 (Classic) or v2 (elements/layout/tabs) dashboard based on runtime capability
+ * - Performs an authoritative V2 capability probe after skeleton creation (reads isV2 from
+ *   get_dashboard_by_uid response). On v0.11.4 servers the field is absent → always v1.
+ * - V2 write failures fall back to v1 automatically
+ * - Dashboard JSON results are never compressed (required for correct panel construction)
  */
 export async function runDashboardAgent(
     step: PlanStep,
@@ -282,9 +591,20 @@ export async function runDashboardAgent(
     onUpdate: (stepId: string, toolExecutions: ToolExecution[]) => void,
     preferredCategories: ToolCategory[] = [],
     conversationDigest = '',
+    schemaCapabilityHint: DashboardSchemaCapability = 'v1',
 ): Promise<SpecialistResult> {
+    // Apply deterministic enrichment before building the prompt
+    const enrichedFindings = enrichDataFindings(dataFindings, step.description, userMessage);
+
     const scopedTools = scopeDashboardTools(allTools);
-    const systemPrompt = buildDashboardSystemPrompt(step.description, dataFindings, context, preferredCategories, conversationDigest);
+
+    // Start with the heuristic schema target; will be refined by the runtime probe
+    let resolvedSchema: DashboardSchemaCapability = schemaCapabilityHint;
+
+    const systemPrompt = buildDashboardSystemPrompt(
+        step.description, enrichedFindings, context,
+        preferredCategories, conversationDigest, resolvedSchema,
+    );
 
     const llmMessages: any[] = [
         { role: 'system', content: systemPrompt },
@@ -295,9 +615,10 @@ export async function runDashboardAgent(
     let fullContent = '';
     let iteration = 0;
     let createdDashboardUid: string | undefined;
+    let v2FallbackNote = '';
 
     // Dashboard JSON results must never be compressed — the agent needs the full
-    // panel array to append new panels correctly in each iteration.
+    // panel/elements structure for each update.
     const NO_COMPRESS = new Set([
         'get_dashboard_by_uid',
         'get_dashboard_panel_queries',
@@ -317,10 +638,7 @@ export async function runDashboardAgent(
         fullContent = response.choices?.[0]?.message?.content ?? '';
 
         while (toolCalls.length > 0 && iteration < maxIterations) {
-            if (signal.aborted) {
-                throw new Error('Aborted');
-            }
-
+            if (signal.aborted) { throw new Error('Aborted'); }
             iteration++;
 
             llmMessages.push({
@@ -330,46 +648,53 @@ export async function runDashboardAgent(
             });
 
             for (const toolCall of toolCalls) {
-                if (signal.aborted) {
-                    throw new Error('Aborted');
-                }
+                if (signal.aborted) { throw new Error('Aborted'); }
 
                 toolExecutions.push({ name: toolCall.function.name, status: 'pending' });
                 onUpdate(step.id, toolExecutions.map(t => ({ ...t })));
 
                 let rawResult = '';
                 try {
-                    if (!mcpClient) {
-                        throw new Error('MCP client not available');
-                    }
+                    if (!mcpClient) { throw new Error('MCP client not available'); }
+
                     const args = normalizeToolArgs(JSON.parse(toolCall.function.arguments));
                     const result = await mcpClient.callTool({ name: toolCall.function.name, arguments: args });
                     rawResult = JSON.stringify(result.content);
 
-                    // Extract the dashboard UID from the update_dashboard response so we
-                    // can guarantee a link in the final output even if the LLM omits it.
+                    // ── UID extraction ──────────────────────────────────────
                     if (toolCall.function.name === 'update_dashboard' && !createdDashboardUid) {
-                        try {
-                            const parsed = JSON.parse(rawResult);
-                            const blocks: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
-                            for (const block of blocks) {
-                                if (typeof block !== 'object' || block === null) { continue; }
-                                const b = block as Record<string, unknown>;
-                                if (typeof b['uid'] === 'string' && b['uid']) {
-                                    createdDashboardUid = b['uid'] as string;
-                                    break;
-                                }
-                                if (typeof b['text'] === 'string') {
-                                    try {
-                                        const inner = JSON.parse(b['text'] as string) as Record<string, unknown>;
-                                        if (typeof inner['uid'] === 'string' && inner['uid']) {
-                                            createdDashboardUid = inner['uid'] as string;
-                                            break;
-                                        }
-                                    } catch { /* not JSON text */ }
-                                }
-                            }
-                        } catch { /* rawResult not parseable — uid stays undefined */ }
+                        createdDashboardUid = extractDashboardUid(rawResult);
+                    }
+
+                    // ── Authoritative V2 capability probe ───────────────────
+                    // After the skeleton's get_dashboard_by_uid call, read isV2 from the
+                    // response. On mcp-grafana ≥ v0.16.0 this confirms V2 capability;
+                    // on v0.11.4 (current bundled) the field is absent → resolves to v1.
+                    if (toolCall.function.name === 'get_dashboard_by_uid' && createdDashboardUid) {
+                        const probed = resolveSchemaFromProbeResult(rawResult, schemaCapabilityHint);
+                        if (probed !== resolvedSchema) {
+                            resolvedSchema = probed;
+                            // Rebuild system prompt with confirmed target (affects remaining iterations)
+                            const updatedPrompt = buildDashboardSystemPrompt(
+                                step.description, enrichedFindings, context,
+                                preferredCategories, conversationDigest, resolvedSchema,
+                            );
+                            llmMessages[0] = { role: 'system', content: updatedPrompt };
+                        }
+                    }
+
+                    // ── V2 write failure → fall back to v1 ─────────────────
+                    if (toolCall.function.name === 'update_dashboard' &&
+                        resolvedSchema === 'v2-capable' &&
+                        (rawResult.includes('Kubernetes-capable Grafana is required') ||
+                         rawResult.includes('k8s client is not available'))) {
+                        resolvedSchema = 'v1';
+                        v2FallbackNote = '\n\n> **Note:** V2 schema write failed (app-platform API not available on this Grafana). Dashboard rebuilt as Classic v1.';
+                        const updatedPrompt = buildDashboardSystemPrompt(
+                            step.description, enrichedFindings, context,
+                            preferredCategories, conversationDigest, 'v1',
+                        );
+                        llmMessages[0] = { role: 'system', content: updatedPrompt };
                     }
 
                     llmMessages.push({
@@ -390,7 +715,6 @@ export async function runDashboardAgent(
                         content: rawResult,
                         tool_call_id: toolCall.id,
                     });
-
                     const idx = findLastIndex(
                         toolExecutions,
                         (t: ToolExecution) => t.name === toolCall.function.name && t.status === 'pending'
@@ -405,7 +729,6 @@ export async function runDashboardAgent(
             }
 
             // Compress only non-dashboard tool results (list_datasources etc.)
-            // Dashboard JSON is preserved verbatim for incremental panel construction.
             for (const toolCall of toolCalls) {
                 if (NO_COMPRESS.has(toolCall.function.name)) { continue; }
                 const msgIdx = findLastIndex(
@@ -422,9 +745,7 @@ export async function runDashboardAgent(
                 }
             }
 
-            if (signal.aborted) {
-                throw new Error('Aborted');
-            }
+            if (signal.aborted) { throw new Error('Aborted'); }
 
             response = await llm.chatCompletions({
                 model: llm.Model.LARGE,
@@ -443,6 +764,10 @@ export async function runDashboardAgent(
             fullContent += `\n\n> **Note:** Maximum tool call steps (${maxIterations}) reached. If the dashboard was created, ${uidHint}. To add remaining panels, ask me to continue, or increase the limit in the Graft plugin settings at ${SETTINGS_PATH}.`;
         }
 
+        if (v2FallbackNote) {
+            fullContent += v2FallbackNote;
+        }
+
         return {
             stepId: step.id,
             status: 'success',
@@ -451,9 +776,7 @@ export async function runDashboardAgent(
             dashboardUid: createdDashboardUid,
         };
     } catch (err: any) {
-        if (err.message === 'Aborted') {
-            throw err;
-        }
+        if (err.message === 'Aborted') { throw err; }
         return {
             stepId: step.id,
             status: 'error',

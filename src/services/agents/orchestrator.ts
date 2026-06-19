@@ -7,6 +7,7 @@ import type {
     OrchestrationUpdate,
     ToolCategory,
     DataFindings,
+    DashboardSchemaCapability,
 } from './types';
 import { TOOL_CATEGORIES } from '../toolFilter';
 import { llmService } from '../llm';
@@ -14,6 +15,16 @@ import { runPlanner } from './planner';
 import { runSpecialist } from './specialist';
 import { runDashboardAgent } from './dashboardAgent';
 import { runSynthesiser } from './synthesiser';
+
+/**
+ * Extract the dashboard schema capability hint from the formatted context string.
+ * The context string contains a line like "Dashboard schema capability: v1|v2-capable"
+ * injected by formatContext in ChatInterface.tsx.
+ */
+function extractSchemaCapabilityFromContext(context: string): DashboardSchemaCapability {
+    const match = context.match(/Dashboard schema capability:\s*(v1|v2-capable)/);
+    return (match?.[1] as DashboardSchemaCapability | undefined) ?? 'v1';
+}
 
 function getEnabledCategories(toolsConfig?: ToolsConfig): ToolCategory[] {
     if (!toolsConfig) {
@@ -387,6 +398,7 @@ export async function runOrchestration(
                         },
                         dashHint,
                         conversationDigest,
+                        extractSchemaCapabilityFromContext(context),
                     );
                 }
 

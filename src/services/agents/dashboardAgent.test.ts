@@ -260,8 +260,8 @@ describe('runDashboardAgent', () => {
         const systemMsg = mockChatCompletions.mock.calls[0][0].messages
             .find((m: any) => m.role === 'system')?.content ?? '';
         expect(systemMsg).toContain('get_dashboard_panel_queries');
-        expect(systemMsg).toContain('FIX any mismatch before finishing');
-        expect(systemMsg).toMatch(/Do NOT finish while any panel/i);
+        expect(systemMsg).toContain('datasource-type mismatch');
+        expect(systemMsg).toMatch(/fix any datasource-type mismatch before finishing/i);
     });
 
     // ─── Directional hint tests (Fix B1) ─────────────────────────────────────
@@ -344,6 +344,7 @@ describe('runDashboardAgent', () => {
             prometheus: {
                 datasourceUid: 'prom-uid-456',
                 datasourceName: 'Prometheus',
+                labels: {},
                 validatedQueries: [],
             },
         };
