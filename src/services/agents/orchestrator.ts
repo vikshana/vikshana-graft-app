@@ -26,6 +26,48 @@ function extractSchemaCapabilityFromContext(context: string): DashboardSchemaCap
     return (match?.[1] as DashboardSchemaCapability | undefined) ?? 'v1';
 }
 
+/**
+ * Fetches the complete list of metric names from a Prometheus datasource via the
+ * Grafana backend proxy. Used to populate PrometheusFindings.availableMetrics when
+ * the specialist returned validatedQueries:[] — so the dashboard agent can plan
+ * panels from the actual metric list instead of inventing names from convention.
+ *
+ * Returns an empty array on any error (fail open — the agent can still proceed
+ * without the list, it just won't have the ground-truth metric names).
+ */
+async function fetchRealMetricNames(datasourceUid: string): Promise<string[]> {
+    try {
+        const url = `/api/datasources/proxy/uid/${datasourceUid}/api/v1/label/__name__/values`;
+        const response = await fetch(url);
+        if (!response.ok) { return []; }
+        const data = await response.json();
+        return Array.isArray(data?.data) ? (data.data as string[]) : [];
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Enriches collectedFindings with the real metric names from the datasource
+ * when the specialist was unable to validate any queries. Called code-side
+ * before the dashboard agent so the PLAN phase has ground-truth names.
+ */
+async function enrichFindingsWithRealMetrics(findings: DataFindings): Promise<DataFindings> {
+    if (findings.prometheus &&
+        findings.prometheus.validatedQueries.length === 0 &&
+        findings.prometheus.datasourceUid &&
+        !findings.prometheus.availableMetrics) {
+        const metrics = await fetchRealMetricNames(findings.prometheus.datasourceUid);
+        if (metrics.length > 0) {
+            return {
+                ...findings,
+                prometheus: { ...findings.prometheus, availableMetrics: metrics },
+            };
+        }
+    }
+    return findings;
+}
+
 function getEnabledCategories(toolsConfig?: ToolsConfig): ToolCategory[] {
     if (!toolsConfig) {
         return Object.keys(TOOL_CATEGORIES) as ToolCategory[];
@@ -370,7 +412,7 @@ export async function runOrchestration(
         }
 
         const waveResults = await Promise.allSettled(
-            wave.map(step => {
+            wave.map(async step => {
                 if (isDashboardStep(step)) {
                     // Infer the required datasource type from the step description and
                     // conversation. This hint is forwarded into the dashboard agent so that
@@ -382,13 +424,19 @@ export async function runOrchestration(
                         enabledCategories,
                     );
 
+                    // When the specialist returned no validated queries, fetch the real
+                    // metric names from the datasource in code and inject them into the
+                    // findings. This gives the PLAN phase ground-truth names to plan from
+                    // instead of inventing names from general OTel naming conventions.
+                    const enrichedFindings = await enrichFindingsWithRealMetrics(collectedFindings);
+
                     // Route to the purpose-built dashboard agent with collected findings.
                     // Dashboard construction is step-intensive; give it 2× the configured limit.
                     return runDashboardAgent(
                         step,
                         userMessage,
                         context,
-                        collectedFindings,
+                        enrichedFindings,
                         allTools,
                         mcpClient,
                         Math.min(maxIterations * 2, 100),

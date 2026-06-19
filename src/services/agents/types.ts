@@ -117,6 +117,8 @@ export interface LokiFindings {
     labels: Record<string, string[]>;
     /** Queries that have been executed and confirmed to return data */
     validatedQueries: ValidatedLokiQuery[];
+    /** Complete list of log stream label names from this Loki datasource */
+    availableLabels?: string[];
 }
 
 /**
@@ -129,6 +131,12 @@ export interface PrometheusFindings {
     labels: Record<string, string[]>;
     /** Queries that have been executed and confirmed to return data */
     validatedQueries: ValidatedPrometheusQuery[];
+    /**
+     * Complete list of metric names that actually exist in this datasource.
+     * Populated by the orchestrator (code-side) when validatedQueries is empty,
+     * so the dashboard agent can plan from reality not convention.
+     */
+    availableMetrics?: string[];
 }
 
 /**

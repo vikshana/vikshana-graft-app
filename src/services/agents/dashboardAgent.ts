@@ -397,6 +397,12 @@ function buildPlanPhasePrompt(
         (dataFindings.prometheus?.validatedQueries?.length ?? 0) > 0;
     const hasKnownDatasource = findingsBlock.length > 0 && !hasValidatedQueries;
 
+    // Build the available metrics block — injected when validatedQueries is empty
+    // so the LLM plans from the real metric list, not from naming conventions.
+    const availableMetricsList = (!hasValidatedQueries && dataFindings.prometheus?.availableMetrics?.length)
+        ? `\n## Available metrics in this Prometheus datasource (${dataFindings.prometheus.availableMetrics.length} total)\nUse ONLY these metric names — do not invent names that are not on this list:\n${dataFindings.prometheus.availableMetrics.map(m => `  - ${m}`).join('\n')}`
+        : '';
+
     return `You are a dashboard planning agent for Graft, an AI assistant embedded in Grafana.
 Your task: analyse the user request and the pre-validated query findings below, then output a
 STRUCTURED PANEL TODO LIST that the dashboard construction agent will use as its contract.
@@ -405,6 +411,7 @@ ${conversationDigest ? `## Recent conversation\n${conversationDigest}\n\n` : ''}
 ${hasValidatedQueries ? `## Pre-validated queries\n${findingsBlock}` :
   hasKnownDatasource ? `## Datasource identified\n${findingsBlock}\n\n${buildEmptyFindingsGuidance(preferredCategories)}` :
   buildEmptyFindingsGuidance(preferredCategories)}
+${availableMetricsList}
 
 ${context ? `## Current Grafana context\n${context}` : ''}
 
@@ -414,7 +421,7 @@ ${context ? `## Current Grafana context\n${context}` : ''}
     {
       "title": "<panel title>",
       "description": "<what this panel shows>",
-      "query": "<EXACT PromQL/LogQL from findings, OR 'DISCOVER' if no findings were provided>",
+      "query": "<EXACT PromQL/LogQL from findings, OR a PromQL expression using ONLY metric names from the available metrics list above>",
       "datasourceType": "<prometheus|loki>",
       "viz": "<timeseries|stat|gauge|bargauge|heatmap|table|logs>",
       "unit": "<grafana unit id or empty string>",
@@ -423,7 +430,7 @@ ${context ? `## Current Grafana context\n${context}` : ''}
     }
   ],
   "variables": [
-    { "name": "<var_name>", "label": "<Human Label>", "query": "label_values(<metric>, <label>)", "datasourceType": "<prometheus|loki>" }
+    { "name": "<var_name>", "label": "<Human Label>", "query": "label_values(<metric_from_available_list>, <label>)", "datasourceType": "<prometheus|loki>" }
   ],
   "timeRange": { "from": "now-1h", "to": "now" },
   "layoutHint": "<none|RED|USE|golden-signals>"
@@ -431,8 +438,10 @@ ${context ? `## Current Grafana context\n${context}` : ''}
 
 Rules:
 - If pre-validated queries were provided: use the EXACT expression strings from the findings. Do NOT rephrase or reconstruct.
-- If NO pre-validated queries were provided: set query to "DISCOVER" for every panel. The construction agent has tool access and will discover the real metric names. DO NOT invent or guess metric names — fabricated metric names produce empty "No data" panels.
+- If an available metrics list is shown above: write PromQL expressions using ONLY those exact metric names. Do NOT use metric names outside that list. Do NOT guess names that "should" exist.
+- If NO pre-validated queries AND NO available metrics list: set query to "DISCOVER" for every panel.
 - Include ONE entry per panel. Assign each panel to a rowGroup.
+- Wire template variables into queries: use {receiver=~"$receiver"}, {exporter=~"$exporter"}, {job=~"$job"} etc. where the label exists on the metric.
 - Output only the JSON object. No markdown fences, no explanation.`;
 }
 
