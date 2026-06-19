@@ -414,7 +414,7 @@ ${context ? `## Current Grafana context\n${context}` : ''}
     {
       "title": "<panel title>",
       "description": "<what this panel shows>",
-      "query": "<the PromQL or LogQL expression>",
+      "query": "<EXACT PromQL/LogQL from findings, OR 'DISCOVER' if no findings were provided>",
       "datasourceType": "<prometheus|loki>",
       "viz": "<timeseries|stat|gauge|bargauge|heatmap|table|logs>",
       "unit": "<grafana unit id or empty string>",
@@ -430,10 +430,9 @@ ${context ? `## Current Grafana context\n${context}` : ''}
 }
 
 Rules:
-- Include ONE entry per panel in the final dashboard. DO NOT omit panels from the findings.
-- Every validated query in the findings MUST appear as at least one panel.
-- Use the EXACT query expressions from the findings — do not rephrase or reconstruct.
-- Assign each panel to a rowGroup (at minimum one row per datasource type, or by signal/service).
+- If pre-validated queries were provided: use the EXACT expression strings from the findings. Do NOT rephrase or reconstruct.
+- If NO pre-validated queries were provided: set query to "DISCOVER" for every panel. The construction agent has tool access and will discover the real metric names. DO NOT invent or guess metric names — fabricated metric names produce empty "No data" panels.
+- Include ONE entry per panel. Assign each panel to a rowGroup.
 - Output only the JSON object. No markdown fences, no explanation.`;
 }
 
@@ -620,17 +619,35 @@ function buildCreatePhasePrompt(
     // Build a per-panel reference map: id → todo data (query, unit, datasourceType, etc.)
     // so the model can look up the right query/unit by panel id
     const dataLayouts = layout.filter(p => p.type === 'data');
+    const hasDiscoverPanels = dataLayouts.some(p => p.query === 'DISCOVER');
+
+    const discoverInstructions = hasDiscoverPanels ? `
+## DISCOVER MODE — find real metric names before writing panels
+
+Some panels are marked "DISCOVER". This means no pre-validated queries were available,
+so you MUST discover the actual metric names from the datasource before writing those panels.
+
+MANDATORY for DISCOVER panels:
+1. Call list_datasources to get the datasource uid and type.
+2. Call list_prometheus_metric_names (or equivalent) to get the full list of available metrics.
+3. From that list, choose the REAL metric names that match each panel's purpose.
+4. ONLY use metric names that actually exist in the list — never invent or guess names.
+5. Write the panel with the real expr.
+
+CRITICAL: Do NOT use metric names from general knowledge. A metric name that doesn't exist in the
+datasource will show "No data" permanently. Fabricated metrics are worse than no panel at all.` : '';
 
     return `You are a dashboard construction agent for Graft, an AI assistant embedded in Grafana.
 
 You have access to dashboard and datasource tools ONLY — no query tools.
-All queries below have been pre-validated — copy them VERBATIM.
+${hasDiscoverPanels ? 'Some panels have query="DISCOVER" — you MUST look up real metric names before writing those panels (see DISCOVER MODE section below).' : 'All queries below have been pre-validated — copy them VERBATIM.'}
 
 ${conversationDigest ? `## Recent conversation\n${conversationDigest}\n\n` : ''}\
 ${hasValidatedQueries ? `## Pre-validated data\n${findingsBlock}\n\n` :
   buildEmptyFindingsGuidance(preferredCategories) + '\n\n'}
 ${varList ? `${varList}\n\n` : ''}
 ${schemaRules}
+${discoverInstructions}
 
 ## PRE-COMPUTED LAYOUT (copy exact gridPos values — do NOT recalculate)
 
@@ -645,10 +662,13 @@ ${dataLayouts.map(p => {
     const ds = p.datasourceType === 'loki'
         ? (dataFindings.loki ? `{"type":"loki","uid":"${dataFindings.loki.datasourceUid}"}` : '{"type":"loki","uid":"<loki-uid>"}')
         : (dataFindings.prometheus ? `{"type":"prometheus","uid":"${dataFindings.prometheus.datasourceUid}"}` : '{"type":"prometheus","uid":"<prom-uid>"}');
+    const exprNote = p.query === 'DISCOVER'
+        ? '⚠ DISCOVER — call list_prometheus_metric_names to find the real expr for this panel'
+        : p.query;
     return `Panel id=${p.id} "${p.title}"
   viz: ${p.viz}  unit: ${p.unit || 'short'}  description: ${p.description || p.title}
   datasource: ${ds}
-  expr: ${p.query}`;
+  expr: ${exprNote}`;
 }).join('\n\n')}
 
 ## MANDATORY BUILD SEQUENCE — follow these steps IN ORDER

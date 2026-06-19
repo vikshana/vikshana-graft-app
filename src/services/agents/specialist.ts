@@ -116,6 +116,7 @@ ${labelDiscovery}
 - You MUST call ${queryTool} for EVERY query you intend to include in your output — not just one. Run each query individually and check that it returns data.
 - Only include queries that actually returned results when you called ${queryTool}. If a query returns no data (empty result, no streams, no series), revise the expression or omit it entirely.
 - NEVER include a query in your output that you did not explicitly call ${queryTool} with and confirm returned data.
+- NEVER guess or invent metric names from general knowledge of naming conventions. Only use metric names you have confirmed exist by calling list_prometheus_metric_names (or the equivalent label/series discovery tool) and seeing them in the response. A fabricated metric name shows "No data" permanently and is worse than an empty validatedQueries array.
 - When you output the JSON, copy the EXACT expression string you used in the ${queryTool} call — do not rephrase, reformat, or reconstruct it from memory.
 
 Presentation metadata rules (fill for every query in validatedQueries):
