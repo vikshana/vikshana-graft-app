@@ -94,6 +94,12 @@ export interface SpecialistResult {
      * Consumed by the dashboard agent to build panels with pre-validated queries.
      */
     dataFindings?: DataFindings;
+    /**
+     * UID of the Grafana dashboard created or updated during this step.
+     * Set by the dashboard agent when update_dashboard succeeds.
+     * Used by the synthesiser to guarantee a clickable link in the final response.
+     */
+    dashboardUid?: string;
 }
 
 // ─── Orchestration events ─────────────────────────────────────────────────────

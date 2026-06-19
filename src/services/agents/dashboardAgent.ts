@@ -2,6 +2,7 @@ import { llm } from '@grafana/llm';
 import type { ToolExecution } from '../../types/llm.types';
 import type { PlanStep, SpecialistResult, DataFindings, ToolCategory } from './types';
 import { TOOL_CATEGORIES } from '../toolFilter';
+import { normalizeToolArgs } from '../toolUtils';
 
 const SETTINGS_PATH = '/plugins/vikshana-graft-app';
 
@@ -293,6 +294,7 @@ export async function runDashboardAgent(
     const toolExecutions: ToolExecution[] = [];
     let fullContent = '';
     let iteration = 0;
+    let createdDashboardUid: string | undefined;
 
     // Dashboard JSON results must never be compressed — the agent needs the full
     // panel array to append new panels correctly in each iteration.
@@ -340,9 +342,35 @@ export async function runDashboardAgent(
                     if (!mcpClient) {
                         throw new Error('MCP client not available');
                     }
-                    const args = JSON.parse(toolCall.function.arguments);
+                    const args = normalizeToolArgs(JSON.parse(toolCall.function.arguments));
                     const result = await mcpClient.callTool({ name: toolCall.function.name, arguments: args });
                     rawResult = JSON.stringify(result.content);
+
+                    // Extract the dashboard UID from the update_dashboard response so we
+                    // can guarantee a link in the final output even if the LLM omits it.
+                    if (toolCall.function.name === 'update_dashboard' && !createdDashboardUid) {
+                        try {
+                            const parsed = JSON.parse(rawResult);
+                            const blocks: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
+                            for (const block of blocks) {
+                                if (typeof block !== 'object' || block === null) { continue; }
+                                const b = block as Record<string, unknown>;
+                                if (typeof b['uid'] === 'string' && b['uid']) {
+                                    createdDashboardUid = b['uid'] as string;
+                                    break;
+                                }
+                                if (typeof b['text'] === 'string') {
+                                    try {
+                                        const inner = JSON.parse(b['text'] as string) as Record<string, unknown>;
+                                        if (typeof inner['uid'] === 'string' && inner['uid']) {
+                                            createdDashboardUid = inner['uid'] as string;
+                                            break;
+                                        }
+                                    } catch { /* not JSON text */ }
+                                }
+                            }
+                        } catch { /* rawResult not parseable — uid stays undefined */ }
+                    }
 
                     llmMessages.push({
                         role: 'tool',
@@ -409,7 +437,10 @@ export async function runDashboardAgent(
         }
 
         if (iteration >= maxIterations) {
-            fullContent += `\n\n> **Note:** Maximum tool call steps (${maxIterations}) reached. If the dashboard was created, check the tool calls above for its UID and open it at /d/{uid}. To add remaining panels, ask me to continue, or increase the limit in the Graft plugin settings at ${SETTINGS_PATH}.`;
+            const uidHint = createdDashboardUid
+                ? `[Open dashboard](/d/${createdDashboardUid})`
+                : 'check the tool calls above for its UID and open it at /d/{uid}';
+            fullContent += `\n\n> **Note:** Maximum tool call steps (${maxIterations}) reached. If the dashboard was created, ${uidHint}. To add remaining panels, ask me to continue, or increase the limit in the Graft plugin settings at ${SETTINGS_PATH}.`;
         }
 
         return {
@@ -417,6 +448,7 @@ export async function runDashboardAgent(
             status: 'success',
             summary: fullContent || `Dashboard step "${step.description}" completed with ${toolExecutions.length} tool call(s).`,
             toolExecutions,
+            dashboardUid: createdDashboardUid,
         };
     } catch (err: any) {
         if (err.message === 'Aborted') {

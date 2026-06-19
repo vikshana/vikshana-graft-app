@@ -2,6 +2,7 @@ import { llm } from '@grafana/llm';
 import type { ToolExecution } from '../../types/llm.types';
 import type { PlanStep, SpecialistResult, DataFindings, LokiFindings, PrometheusFindings } from './types';
 import { TOOL_CATEGORIES } from '../toolFilter';
+import { normalizeToolArgs } from '../toolUtils';
 
 const SETTINGS_PATH = '/plugins/vikshana-graft-app';
 
@@ -370,7 +371,7 @@ If a tool returns an error, explain what failed briefly and continue if possible
                     if (!mcpClient) {
                         throw new Error('MCP client not available');
                     }
-                    const args = JSON.parse(toolCall.function.arguments);
+                    const args = normalizeToolArgs(JSON.parse(toolCall.function.arguments));
                     const result = await mcpClient.callTool({ name: toolCall.function.name, arguments: args });
                     rawResult = JSON.stringify(result.content);
 
@@ -390,7 +391,7 @@ If a tool returns an error, explain what failed briefly and continue if possible
                     // We record whether the result was non-empty so parseDataFindings can
                     // drop findings entries whose queries returned no data.
                     if (toolCall.function.name === queryToolName) {
-                        const expr: string = args?.expr ?? args?.query ?? '';
+                        const expr = (args?.expr ?? args?.query ?? '') as string;
                         if (expr) {
                             const norm = normaliseExpr(expr);
                             const nonEmpty = isLokiStep
