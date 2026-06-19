@@ -20,7 +20,7 @@ import { mcp } from '@grafana/llm';
 // Local services
 import { llmService } from '../../../services/llm';
 import type { Message, ToolExecution, StepToolExecutions } from '../../../types/llm.types';
-import { contextService, UserContext, DataSourceContext, DashboardContext } from '../../../services/context';
+import { contextService, UserContext, DataSourceContext, DashboardContext, DashboardSchemaCapability } from '../../../services/context';
 import { chatHistoryService } from '../../../services/chatHistory';
 import { truncateMessages } from '../../../services/truncation';
 import { filterTools } from '../../../services/toolFilter';
@@ -86,7 +86,14 @@ const normalizeMarkdown = (content: string): string => {
   return content.replace(/\n\n+/g, '\n');
 };
 
-const formatContext = (dashboard: DashboardContext, user: UserContext, dataSources: DataSourceContext[], toolsConfig?: ToolsConfig): string => {
+const formatContext = (
+  dashboard: DashboardContext,
+  user: UserContext,
+  dataSources: DataSourceContext[],
+  toolsConfig?: ToolsConfig,
+  grafanaVersion?: string,
+  dashboardSchema?: DashboardSchemaCapability,
+): string => {
   const lines: string[] = [];
 
   // Role + scope (critical instructions near top)
@@ -115,6 +122,13 @@ const formatContext = (dashboard: DashboardContext, user: UserContext, dataSourc
 
   // Dynamic runtime context
   lines.push(`Current time: ${new Date().toISOString()}`);
+
+  if (grafanaVersion) {
+    lines.push(`Grafana version: ${grafanaVersion}`);
+  }
+  if (dashboardSchema) {
+    lines.push(`Dashboard schema capability: ${dashboardSchema}`);
+  }
 
   if (user?.login) {
     lines.push(`User: ${user.name || user.login} | Role: ${user.orgRole}`);
@@ -154,18 +168,26 @@ const formatContext = (dashboard: DashboardContext, user: UserContext, dataSourc
   lines.push('- Loki: LogQL. Call list_loki_label_names/values to discover labels before querying.');
   lines.push('- Time ranges: use Grafana relative format ("now-1h" / "now"). Default to last 1 hour unless the user specifies otherwise.');
 
-  // Dashboard editing
+  // Dashboard editing — aligned with v1 quality rules (see dashboardAgent.ts buildV1DashboardRules)
   lines.push('');
   lines.push('Dashboard editing:');
   lines.push(
     `- To modify an existing dashboard: call get_dashboard_by_uid first, then call update_dashboard with the modified JSON.`
   );
   lines.push(
-    `- To create a new dashboard: build it incrementally. ` +
-    `First, call update_dashboard with a minimal dashboard JSON (title, uid: "", id: null, empty panels array). ` +
-    `Then, call get_dashboard_by_uid to get the created dashboard with its assigned UID. ` +
-    `Then add panels one at a time — each time, fetch the latest JSON, append one panel, and call update_dashboard. ` +
-    `This keeps each call small and reliable.`
+    `- To create a new dashboard: follow the skeleton → get-UID → add-all-panels-in-one-call process. ` +
+    `First call update_dashboard with a minimal skeleton (title, uid: "", id: null, empty panels array, schemaVersion: 38). ` +
+    `Then call get_dashboard_by_uid to get the assigned UID. ` +
+    `Then build ALL panels at once and call update_dashboard a single time with the complete panels array.`
+  );
+  lines.push(
+    `- Panel quality: set fieldConfig.defaults.unit for every data panel (e.g. "s", "bytes", "reqps", "percent"). ` +
+    `Set thresholds on stat/gauge panels (null→green, warning→orange, critical→red). ` +
+    `Set a description on every panel. Group related panels into rows using type:"row" panels.`
+  );
+  lines.push(
+    `- Template variables: where labels are known, add query variables to templating.list ` +
+    `(e.g. label_values(up, job)) with includeAll:true. Use \${var:regex} in matchers.`
   );
   lines.push(
     `- Only confirm the dashboard UID with the user if they reference an existing dashboard by name and you cannot determine its UID from context.`
@@ -509,8 +531,9 @@ export const ChatInterface = () => {
       const dashboard = await contextService.getCurrentDashboard();
       const user = contextService.getUserContext();
       const dataSources = contextService.getDataSources();
+      const { version: grafanaVersion, dashboardSchema } = contextService.getBuildInfo();
 
-      const context = formatContext(dashboard, user, dataSources, toolsConfig);
+      const context = formatContext(dashboard, user, dataSources, toolsConfig, grafanaVersion, dashboardSchema);
 
       // Create a placeholder message for the assistant
       const assistantMessage: Message = { role: 'assistant', content: '' };
@@ -771,7 +794,8 @@ ${input} `
       const dashboard = await contextService.getCurrentDashboard();
       const user = contextService.getUserContext();
       const dataSources = contextService.getDataSources();
-      const context = formatContext(dashboard, user, dataSources, toolsConfig);
+      const { version: grafanaVersion, dashboardSchema } = contextService.getBuildInfo();
+      const context = formatContext(dashboard, user, dataSources, toolsConfig, grafanaVersion, dashboardSchema);
       const assistantMessage: Message = { role: 'assistant', content: '' };
       setMessages((prev) => [...prev, assistantMessage]);
 

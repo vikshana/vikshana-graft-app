@@ -87,6 +87,7 @@ describe('ChatInterface', () => {
         (contextService.getCurrentDashboard as jest.Mock).mockResolvedValue({});
         (contextService.getUserContext as jest.Mock).mockReturnValue({ login: 'testuser', name: 'Test User' });
         (contextService.getDataSources as jest.Mock).mockReturnValue([]);
+        (contextService.getBuildInfo as jest.Mock).mockReturnValue({ version: '11.0.0', dashboardSchema: 'v1' });
         (chatHistoryService.getSession as jest.Mock).mockReturnValue(null);
         (chatHistoryService.saveSession as jest.Mock).mockReturnValue({ id: 'test-session-id', messages: [] });
 
