@@ -28,6 +28,9 @@ on:
       - 'jest*.ts'
       - 'eslint.config.mjs'
       - '.github/workflows/ci.yml'
+      # The following are intentionally outside CI path filters:
+      # opencode.json, .opencode/**, scripts/**, docs/**, output/** cannot
+      # affect the built plugin artifact or test outcomes.
 
 jobs:
   build:

@@ -119,7 +119,7 @@ The frontend uses `@grafana/llm` MCP client for tool execution. Tools are loaded
 - **Styling**: Emotion CSS-in-JS via `@emotion/css` and `useStyles2` hook
 - **State**: React hooks with URL-based session management via `react-router-dom`
 - **LLM Calls**: Frontend calls `@grafana/llm` directly (synchronous chat completions, not streaming)
-- **Test IDs**: Use `data-testid` attributes defined in `src/components/testIds.ts`
+- **Test IDs**: `data-testid` attributes are defined inline in JSX. `src/components/testIds.ts` is stale scaffold — do not use it. Find real IDs via `grep -r 'data-testid' src/`.
 - **Lazy Loading**: Route components use React lazy loading with Suspense
 
 ## Workflow Rules
@@ -213,8 +213,62 @@ feat!(config): redesign prompt library API
 The CI workflows (`ci.yml`, `is-compatible.yml`, `bundle-stats.yml`) only run when files that can affect their outcome are changed — `src/**`, `pkg/**`, `tests/**`, build config, etc. PRs that touch only docs, `CLAUDE.md`, workflow files, or release config will skip the real CI jobs and instead run a lightweight companion workflow (e.g. `ci-skip.yml`) that reports success immediately so branch protection checks stay green.
 
 **This is intentional and safe.** Files outside the path filters cannot affect the built artifact or test outcomes. If you add a new build config file (e.g. a new root-level `eslint.config.js`), add it to the `paths` list in `ci.yml` and the `paths-ignore` list in `ci-skip.yml` to keep the two in sync.
+
+The following files/directories are intentionally outside CI path filters (docs/tooling only):
+- `opencode.json`, `.opencode/**` — OpenCode agent configuration and skills
+- `scripts/**` — developer helper scripts
+- `docs/**`, `CLAUDE.md`, `README.md` — documentation
+- `output/**` — verification screenshots (gitignored content)
 ### Versioning and Releases
 - Releases are managed automatically by **release-please**. Do not manually edit `package.json` version, `CHANGELOG.md`, or push version tags.
 - Commit messages must follow **Conventional Commits** (see above) — release-please reads them to determine the next version and generate the CHANGELOG.
 - After merging to `main`, release-please opens a Release PR automatically. Merge it when ready to publish a release.
 - See `docs/release_workflow.md` for the full release process.
+
+## UI Verification Workflow
+
+After making frontend changes, **always verify the result in the actual running plugin UI before handing off to the developer for manual review**. This closes the gap between "I assume it works" and "the actual UI is completely different".
+
+### How to trigger
+
+Two equivalent entry points — both load the same verification loop:
+
+1. **Slash command** (quick): type `/verify-ui` in the OpenCode TUI, or use Ctrl+P → Commands → `verify-ui`. Optionally pass a scenario: `/verify-ui check the history page`.
+2. **Natural language**: describe what you want verified (e.g. "verify the chat landing page") and the agent will load the skill automatically.
+
+The command lives at `.opencode/commands/verify-ui.md`. It delegates to the `verify-ui` skill at `.opencode/skills/verify-ui/SKILL.md`, which encodes the full verification loop: rebuild gate → plugin reload gate → LLM health gate → drive headed Chrome → inspect console + network → screenshot → assert → iterate → hand off.
+
+### Quick reference
+
+```sh
+# 1. Ensure Grafana is running with the latest build
+npm run build && npm run server   # or: npm run dev (watch) + npm run server
+
+# 2. Run the precheck
+sh scripts/verify-ui-precheck.sh
+
+# 3. After a rebuild, wait for Grafana to serve the new bundle
+sh scripts/wait-for-plugin-reload.sh
+
+# 4. Load the verify-ui skill in OpenCode and run the verification loop
+```
+
+### What gets verified
+
+- **Non-chat pages**: Correct rendering, navigation, DOM structure (history, prompts, config).
+- **Chat flows**: LLM health gate → send message → confirm tool call / plan / thinking blocks render → no JS console errors → LLM network calls return 200 → non-empty response rendered.
+- **LLM harness iteration**: When structure is wrong (no tool calls, no plan block), the agent inspects the raw `chat/completions` response and iterates on system prompts / `src/services/llm.ts` until the structure is correct.
+
+### Screenshots
+
+Screenshots land in `output/` (gitignored). The agent shows you the list of screenshots and an explicit "please manually confirm X" list at hand-off.
+
+### Tools used
+
+- **Chrome DevTools MCP** (`opencode.json`) — drives a headed, isolated Chrome session.
+- `navigate_page`, `take_snapshot`, `take_screenshot`, `click`, `fill`, `type_text`, `wait_for` — browser automation.
+- `list_console_messages` — diagnose JS errors (most common cause of blank panels).
+- `list_network_requests` — confirm LLM API calls fired and returned 200.
+- `evaluate_script` — read `localStorage`, poll plugin health, dismiss Grafana portal backdrop.
+
+See `docs/ui_verification_workflow.md` for the full contributor guide.
