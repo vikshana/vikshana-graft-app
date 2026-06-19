@@ -55,15 +55,29 @@ fi
 # ── 3. Plugin app route loads ──────────────────────────────────────────────────
 if [ "${HTTP_STATUS}" = "200" ]; then
   printf "Checking plugin app route... "
-  PLUGIN_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
-    "${GRAFANA_URL}${PLUGIN_APP_PATH}" 2>/dev/null || echo "000")
-  if [ "${PLUGIN_STATUS}" = "200" ] || [ "${PLUGIN_STATUS}" = "302" ]; then
-    pass "Plugin route ${PLUGIN_APP_PATH} responds (HTTP ${PLUGIN_STATUS})"
-  else
-    fail "Plugin route ${PLUGIN_APP_PATH} returned HTTP ${PLUGIN_STATUS}"
-    echo "      The plugin may not be loaded. Check: docker logs ${PLUGIN_ID}"
-    ERRORS=$((ERRORS + 1))
-  fi
+  # Single request: capture both the final status and effective URL atomically.
+  # A redirect to /login means anonymous auth is misconfigured — treat as failure.
+  _plugin_out=$(curl -s -o /dev/null -w "%{http_code} %{url_effective}" --max-time 5 \
+    -L "${GRAFANA_URL}${PLUGIN_APP_PATH}" 2>/dev/null || echo "000 ")
+  PLUGIN_STATUS="${_plugin_out%% *}"
+  PLUGIN_EFFECTIVE_URL="${_plugin_out#* }"
+  case "${PLUGIN_EFFECTIVE_URL}" in
+    */login*|*/auth/login*)
+      fail "Plugin route redirected to login page — anonymous auth may be disabled"
+      echo "      Effective URL: ${PLUGIN_EFFECTIVE_URL}"
+      echo "      Restart with anonymous auth: npm run server"
+      ERRORS=$((ERRORS + 1))
+      ;;
+    *)
+      if [ "${PLUGIN_STATUS}" = "200" ]; then
+        pass "Plugin route ${PLUGIN_APP_PATH} responds (HTTP 200)"
+      else
+        fail "Plugin route ${PLUGIN_APP_PATH} returned HTTP ${PLUGIN_STATUS}"
+        echo "      The plugin may not be loaded. Check: docker logs ${PLUGIN_ID}"
+        ERRORS=$((ERRORS + 1))
+      fi
+      ;;
+  esac
 fi
 
 # ── 4. grafana-llm-app health ─────────────────────────────────────────────────
@@ -77,9 +91,33 @@ if [ "${HTTP_STATUS}" = "200" ]; then
     warn "LLM plugin health endpoint not reachable"
     echo "      The grafana-llm-app may still be installing (wait ~30s on first start)."
   else
-    # Check if llmProvider.ok is true in the JSON response
-    LLM_OK=$(echo "${LLM_BODY}" | grep -o '"ok":true' | head -1 || echo "")
-    if [ -n "${LLM_OK}" ]; then
+    # Specifically check details.llmProvider.ok — a shallow grep for "ok":true
+    # can produce false positives when other nested fields contain an ok flag.
+    # Use python3 when available; fall back to a targeted grep on the llmProvider
+    # object only. printf '%s' avoids echo escape-handling differences in /bin/sh.
+    if command -v python3 > /dev/null 2>&1; then
+      LLM_OK=$(printf '%s' "${LLM_BODY}" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    provider = d.get('details', {}).get('llmProvider', {})
+    ok = provider.get('ok') is True
+    models_ok = provider.get('models', {}).get('base', {}).get('ok') is True
+    print('true' if (ok and models_ok) else 'false')
+except Exception:
+    print('false')
+" 2>/dev/null || echo "false")
+    else
+      # python3 not available — extract just the llmProvider object with awk so
+      # we don't match ok flags in other sections of the response.
+      _provider_json=$(printf '%s' "${LLM_BODY}" | \
+        awk 'BEGIN{p=0} /"llmProvider"/{p=1} p{print} p && /}/{p=0}')
+      case "${_provider_json}" in
+        *'"ok":true'*) LLM_OK="true" ;;
+        *)             LLM_OK="false" ;;
+      esac
+    fi
+    if [ "${LLM_OK}" = "true" ]; then
       pass "grafana-llm-app is configured and healthy"
     else
       warn "grafana-llm-app is not configured or unhealthy"
