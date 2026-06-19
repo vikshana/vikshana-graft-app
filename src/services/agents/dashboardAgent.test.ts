@@ -380,3 +380,154 @@ describe('runDashboardAgent', () => {
         expect(systemMsg).toContain('Recent conversation');
     });
 });
+
+// ─── Enrichment integration ───────────────────────────────────────────────────
+
+describe('runDashboardAgent — enrichment integration', () => {
+    let mockMcpClient2: { callTool: jest.Mock };
+    let onUpdate2: jest.Mock;
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+        mockMcpClient2 = { callTool: jest.fn() };
+        onUpdate2 = jest.fn();
+    });
+
+    it('applies deterministic enrichment — prompt contains inferred unit for rate(_total) query', async () => {
+        mockChatCompletions.mockResolvedValue(makeResponse('done'));
+
+        // Provide a query without unit/suggestedViz — enrichment should fill them
+        const rawFindings: DataFindings = {
+            prometheus: {
+                datasourceUid: 'prom-uid',
+                datasourceName: 'Prometheus',
+                labels: { job: ['api'] },
+                validatedQueries: [
+                    { description: 'Request rate', promql: 'rate(http_requests_total[5m])' },
+                ],
+            },
+        };
+
+        await runDashboardAgent(
+            makeStep({ description: 'Build RED metrics dashboard' }),
+            'build it', '', rawFindings,
+            [], mockMcpClient2, 10, new AbortController().signal, onUpdate2,
+        );
+
+        const systemMsg = mockChatCompletions.mock.calls[0][0].messages
+            .find((m: any) => m.role === 'system')?.content ?? '';
+
+        // Enrichment should have derived unit: reqps for rate(_total) — appears in findings block
+        expect(systemMsg).toContain('reqps');
+        // Layout hint: RED detected from step description — row strategy changes
+        expect(systemMsg).toContain('Request Rate');  // row title from RED layout hint
+    });
+
+    it('does NOT compress update_dashboard results (must be in NO_COMPRESS)', async () => {
+        // update_dashboard result must be preserved verbatim — the agent needs to see
+        // the full response (including UID) to proceed correctly.
+        const uid = 'new-dash-uid-abc';
+        const updateResult = JSON.stringify([{ text: JSON.stringify({ uid, status: 'success', version: 1 }) }]);
+
+        mockChatCompletions
+            .mockResolvedValueOnce(makeResponse('', [makeToolCall('update_dashboard', 'tc1', JSON.stringify({ dashboard: { title: 'Test', panels: [] }, overwrite: false }))]))
+            .mockResolvedValueOnce(makeResponse('Dashboard created. [Open dashboard](/d/' + uid + ')'));
+
+        const mcpClient = {
+            callTool: jest.fn().mockResolvedValue({ content: updateResult }),
+        };
+
+        await runDashboardAgent(
+            makeStep(), 'build', '', {},
+            [], mcpClient, 10, new AbortController().signal, onUpdate2,
+        );
+
+        // The second LLM call's messages should contain the raw update_dashboard result,
+        // NOT a compressed placeholder.
+        const secondCallMessages = mockChatCompletions.mock.calls[1][0].messages;
+        const toolRoleMsg = secondCallMessages.find((m: any) => m.role === 'tool' && m.tool_call_id === 'tc1');
+        expect(toolRoleMsg).toBeDefined();
+        expect(toolRoleMsg.content).not.toContain('[update_dashboard result processed');
+        expect(toolRoleMsg.content).toContain(uid);
+    });
+});
+
+// ─── V2 capability probe and fallback ────────────────────────────────────────
+
+describe('runDashboardAgent — V2 capability probe', () => {
+    let onUpdate3: jest.Mock;
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+        onUpdate3 = jest.fn();
+    });
+
+    it('uses v1 rules when schemaCapabilityHint is v1 (default)', async () => {
+        mockChatCompletions.mockResolvedValue(makeResponse('done'));
+
+        await runDashboardAgent(
+            makeStep(), 'build', '', {}, [], { callTool: jest.fn() }, 10,
+            new AbortController().signal, onUpdate3,
+            [], '', 'v1',
+        );
+
+        const systemMsg = mockChatCompletions.mock.calls[0][0].messages
+            .find((m: any) => m.role === 'system')?.content ?? '';
+        // v1 schema rules should be present
+        expect(systemMsg).toContain('schemaVersion');
+        expect(systemMsg).toContain('templating');
+        // v2 elements/layout should NOT be present
+        expect(systemMsg).not.toContain('"elements"');
+        expect(systemMsg).not.toContain('TabsLayout');
+    });
+
+    it('uses v2 rules when schemaCapabilityHint is v2-capable', async () => {
+        mockChatCompletions.mockResolvedValue(makeResponse('done'));
+
+        await runDashboardAgent(
+            makeStep(), 'build', '', {}, [], { callTool: jest.fn() }, 10,
+            new AbortController().signal, onUpdate3,
+            [], '', 'v2-capable',
+        );
+
+        const systemMsg = mockChatCompletions.mock.calls[0][0].messages
+            .find((m: any) => m.role === 'system')?.content ?? '';
+        // v2 rules present
+        expect(systemMsg).toContain('TabsLayout');
+        expect(systemMsg).toContain('"elements"');
+        // v1 schemaVersion should NOT be the primary instruction
+        expect(systemMsg).not.toContain('schemaVersion: 38');
+    });
+
+    it('falls back to v1 when update_dashboard returns Kubernetes-not-available error', async () => {
+        const k8sError = JSON.stringify([{ text: 'a Kubernetes-capable Grafana is required to save a v2 dashboard' }]);
+
+        mockChatCompletions
+            // First response: emit an update_dashboard tool call
+            .mockResolvedValueOnce(makeResponse('', [
+                makeToolCall('update_dashboard', 'tc1', JSON.stringify({ dashboard: { elements: {}, layout: {} }, overwrite: false }))
+            ]))
+            // Second response: LLM sees v1 prompt (after fallback) and concludes
+            .mockResolvedValueOnce(makeResponse('Fell back to v1 and created dashboard'));
+
+        const mcpClient = {
+            callTool: jest.fn().mockResolvedValue({ content: k8sError }),
+        };
+
+        const result = await runDashboardAgent(
+            makeStep(), 'build', '', {}, [], mcpClient, 10,
+            new AbortController().signal, onUpdate3,
+            [], '', 'v2-capable',
+        );
+
+        // The second LLM call should have received a v1 system prompt (rebuilt after fallback)
+        const secondCallSystemMsg = mockChatCompletions.mock.calls[1][0].messages
+            .find((m: any) => m.role === 'system')?.content ?? '';
+        expect(secondCallSystemMsg).toContain('schemaVersion');
+        expect(secondCallSystemMsg).not.toContain('TabsLayout');
+
+        // Summary should mention the fallback
+        expect(result.summary).toContain('v1');
+        expect(result.status).toBe('success');
+    });
+});

@@ -62,9 +62,9 @@ describe('inferMetricType', () => {
     it('infers "counter" for rate() expressions', () => {
         expect(inferMetricType('rate(errors_total[5m])')).toBe('counter');
     });
-    it('infers "summary" for histogram_quantile (without _bucket suffix)', () => {
-        // When _bucket is absent, histogram_quantile matches the counter/_sum pattern first,
-        // giving 'counter'. The heatmap path only fires when _bucket is in the expr.
+    it('returns "counter" for histogram_quantile expr containing _sum (not _bucket — no heatmap path)', () => {
+        // histogram_quantile on _sum hits the _sum→counter branch before the _quantile branch.
+        // Only _bucket suffix triggers 'histogram'. This test documents the actual precedence.
         expect(inferMetricType('histogram_quantile(0.95, rate(http_duration_sum[5m]))')).toBe('counter');
     });
     it('returns undefined for unknown patterns', () => {

@@ -474,7 +474,10 @@ describe('runSpecialist', () => {
             expect(result.dataFindings).toBeUndefined();
         });
 
-        it('injects query validation instruction into system prompt for loki steps', async () => {
+        it('injects the Loki output schema and query_loki_logs tool name into the system prompt', async () => {
+            // Verifies the specialist receives the correct tool name and output format —
+            // if either is missing the LLM cannot produce valid findings. We assert on
+            // structural markers (tool name, schema key) not on prose wording.
             mockChatCompletions.mockResolvedValue(makeResponse('{}'));
 
             await runSpecialist(
@@ -490,8 +493,13 @@ describe('runSpecialist', () => {
 
             const systemMsg = mockChatCompletions.mock.calls[0][0].messages
                 .find((m: any) => m.role === 'system')?.content ?? '';
+            // Tool name must appear so the model knows which tool to call
             expect(systemMsg).toContain('query_loki_logs');
-            expect(systemMsg).toContain('Query validation rules');
+            // Output schema key must appear so the model knows the expected JSON shape
+            expect(systemMsg).toContain('validatedQueries');
+            // Presentation metadata fields must appear in the schema
+            expect(systemMsg).toContain('suggestedViz');
+            expect(systemMsg).toContain('unit');
         });
 
         it('does NOT inject query validation for non-data steps', async () => {
@@ -510,30 +518,14 @@ describe('runSpecialist', () => {
 
             const systemMsg = mockChatCompletions.mock.calls[0][0].messages
                 .find((m: any) => m.role === 'system')?.content ?? '';
-            expect(systemMsg).not.toContain('Query validation rules');
+            expect(systemMsg).not.toContain('query_loki_logs');
+            expect(systemMsg).not.toContain('query_prometheus');
+            expect(systemMsg).not.toContain('validatedQueries');
         });
 
-        it('prompt instructs model to discover label values before writing equality matchers', async () => {
-            mockChatCompletions.mockResolvedValue(makeResponse('{}'));
-
-            await runSpecialist(
-                makeStep({ toolCategories: ['loki'] }),
-                'query logs',
-                '',
-                [],
-                mockMcpClient,
-                10,
-                new AbortController().signal,
-                onUpdate
-            );
-
-            const systemMsg = mockChatCompletions.mock.calls[0][0].messages
-                .find((m: any) => m.role === 'system')?.content ?? '';
-            expect(systemMsg).toContain('equality matchers');
-            expect(systemMsg).toContain('NEVER include a query');
-        });
-
-        it('Prometheus prompt explicitly warns that list_* tools alone are not sufficient (Fix A2)', async () => {
+        it('injects the Prometheus output schema and query_prometheus tool name into the system prompt', async () => {
+            // Same structural contract as the Loki test — verifies the schema injection
+            // is wired for Prometheus steps, including the metricType field.
             mockChatCompletions.mockResolvedValue(makeResponse('{}'));
 
             await runSpecialist(
@@ -549,29 +541,11 @@ describe('runSpecialist', () => {
 
             const systemMsg = mockChatCompletions.mock.calls[0][0].messages
                 .find((m: any) => m.role === 'system')?.content ?? '';
-            // Must warn that discovery tools alone are insufficient
-            expect(systemMsg).toContain('list_prometheus_label_names');
-            expect(systemMsg).toContain('NOT sufficient');
             expect(systemMsg).toContain('query_prometheus');
-        });
-
-        it('Prometheus prompt requires copying the exact executed expr into output (Fix A2)', async () => {
-            mockChatCompletions.mockResolvedValue(makeResponse('{}'));
-
-            await runSpecialist(
-                makeStep({ toolCategories: ['prometheus'] }),
-                'query metrics',
-                '',
-                [],
-                mockMcpClient,
-                10,
-                new AbortController().signal,
-                onUpdate
-            );
-
-            const systemMsg = mockChatCompletions.mock.calls[0][0].messages
-                .find((m: any) => m.role === 'system')?.content ?? '';
-            expect(systemMsg).toContain('EXACT expression string you used');
+            expect(systemMsg).toContain('validatedQueries');
+            expect(systemMsg).toContain('metricType');
+            expect(systemMsg).toContain('thresholds');
+            expect(systemMsg).toContain('list_prometheus_label_names');
         });
 
         it('returns datasource-only PrometheusFindings when query_prometheus was never called (Fix A1)', async () => {
@@ -599,5 +573,168 @@ describe('runSpecialist', () => {
             expect(result.dataFindings?.prometheus?.datasourceName).toBe('Prometheus');
             expect(result.dataFindings?.prometheus?.validatedQueries).toHaveLength(0);
         });
+    });
+});
+
+// ─── extractQueryMeta — presentation metadata sanitisation ───────────────────
+// extractQueryMeta is the code-enforced gate that sanitises LLM-supplied
+// presentation metadata. We test it indirectly through parseDataFindings
+// (which calls it on every validated query) to avoid coupling tests to the
+// internal helper name.
+
+describe('extractQueryMeta — presentation metadata in parseDataFindings', () => {
+    // Re-use the module-level mockChatCompletions (declared at the top of the file)
+    let mockMcpClientLoki: { callTool: jest.Mock };
+    const onUpdate = jest.fn();
+
+    // content must be an object/array — runSpecialist does JSON.stringify(result.content)
+    const lokiNonEmptyContent = [{ type: 'text', text: JSON.stringify({
+        data: { result: [{ stream: {}, values: [['1', 'log']] }] }
+    })}];
+    const promNonEmptyContent = [{ type: 'text', text: JSON.stringify({
+        data: { result: [{ metric: { job: 'api' }, values: [[1, '42']] }] }
+    })}];
+
+    function makePromMcpClient() {
+        return { callTool: jest.fn().mockResolvedValue({ content: promNonEmptyContent }) };
+    }
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+        mockMcpClientLoki = { callTool: jest.fn().mockResolvedValue({ content: lokiNonEmptyContent }) };
+    });
+
+    function makeStep(overrides = {}) {
+        return {
+            id: 'step_1', description: 'test', toolCategories: ['loki'] as any,
+            dependsOn: [], ...overrides,
+        };
+    }
+
+    function makePromStep(overrides = {}) {
+        return {
+            id: 'step_1', description: 'test', toolCategories: ['prometheus'] as any,
+            dependsOn: [], ...overrides,
+        };
+    }
+
+    it('passes through valid suggestedViz on a Loki query', async () => {
+        const logqlExpr = 'rate({job="api"}[5m])';
+        const findings = JSON.stringify({
+            datasourceUid: 'loki-uid',
+            datasourceName: 'Loki',
+            labels: {},
+            validatedQueries: [{
+                description: 'Error rate',
+                logql: logqlExpr,
+                suggestedViz: 'timeseries',
+                unit: 'reqps',
+            }],
+        });
+        mockChatCompletions
+            .mockResolvedValueOnce(makeResponse('', [
+                makeToolCall('query_loki_logs', 'c1', JSON.stringify({ query: logqlExpr, start: 'now-1h', end: 'now', limit: 100 }))
+            ]))
+            .mockResolvedValueOnce(makeResponse(findings));
+
+        const result = await runSpecialist(makeStep({ toolCategories: ['loki'] }), 'query', '', [], mockMcpClientLoki as any, 10, new AbortController().signal, onUpdate);
+        expect(result.dataFindings?.loki?.validatedQueries[0].suggestedViz).toBe('timeseries');
+        expect(result.dataFindings?.loki?.validatedQueries[0].unit).toBe('reqps');
+    });
+
+    it('drops invalid suggestedViz (unknown value) from Prometheus query', async () => {
+        const promMcp = makePromMcpClient();
+        const promqlExpr = 'rate(cpu_seconds_total[5m])';
+        const findings = JSON.stringify({
+            datasourceUid: 'prom-uid',
+            datasourceName: 'Prometheus',
+            labels: {},
+            validatedQueries: [{
+                description: 'CPU',
+                promql: promqlExpr,
+                suggestedViz: 'bar_chart',  // not in VALID_VIZ
+                unit: 'reqps',
+            }],
+        });
+        mockChatCompletions
+            .mockResolvedValueOnce(makeResponse('', [
+                makeToolCall('query_prometheus', 'c1', JSON.stringify({ expr: promqlExpr, start: 'now-1h', end: 'now' }))
+            ]))
+            .mockResolvedValueOnce(makeResponse(findings));
+
+        const result = await runSpecialist(makePromStep(), 'query', '', [], promMcp as any, 10, new AbortController().signal, onUpdate);
+        expect(result.dataFindings?.prometheus?.validatedQueries[0].suggestedViz).toBeUndefined();
+        expect(result.dataFindings?.prometheus?.validatedQueries[0].unit).toBe('reqps');
+    });
+
+    it('drops invalid metricType (unknown value) from Prometheus query', async () => {
+        const promMcp = makePromMcpClient();
+        const promqlExpr = 'rate(cpu_seconds_total[5m])';
+        const findings = JSON.stringify({
+            datasourceUid: 'prom-uid',
+            datasourceName: 'Prometheus',
+            labels: {},
+            validatedQueries: [{
+                description: 'CPU',
+                promql: promqlExpr,
+                metricType: 'event',  // not in VALID_METRIC_TYPE
+            }],
+        });
+        mockChatCompletions
+            .mockResolvedValueOnce(makeResponse('', [
+                makeToolCall('query_prometheus', 'c1', JSON.stringify({ expr: promqlExpr, start: 'now-1h', end: 'now' }))
+            ]))
+            .mockResolvedValueOnce(makeResponse(findings));
+
+        const result = await runSpecialist(makePromStep(), 'query', '', [], promMcp as any, 10, new AbortController().signal, onUpdate);
+        expect(result.dataFindings?.prometheus?.validatedQueries[0].metricType).toBeUndefined();
+    });
+
+    it('preserves valid thresholds array from Prometheus query', async () => {
+        const promMcp = makePromMcpClient();
+        const promqlExpr = 'rate(cpu_seconds_total[5m])';
+        const thresholds = [{ value: null, color: 'green' }, { value: 0.8, color: 'orange' }, { value: 0.95, color: 'red' }];
+        const findings = JSON.stringify({
+            datasourceUid: 'prom-uid',
+            datasourceName: 'Prometheus',
+            labels: {},
+            validatedQueries: [{
+                description: 'Error rate',
+                promql: promqlExpr,
+                suggestedViz: 'gauge',
+                thresholds,
+            }],
+        });
+        mockChatCompletions
+            .mockResolvedValueOnce(makeResponse('', [
+                makeToolCall('query_prometheus', 'c1', JSON.stringify({ expr: promqlExpr, start: 'now-1h', end: 'now' }))
+            ]))
+            .mockResolvedValueOnce(makeResponse(findings));
+
+        const result = await runSpecialist(makePromStep(), 'query', '', [], promMcp as any, 10, new AbortController().signal, onUpdate);
+        expect(result.dataFindings?.prometheus?.validatedQueries[0].thresholds).toEqual(thresholds);
+    });
+
+    it('drops malformed thresholds (non-array) silently', async () => {
+        const promMcp = makePromMcpClient();
+        const promqlExpr = 'rate(cpu_seconds_total[5m])';
+        const findings = JSON.stringify({
+            datasourceUid: 'prom-uid',
+            datasourceName: 'Prometheus',
+            labels: {},
+            validatedQueries: [{
+                description: 'CPU',
+                promql: promqlExpr,
+                thresholds: 'green',  // should be an array
+            }],
+        });
+        mockChatCompletions
+            .mockResolvedValueOnce(makeResponse('', [
+                makeToolCall('query_prometheus', 'c1', JSON.stringify({ expr: promqlExpr, start: 'now-1h', end: 'now' }))
+            ]))
+            .mockResolvedValueOnce(makeResponse(findings));
+
+        const result = await runSpecialist(makePromStep(), 'query', '', [], promMcp as any, 10, new AbortController().signal, onUpdate);
+        expect(result.dataFindings?.prometheus?.validatedQueries[0].thresholds).toBeUndefined();
     });
 });

@@ -468,34 +468,7 @@ describe('ChatInterface', () => {
                 expect(screen.queryByText('Internal reasoning here')).not.toBeInTheDocument();
             });
         });
-        it('sanitizes SVG output from Mermaid', async () => {
 
-            const maliciousSvg = '<svg><g onclick="alert(1)"></g></svg>';
-
-            // Mock mermaid render to return malicious SVG
-            const mockMermaid = {
-                initialize: jest.fn(),
-                parse: jest.fn().mockResolvedValue(true),
-                render: jest.fn().mockResolvedValue({ svg: maliciousSvg })
-            };
-
-            jest.mock('mermaid', () => ({
-                default: mockMermaid
-            }));
-
-            await renderComponent();
-
-            // Trigger mermaid rendering (this part depends on how you can trigger it in the test)
-            // For now, we'll assume the component renders it if we pass a message with mermaid code
-            // But since we are mocking the whole chat flow, we might need to simulate a message
-
-            // Actually, testing the internal sanitization of MermaidBlock directly might be hard 
-            // without exporting it or using a more integration-style test.
-            // Let's rely on checking if DOMPurify was called if we can mock it, 
-            // or just trust the manual verification for now if this is too complex to setup quickly.
-
-            // Alternative: Check if DOMPurify.sanitize is called
-        });
 
         it('displays "Thinking for" label instead of "Thinking" during streaming', async () => {
             (llmService.chat as jest.Mock).mockImplementation(async (messages, context, onUpdate) => {
