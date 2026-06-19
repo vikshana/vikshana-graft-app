@@ -492,16 +492,15 @@ describe('runDashboardAgent', () => {
 
         const createSystemMsg = mockChatCompletions.mock.calls[1][0].messages
             .find((m: any) => m.role === 'system')?.content ?? '';
-        // Must describe the 3-step sequence
+        // Must describe the 2-step sequence (skeleton + group-by-group)
         expect(createSystemMsg).toContain('Step 1');
         expect(createSystemMsg).toContain('Step 2');
-        expect(createSystemMsg).toContain('Step 3');
         // Step 1 must be skeleton with empty panels
         expect(createSystemMsg).toContain('panels: []');
-        // Step 2 must be row panels via patch
+        // Step 2 must interleave row + data panels per group via patch
         expect(createSystemMsg).toContain('$.panels/- ');
-        // Step 3 must be data panels per row
-        expect(createSystemMsg).toContain('data panels');
+        // Must explain the interleaving rule
+        expect(createSystemMsg).toContain('GROUP BY GROUP');
         // Must explicitly prohibit panel_queries/summary in the CREATE phase
         expect(createSystemMsg).toContain('DO NOT call get_dashboard_panel_queries');
     });

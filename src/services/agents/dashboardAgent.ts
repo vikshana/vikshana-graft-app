@@ -526,44 +526,42 @@ Call update_dashboard with a full JSON body. Use uid:"" and panels:[] — no pan
   "folderUid": "",
   "overwrite": false
 }
-The response will contain the assigned UID — note it immediately. You will use it for all following patch steps.
+The response contains the assigned UID — note it immediately for all following patch steps.
 
-### Step 2 — Add all row panels (one patch call)
-Call update_dashboard in PATCH MODE (uid + operations) to append all row panels:
+### Step 2 — Add panels GROUP BY GROUP (one patch call per row group, in order)
+
+CRITICAL GRAFANA RULE: In the flat panels[] array, a row panel "owns" all the panels
+that follow it until the next row panel. You MUST interleave row panels and their data
+panels — do NOT add all rows first. The correct array structure is:
+  [Row1-panel, Row1-data-panel-A, Row1-data-panel-B, Row2-panel, Row2-data-panel-A, ...]
+
+For EACH row group (in order), make ONE patch call that appends the row panel IMMEDIATELY
+followed by that row's data panels — all in a single operations array:
 {
   "uid": "<uid from Step 1>",
   "operations": [
-    { "op": "add", "path": "$.panels/- ", "value": { "type": "row", "title": "<Row 1 title>", "id": 1, "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "panels": [] } },
-    { "op": "add", "path": "$.panels/- ", "value": { "type": "row", "title": "<Row 2 title>", "id": 2, "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 1 }, "panels": [] } }
+    { "op": "add", "path": "$.panels/- ", "value": { "type": "row", "title": "<Row title>", "id": <id>, "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "panels": [] } },
+    { "op": "add", "path": "$.panels/- ", "value": { <complete data panel JSON for first panel in this row> } },
+    { "op": "add", "path": "$.panels/- ", "value": { <complete data panel JSON for second panel in this row> } }
   ],
   "overwrite": true
 }
-Add one operation per row group, in order. Assign sequential ids starting from 1.
+Then call the SAME pattern for the next row group. Repeat until all row groups are added.
 
-### Step 3 — Add data panels (one patch call per row group)
-For EACH row group, call update_dashboard in PATCH MODE to append that row's panels:
-{
-  "uid": "<uid from Step 1>",
-  "operations": [
-    { "op": "add", "path": "$.panels/- ", "value": { <complete panel JSON> } },
-    { "op": "add", "path": "$.panels/- ", "value": { <complete panel JSON> } }
-  ],
-  "overwrite": true
-}
-Panels go AFTER their row panel. Assign sequential ids continuing from where rows left off.
-Include the full panel object: id, title, description, type, gridPos, fieldConfig (with unit), targets (with datasource + expr/query + legendFormat), options.
+For each data panel include the full object: id, title, description, type, gridPos, fieldConfig (with unit), targets (with datasource + expr/query + legendFormat), options.
+- type: use the viz value from the Panel Todo List
+- fieldConfig.defaults.unit: use the unit from the Panel Todo List
+- targets[0].datasource: exact datasource JSON from the Pre-validated data section
+- targets[0].expr (Prometheus) or targets[0].expr (Loki): EXACT query from the list
+- targets[0].legendFormat: meaningful label e.g. "{{job}}" or static string
+- gridPos y: just use 0 for all panels — Grafana will re-layout automatically
 
-For each panel in the Panel Todo List:
-- type: use the viz value from the list
-- fieldConfig.defaults.unit: use the unit value from the list
-- targets[0].datasource: use the exact datasource JSON from the Pre-validated data section above
-- targets[0].expr (Prometheus) or targets[0].expr (Loki): the EXACT query from the list
-- targets[0].legendFormat: meaningful label, e.g. "{{job}}" or a static string
+Assign sequential integer ids starting from 1 across all panels.
 
-### Step 4 — Confirm and report
+### Step 3 — Confirm and report
 After all patch calls succeed, your final message must include:
 - [Open dashboard](/d/<uid>)
-- Number of panels added
+- Number of panels added per row group
 - Any issues encountered
 
 DO NOT call get_dashboard_panel_queries or get_dashboard_summary — those are called by the system after you finish.
