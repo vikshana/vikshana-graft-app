@@ -73,9 +73,6 @@ export const AUTO_CONTINUE_DELAY_MS = 2500;
 const CONTINUE_NOTICE =
     '\n\n---\n**Stopped after the maximum automated tool steps.** Reply **"Continue"** to finish the remaining work.';
 
-const INCOMPLETE_CLONE_NOTICE =
-    '\n\n---\n**Dashboard clone not finished.** Reply **"Continue"** to copy the remaining panels.';
-
 const CONTINUATION_USER_MESSAGE =
     'Continue the task from where you stopped. Call tools immediately (get_dashboard_by_uid then update_dashboard as needed). ' +
     'Do not describe what you will do next — execute the remaining panel/dashboard updates now.';
@@ -98,7 +95,9 @@ export function userWantsDashboardWork(userContent: string): boolean {
         return false;
     }
     return (
-        /\b(update|modify|change|edit|fix|convert|add|create|clone|copy|duplicate|replicate)\b/i.test(userContent) &&
+        /\b(update|modify|change|edit|fix|convert|add|create|clone|copy|duplicate|replicate|rearrange|reorder|reorganiz\w*)\b/i.test(
+            userContent
+        ) &&
         /\b(panel|dashboard|chart|graph|visual)/i.test(userContent)
     );
 }

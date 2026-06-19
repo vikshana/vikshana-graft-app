@@ -1,5 +1,5 @@
 // External libraries
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const PLACEHOLDER_TEXTS = [
     'Query Metrics, Logs and Traces ...',

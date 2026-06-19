@@ -5,7 +5,7 @@ describe('dashboardLayoutValidate', () => {
     it('detects overlapping panels on same row', () => {
         const panels = [
             { id: 200, type: 'barchart', title: 'Pressure', gridPos: { x: 0, y: 2, w: 12, h: 8 } },
-            { id: 201, type: 'timeseries', title: 'Pressure Trends', gridPos: { x: 12, y: 2, w: 12, h: 8 } },
+            { id: 201, type: 'timeseries', title: 'Pressure Trends', gridPos: { x: 6, y: 2, w: 12, h: 8 } },
         ];
         const issues = validateDashboardLayout(panels as Record<string, unknown>[]);
         expect(issues.some((i) => i.code === 'grid_overlap')).toBe(true);

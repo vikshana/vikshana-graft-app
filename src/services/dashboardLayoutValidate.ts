@@ -1,4 +1,4 @@
-import { listDashboardPanels, type DashboardPanelEntry } from './panelDiscovery';
+import { listDashboardPanels } from './panelDiscovery';
 import {
     computeModulePanelSectionStartY,
     selectModuleCurrentPanels,

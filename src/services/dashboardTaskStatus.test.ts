@@ -49,6 +49,8 @@ describe('assessCloneTask', () => {
 
     it('reports complete when panel counts match', () => {
         const tools: ToolExecution[] = [
+            // Completion of a distinct source→target clone requires save evidence.
+            { name: 'update_dashboard', status: 'success', summary: 'Saved dashboard uid=efnv9we9u9n9cd, version=2' },
             {
                 name: 'get_dashboard_summary',
                 status: 'success',

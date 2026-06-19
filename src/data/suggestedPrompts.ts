@@ -4,10 +4,7 @@ import {
     formatPeerBandPanelCopyExamplePrompt,
     PEER_BAND_PANEL_COPY_EXAMPLE_PROMPT,
 } from '../services/peerBandPanelCopyParse';
-import {
-    formatSinglePanelCopyExamplePrompt,
-    SINGLE_PANEL_COPY_EXAMPLE_PROMPT,
-} from '../services/singlePanelCopyParse';
+import { SINGLE_PANEL_COPY_EXAMPLE_PROMPT } from '../services/singlePanelCopyParse';
 
 export interface SuggestedPrompt {
     id: string;

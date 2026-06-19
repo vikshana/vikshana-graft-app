@@ -87,9 +87,12 @@ export function extractSourceDashboardTitleForPanelCopy(message: string): string
 
 export function extractSourceMachineIdForPanelCopy(message: string): string | undefined {
     const text = normalizeMessageQuotes(message.trim());
+    // Anchor on the SOURCE-panel phrase ("copy of the "X" panel on …" / "same as
+    // the "X" panel on …") before the generic patterns below, otherwise the
+    // earlier "new panel on the <target> dashboard" phrase is matched as source.
     const fromQuotedPanel = text.match(
         new RegExp(
-            `\\bcopy of (?:the\\s+)?"[^"]+"\\s+panel\\s+on\\s+(?:the\\s+)?(${MACHINE_ID_PATTERN.source})`,
+            `\\b(?:copy of|same as) (?:the\\s+)?"[^"]+"\\s+panel\\s+on\\s+(?:the\\s+)?(${MACHINE_ID_PATTERN.source})`,
             'i'
         )
     );

@@ -75,7 +75,7 @@ describe('instrumentationMetricDiscovery', () => {
         ];
         const metrics = extractMetricsFromPanels(panels, '2505-200033');
         expect(metrics.map((m) => m.key)).toEqual(['field:Flow1_gpm']);
-        expect(metrics[0].expr).toBe('machine_metrics{machine="2505-200033", field="Flow1_gpm"}');
+        expect(metrics[0].expr).toBe('machine_metrics{machine="2505-200033",field="Flow1_gpm"}');
     });
 });
 

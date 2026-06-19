@@ -76,7 +76,11 @@ describe('sanitizeInfluxFluxPanel', () => {
         ];
         const { panel: fixed, changed, fixes } = repairInfluxFluxPanel(panel, refPanels);
         expect(changed).toBe(true);
-        expect((fixed.targets as Record<string, unknown>[])[0].datasource).toEqual({ uid: 'influx-uid' });
+        // The full datasource ref (type + uid) is copied from the reference panel.
+        expect((fixed.targets as Record<string, unknown>[])[0].datasource).toEqual({
+            type: 'influxdb',
+            uid: 'influx-uid',
+        });
         expect((fixed.targets as Record<string, unknown>[])[0].expr).toBeUndefined();
         expect(fixes.some((f) => f.includes('datasource'))).toBe(true);
     });
@@ -125,7 +129,7 @@ describe('sanitizeInfluxFluxPanel', () => {
         expect(q).toContain('r with _field');
         expect(fixes.some((f) => f.includes('legend label'))).toBe(true);
 
-        const { panel: fixedAgain, changed: changedAgain } = repairInfluxFluxPanel(fixed);
+        const { changed: changedAgain } = repairInfluxFluxPanel(fixed);
         expect(changedAgain).toBe(false);
     });
 

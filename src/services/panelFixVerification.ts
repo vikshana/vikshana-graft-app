@@ -6,7 +6,7 @@ import { resolvePanelForScopedFix } from './panelDiscovery';
 import { formatScopedPanelCrossReference } from './panelCrossReference';
 import { formatPanelVerificationBlock, scanPanelFluxIssues } from './panelFluxVerification';
 import type { ScopedPanelFixTarget } from './panelFixScope';
-import { isExplicitScopedPanelFixCommand, parseScopedPanelFixRequest } from './panelFixScope';
+import { isExplicitScopedPanelFixCommand } from './panelFixScope';
 import { userWantsBulkPeerBandFix } from './bulkPeerBandFixParse';
 import { isCrossDashboardPeerBandCopyIntent } from './peerBandShared';
 import {

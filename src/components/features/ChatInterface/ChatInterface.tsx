@@ -24,7 +24,6 @@ import { contextService, UserContext, DataSourceContext, DashboardContext } from
 import { chatHistoryService, prepareMessagesForStorage } from '../../../services/chatHistory';
 import { PLUGIN_BASE_URL } from '../../../constants';
 import { replaceChatSessionInUrl } from '../../../utils/chatSessionUrl';
-import { truncateMessages } from '../../../services/truncation';
 import { runGraftChatTurn } from '../../../services/graftChatTurn';
 import {
     CONTINUE_USER_MESSAGE,
@@ -34,10 +33,6 @@ import {
     responseNeedsContinueAction,
 } from '../../../services/continueAction';
 import { ContinueActionBanner } from './ContinueActionBanner';
-import {
-  appendDashboardReferencesToReply,
-  appendSaveVerificationWarning,
-} from '../../../services/appendToolReferences';
 import { filterTools } from '../../../services/toolFilter';
 import { isSimpleConversationalMessage } from '../../../services/programmaticChatIntents';
 import { latestNonContinueUserMessage } from '../../../services/dashboardCloneProgress';
@@ -535,6 +530,10 @@ export const ChatInterface = () => {
   const { client: mcpClient, enabled: mcpEnabled } = mcp.useMCPClient();
   const [mcpTools, setMcpTools] = useState<any[]>([]);
 
+  // The input is usable when the LLM is ready OR when MCP is connected (programmatic
+  // sends work via MCP tools even without the LLM plugin configured).
+  const inputReady = llmReady || mcpEnabled;
+
   useEffect(() => {
     if (mcpEnabled && mcpClient) {
       mcpClient.listTools().then((response) => {
@@ -714,7 +713,7 @@ export const ChatInterface = () => {
   // Persist when leaving the Grafana app route (dashboard, explore, etc.)
   useEffect(() => {
     const history = locationService.getHistory();
-    const unlisten = history.listen((loc) => {
+    const unlisten = history.listen((loc: { pathname?: string }) => {
       const path = loc.pathname || '';
       if (!path.includes(PLUGIN_BASE_URL)) {
         persistActiveSession();
@@ -941,6 +940,8 @@ export const ChatInterface = () => {
 
     let usedSimpleChatPath = false;
     let errorPathTag = 'full-llm';
+    // Declared outside the try so the catch block can read it for the fallback path.
+    let finalToolExecutions: ToolExecution[] = [];
 
     try {
       // Create a placeholder message for the assistant
@@ -956,7 +957,6 @@ export const ChatInterface = () => {
 
       // Track final content for saving to history
       let finalContent = '';
-      let finalToolExecutions: ToolExecution[] = [];
       const clearPendingOnProgrammaticSuccess = (ok: boolean) => {
         if (ok) {
           clearPendingDashboardTask();
@@ -2450,13 +2450,8 @@ export const ChatInterface = () => {
         }
       }
 
-      // Save chat to history after completion
-      const finalAssistantMessage: Message = {
-        role: 'assistant',
-        content: displayContent,
-        thinkingSeconds: thinkingDuration,
-        toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined
-      };
+      // Save chat to history after completion. messagesForContinue already carries the
+      // finalized assistant message (set by applyTurnResult).
       const finalMessages = messagesForContinue;
       const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
       if (savedSession) {
@@ -2790,11 +2785,11 @@ ${input} `
                 value={input}
                 onChange={(e) => setInput(e.currentTarget.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={!llmReady ? 'Configure Grafana LLM plugin to start chatting...' : rollingPlaceholder}
+                placeholder={!inputReady ? 'Configure Grafana LLM plugin to start chatting...' : rollingPlaceholder}
                 rows={3}
                 style={{ resize: 'none', flex: 1, border: 'none', outline: 'transparent' }}
                 className={styles.landingTextArea}
-                disabled={!llmReady}
+                disabled={!inputReady}
               />
               <div className={styles.landingInputFooter}>
                 {/* Mode toggle - disabled when LLM is not ready or specific model unavailable */}
@@ -2852,7 +2847,7 @@ ${input} `
                       <line x1="8" y1="23" x2="16" y2="23"></line>
                     </svg>
                   </div>
-                  <button onClick={handleSend} disabled={isLoading || !llmReady} className={styles.landingSendButton} aria-label="Send message" data-testid="send-message-button" title={!llmReady ? 'LLM plugin not configured' : 'Send message'}>
+                  <button onClick={handleSend} disabled={isLoading || !inputReady} className={styles.landingSendButton} aria-label="Send message" data-testid="send-message-button" title={!inputReady ? 'LLM plugin not configured' : 'Send message'}>
                     <svg viewBox="0 0 24 24" width="16" height="16" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="12" y1="19" x2="12" y2="5"></line>
                       <polyline points="5 12 12 5 19 12"></polyline>
@@ -2929,12 +2924,14 @@ ${input} `
                 setTimeout(() => setCopiedMessageIndex(null), 2000);
               };
 
-              // Parse thinking content
+              // Parse thinking content. A streaming/placeholder message can briefly
+              // have undefined content, so default to an empty string.
+              const safeContent = msg.content ?? '';
               let thinkingContent = null;
-              let mainContent = msg.content;
+              let mainContent = safeContent;
               let isThinkingStreaming = false;
 
-              const trimmedContent = msg.content.trimStart();
+              const trimmedContent = safeContent.trimStart();
               if (msg.role === 'assistant' && trimmedContent.startsWith('<think>')) {
                 const thinkEndIndex = msg.content.indexOf('</think>');
                 if (thinkEndIndex !== -1) {
@@ -2976,7 +2973,7 @@ ${input} `
                     )}
                     {msg.role === 'assistant' &&
                       !isStreaming &&
-                      responseNeedsContinueAction(mainContent || msg.content) && (
+                      responseNeedsContinueAction(mainContent || safeContent) && (
                         <ContinueActionBanner
                           theme={theme}
                           disabled={isLoading}
@@ -3130,11 +3127,11 @@ ${input} `
                 data-testid="chat-input"
                 value={input}
                 onChange={(e) => setInput(e.currentTarget.value)}
-                placeholder={!llmReady ? 'Configure Grafana LLM plugin to send messages...' : 'Ask Graft'}
+                placeholder={!inputReady ? 'Configure Grafana LLM plugin to send messages...' : 'Ask Graft'}
                 rows={2}
                 className={styles.textArea}
                 onKeyDown={handleKeyDown}
-                disabled={!llmReady}
+                disabled={!inputReady}
               />
               <div className={styles.inputFooter}>
                 {/* Mode toggle - shown when both models are available */}
@@ -3192,9 +3189,9 @@ ${input} `
                   </div>
                   <div
                     className={styles.sendIconButton}
-                    onClick={isLoading ? handleStop : (llmReady ? handleSend : undefined)}
-                    title={!llmReady ? 'LLM plugin not configured' : (isLoading ? "Stop" : "Send")}
-                    style={!llmReady ? { opacity: 0.5, cursor: 'not-allowed' } : (isLoading ? { background: theme.colors.secondary.main } : undefined)}
+                    onClick={isLoading ? handleStop : (inputReady ? handleSend : undefined)}
+                    title={!inputReady ? 'LLM plugin not configured' : (isLoading ? "Stop" : "Send")}
+                    style={!inputReady ? { opacity: 0.5, cursor: 'not-allowed' } : (isLoading ? { background: theme.colors.secondary.main } : undefined)}
                   >
                     {isLoading ? (
                       <div style={{ width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

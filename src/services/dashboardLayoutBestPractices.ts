@@ -7,7 +7,7 @@ import {
 } from './programmaticModulePanelReorder';
 import { listDashboardPanels, type DashboardPanelEntry } from './panelDiscovery';
 import { parseModuleNumberFromTitle } from './modulePanelReorderParse';
-import { isPeerRandomForestPanel, modulePanelSortKey, normalizeLegacyModulePanelTitle } from './modulePanelTitles';
+import { modulePanelSortKey, normalizeLegacyModulePanelTitle } from './modulePanelTitles';
 
 type PanelRecord = Record<string, unknown>;
 
@@ -126,7 +126,7 @@ function layoutInstrumentationPanels(panels: PanelRecord[]): { panels: PanelReco
 function layoutModuleBlock(entries: DashboardPanelEntry[], includeRandomForest: boolean): number {
     const matched = selectModuleCurrentPanels(entries, includeRandomForest)
         .map((e) => e.panel as PanelRecord)
-        .sort((a, b) => modulePanelSortKey(String(a.title ?? ''), String(b.title ?? '')));
+        .sort((a, b) => modulePanelSortKey(String(a.title ?? '')) - modulePanelSortKey(String(b.title ?? '')));
 
     const startY = computeModulePanelSectionStartY(entries, includeRandomForest);
     let y = startY;
@@ -137,7 +137,7 @@ function layoutModuleBlock(entries: DashboardPanelEntry[], includeRandomForest: 
         const title = String(panel.title ?? '');
         const mod = parseModuleNumberFromTitle(title);
         if (mod != null) {
-            panel.title = normalizeLegacyModulePanelTitle(title, mod);
+            panel.title = normalizeLegacyModulePanelTitle(title);
         }
         const next = { x: 0, y, w: MODULE_PANEL_GRID.w, h: MODULE_PANEL_GRID.h };
         if (prev.x !== next.x || prev.y !== next.y || prev.w !== next.w || prev.h !== next.h) {

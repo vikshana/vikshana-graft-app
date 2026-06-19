@@ -52,19 +52,39 @@ export async function executeLeakedToolCalls(
         const step: ToolExecution = { name: call.name, status: 'pending' };
         toolExecutions.push(step);
 
-        if (call.name === 'update_dashboard' && typeof call.args.dashboard === 'string') {
-            const raw = call.args.dashboard.trim();
-            if (raw.startsWith('{')) {
-                try {
-                    call.args.dashboard = JSON.parse(raw);
-                } catch {
-                    step.status = 'error';
-                    step.error = 'Leaked update_dashboard JSON was truncated or invalid — use programmatic handler instead.';
-                    parts.push(
-                        `[${call.name}] error: dashboard JSON could not be parsed (${raw.length} chars). ` +
-                            'Retry with native tool_calls or the metric-panels programmatic path.'
-                    );
-                    continue;
+        if (call.name === 'update_dashboard') {
+            const dashArg = call.args.dashboard;
+            const hasPayload =
+                (typeof dashArg === 'string' && dashArg.trim().length > 0) ||
+                (dashArg != null && typeof dashArg === 'object') ||
+                call.args.operations != null;
+            // A missing payload means the <parameter>/<invoke> markup was cut off
+            // before the dashboard JSON closed — never call update_dashboard with
+            // empty args, that would overwrite the dashboard with nothing.
+            if (!hasPayload) {
+                step.status = 'error';
+                step.error =
+                    'Leaked update_dashboard markup was truncated before the dashboard payload — use the programmatic handler instead.';
+                parts.push(
+                    `[${call.name}] error: update_dashboard markup was truncated (no dashboard payload). ` +
+                        'Retry with native tool_calls or the programmatic path.'
+                );
+                continue;
+            }
+            if (typeof dashArg === 'string') {
+                const raw = dashArg.trim();
+                if (raw.startsWith('{')) {
+                    try {
+                        call.args.dashboard = JSON.parse(raw);
+                    } catch {
+                        step.status = 'error';
+                        step.error = 'Leaked update_dashboard JSON was truncated or invalid — use programmatic handler instead.';
+                        parts.push(
+                            `[${call.name}] error: dashboard JSON could not be parsed (${raw.length} chars). ` +
+                                'Retry with native tool_calls or the metric-panels programmatic path.'
+                        );
+                        continue;
+                    }
                 }
             }
         }

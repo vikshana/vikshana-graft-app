@@ -30,7 +30,10 @@ export function extractDashboardUidFromMessage(message: string): string | undefi
         /\bdashboard\s+(?:with\s+)?uid\s*[=:#]?\s*["']?([a-zA-Z0-9]{6,})["']?/i,
         /\bdashboard\s+["']([a-zA-Z0-9]{6,})["']/i,
         DASHBOARD_UID_AFTER_LABEL,
-        /\b(?:the\s+)?dashboard\s+([a-z][a-z0-9]{8,})\b/i,
+        // Bare "dashboard <uid>" — uid is 9+ alphanumerics containing at least one
+        // letter (so pure numbers / hyphenated machine ids don't match). Grafana
+        // uids may start with a digit (e.g. "6gawrgawrgragg").
+        /\b(?:the\s+)?dashboard\s+(?=[a-z0-9]*[a-z])([a-z0-9]{9,})\b/i,
     ];
     for (const re of patterns) {
         const m = text.match(re);
@@ -61,6 +64,9 @@ export function extractPanelIdFromMessage(message: string): number | undefined {
     const patterns = [
         /\bpanel\s*id\s*#?\s*(\d+)/i,
         /\bpanelid\s*#?\s*(\d+)/i,
+        // Bare "panel 35" / "in panel #35". Does not match "panel index 35" or
+        // "array index 35" (those are handled by extractPanelArrayIndexFromMessage).
+        /\bpanel\s*#?\s*(\d+)\b/i,
     ];
     for (const re of patterns) {
         const m = message.match(re);

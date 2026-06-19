@@ -14,7 +14,7 @@ describe('scanPanelFluxIssues', () => {
         expect(issues.some((i) => i.refId === 'B' && /=~/.test(i.issue))).toBe(true);
     });
 
-    it('flags OR peer filter and passes collapsed union with machine_metrics', () => {
+    it('flags OR peer filter and passes collapsed union using r.machine + r._field', () => {
         const orIssues = scanPanelFluxIssues({
             targets: [
                 {
@@ -31,7 +31,7 @@ describe('scanPanelFluxIssues', () => {
                 {
                     refId: 'B',
                     query:
-                        'union(tables: [from(b:"x") |> filter(fn: (r) => r._measurement == "machine_metrics" and r._field == "Module1_Current_A") |> keep(columns: ["_time", "_value"]), from(b:"x") |> filter(fn: (r) => r._measurement == "machine_metrics" and r._field == "Module2_Current_A") |> keep(columns: ["_time", "_value"]), from(b:"x") |> filter(fn: (r) => r._measurement == "machine_metrics" and r._field == "Module3_Current_A") |> keep(columns: ["_time", "_value"])]) |> group(columns: ["_time"]) |> mean(column: "_value")',
+                        'union(tables: [from(b:"x") |> filter(fn: (r) => r.machine == "m" and r._field == "Module1_Current_A") |> keep(columns: ["_time", "_value"]), from(b:"x") |> filter(fn: (r) => r.machine == "m" and r._field == "Module2_Current_A") |> keep(columns: ["_time", "_value"]), from(b:"x") |> filter(fn: (r) => r.machine == "m" and r._field == "Module3_Current_A") |> keep(columns: ["_time", "_value"])]) |> group(columns: ["_time"]) |> mean(column: "_value")',
                 },
             ],
         });

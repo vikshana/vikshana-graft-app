@@ -37,6 +37,10 @@ function extractNewPanelTitle(text: string): string | undefined {
         /\bpanel\s+to\s+be\s+'([^']+)'/i,
         /\bpanel\s+to\s+be\s+([A-Za-z][A-Za-z0-9_ -]+?)(?:\s+on\s+|\s*$|\.)/i,
         /\bpanel\s+to\s+([A-Za-z][A-Za-z0-9_ -]+?)(?:\s+on\s+(?:the\s+)?dashboard|\s*$|\.)/i,
+        // Fallback for "Rename panel titled "Old" to "New"" where the new title
+        // is the quoted string after "to" (not immediately after "panel").
+        /\bto\s+"([^"]+)"/i,
+        /\bto\s+'([^']+)'/i,
     ];
     for (const re of patterns) {
         const match = text.match(re);

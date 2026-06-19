@@ -54,6 +54,9 @@ describe('peerBandPanelCopyParse', () => {
     it('reports gaps when target uid is missing', () => {
         const vague = 'Copy all vs. Peer Band panels from dashboard uid="aaa"';
         expect(parsePeerBandPanelCopyRequest(vague)).toBeNull();
-        expect(diagnosePeerBandPanelCopyGaps(vague)).toContain('**Target dashboard uid**');
+        // Gap labels carry a helpful "(e.g. …)" example, so match on the substring.
+        expect(diagnosePeerBandPanelCopyGaps(vague)).toEqual(
+            expect.arrayContaining([expect.stringContaining('**Target dashboard uid**')])
+        );
     });
 });

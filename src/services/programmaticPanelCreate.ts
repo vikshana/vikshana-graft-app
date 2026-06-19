@@ -543,12 +543,15 @@ export async function runProgrammaticMultiPanelCreate(
             panelType: spec.panelType,
             panelId: nextId,
         });
+        const draftArrayIndex = panels.length - 1;
         entries = [
             ...entries,
             {
                 title: spec.panelTitle,
                 panelId: nextId,
                 panel: draftPanel,
+                arrayIndex: draftArrayIndex,
+                path: [draftArrayIndex],
             },
         ];
     }

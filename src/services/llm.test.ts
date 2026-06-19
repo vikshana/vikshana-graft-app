@@ -83,7 +83,6 @@ describe('needsDashboardContinueNudge', () => {
     });
 
     it('returns true after partial clone save when target has fewer panels', () => {
-        const user = cloneUser;
         const history = [cloneUser, 'Continue'];
         const tools: ToolExecution[] = [
             { name: 'update_dashboard', status: 'success' },
@@ -147,7 +146,10 @@ describe('needsDashboardContinueNudge', () => {
 describe('buildContinuationUserMessage', () => {
     it('adds clone instructions for visual copy requests', () => {
         const msg = buildContinuationUserMessage('Create a visual copy of dashboard X for machine Y');
-        expect(msg).toContain('Do not ask the user to pick option 1 vs 2');
+        // Fresh clone continuations route to the directive forced-clone message,
+        // which mandates the save and forbids asking the user questions.
+        expect(msg).toContain('MANDATORY save');
+        expect(msg).toMatch(/asking the user questions/i);
     });
 
     it('includes panel range when clone is incomplete', () => {

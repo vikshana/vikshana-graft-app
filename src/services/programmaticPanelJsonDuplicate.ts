@@ -201,7 +201,7 @@ export async function runProgrammaticPanelJsonDuplicate(
 
     const nextId = maxPanelId(entries) + 1;
     const sanitized = sanitizeInfluxFluxPanel(request.panelJson) as PanelRecord;
-    const repaired = repairInfluxFluxPanel(sanitized, baseline.panels);
+    const repaired = repairInfluxFluxPanel(sanitized, baseline.panels as unknown[] | undefined);
     const newPanel = repaired.panel as PanelRecord;
     newPanel.id = nextId;
     newPanel.gridPos = computeAppendGridPos(entries, newPanel);

@@ -105,7 +105,7 @@ export async function runProgrammaticScopedPanelFix(
     const { panel: fixedPanel, changed, targetsFixed } = applyFluxFixesToPanel(entry.panel, {
         aggressive: true,
         dashboardTitle: typeof baseline.title === 'string' ? baseline.title : undefined,
-        dashboardPanels: baseline.panels,
+        dashboardPanels: baseline.panels as unknown[] | undefined,
     });
     if (!changed) {
         return {

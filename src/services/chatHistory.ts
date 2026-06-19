@@ -517,7 +517,7 @@ class ChatHistoryService {
 }
 
 function getOrCreateChatHistoryService(): ChatHistoryService {
-    const g = globalThis as Record<string, ChatHistoryService | undefined>;
+    const g = globalThis as unknown as Record<string, ChatHistoryService | undefined>;
     if (!g[GLOBAL_SERVICE_KEY]) {
         g[GLOBAL_SERVICE_KEY] = new ChatHistoryService();
     }

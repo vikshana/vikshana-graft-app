@@ -381,6 +381,7 @@ export async function saveDashboardInPanelChunks(
                 return {
                     ok: false,
                     error: 'Missing dashboard uid for panel append batch',
+                    text: '',
                     chunksSaved: i,
                     totalChunks,
                 };

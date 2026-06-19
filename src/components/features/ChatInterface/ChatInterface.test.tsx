@@ -2,13 +2,15 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ChatInterface } from './ChatInterface';
-import { llmService } from '../../../services/llm';
+import { llmService, runSimpleConversationalChat } from '../../../services/llm';
+import { runGraftChatTurn } from '../../../services/graftChatTurn';
 import { contextService } from '../../../services/context';
-import { chatHistoryService } from '../../../services/chatHistory';
+import { chatHistoryService, prepareMessagesForStorage } from '../../../services/chatHistory';
 
 
 // Mock dependencies
 jest.mock('../../../services/llm');
+jest.mock('../../../services/graftChatTurn');
 jest.mock('../../../services/context');
 jest.mock('../../../services/chatHistory');
 
@@ -43,6 +45,7 @@ jest.mock('@grafana/runtime', () => ({
         getHistory: () => ({
             listen: jest.fn(() => jest.fn()),
         }),
+        getLocation: () => ({ pathname: '', search: '', hash: '' }),
     },
     getBackendSrv: () => ({
         post: jest.fn(),
@@ -99,6 +102,63 @@ describe('ChatInterface', () => {
         (chatHistoryService.getLastActiveSessionId as jest.Mock).mockReturnValue(null);
         (chatHistoryService.clearLastActiveSessionId as jest.Mock).mockImplementation(() => undefined);
         (chatHistoryService.saveSession as jest.Mock).mockReturnValue({ id: 'test-session-id', messages: [] });
+        (chatHistoryService.ensureLoaded as jest.Mock).mockResolvedValue(undefined);
+        (chatHistoryService.loadLastActiveSession as jest.Mock).mockReturnValue(null);
+        (chatHistoryService.flushToServer as jest.Mock).mockResolvedValue(undefined);
+        // Auto-mocked named export returns undefined by default; keep the messages.
+        (prepareMessagesForStorage as jest.Mock).mockImplementation((m) => m ?? []);
+
+        // handleSend now routes through runGraftChatTurn (complex messages) and
+        // runSimpleConversationalChat (greetings) instead of llmService.chat directly.
+        // Delegate both seams to the per-test llmService.chat mock so existing
+        // onUpdate-streaming setups keep working.
+        (llmService.chat as jest.Mock).mockImplementation(async (_m, _c, onUpdate) => {
+            onUpdate?.('');
+        });
+        (runGraftChatTurn as jest.Mock).mockImplementation(
+            async ({ conversationMessages, context, modelType, onStream }) => {
+                let out = '';
+                let thinkStart: number | null = null;
+                await (llmService.chat as jest.Mock)(
+                    conversationMessages,
+                    context,
+                    (full: string) => {
+                        out = full ?? '';
+                        if (out.includes('<think>') && thinkStart === null) {
+                            thinkStart = Date.now();
+                        }
+                        onStream?.(out, [], Date.now());
+                    },
+                    modelType
+                );
+                const thinkingSeconds = out.includes('<think>')
+                    ? Math.max(0, Math.round((Date.now() - (thinkStart ?? Date.now())) / 1000))
+                    : undefined;
+                return { displayContent: out, toolExecutions: [], thinkingSeconds };
+            }
+        );
+        (runSimpleConversationalChat as jest.Mock).mockImplementation(
+            async (text: string, modelType?: string) => {
+                let out = '';
+                await (llmService.chat as jest.Mock)(
+                    [{ role: 'user', content: text }],
+                    {},
+                    (full: string) => {
+                        out = full ?? '';
+                    },
+                    modelType
+                );
+                return out;
+            }
+        );
+
+        // BuildBadge fetches build-info.json on mount; jsdom has no fetch.
+        global.fetch = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({}),
+            text: () => Promise.resolve(''),
+        }) as unknown as typeof fetch;
 
         // Mock scrollTo and scrollIntoView which are not available in test environment
         Element.prototype.scrollTo = jest.fn();
@@ -347,13 +407,15 @@ describe('ChatInterface', () => {
     });
 
     describe('Thinking Block', () => {
-        // Helper to wait for LLM health check and send a message
+        // Helper to wait for LLM health check and send a message. Thinking duration
+        // tracking only runs on the runGraftChatTurn path, so send a non-simple message
+        // (the "grafana" keyword keeps it off the simple-conversational fast path).
         const sendMessage = async (message: string) => {
             await waitFor(() => {
                 expect(screen.getByTestId('send-message-button')).not.toBeDisabled();
             });
             const input = screen.getByTestId('chat-input');
-            fireEvent.change(input, { target: { value: message } });
+            fireEvent.change(input, { target: { value: `About grafana: ${message}` } });
             fireEvent.click(screen.getByLabelText('Send message'));
         };
 
@@ -572,10 +634,12 @@ describe('ChatInterface', () => {
             // and that the saved message includes thinkingSeconds
             await waitFor(() => {
                 expect(chatHistoryService.saveSession).toHaveBeenCalled();
-                const savedMessages = (chatHistoryService.saveSession as jest.Mock).mock.calls[0][0];
-                const assistantMessage = savedMessages.find((m: any) => m.role === 'assistant');
+                // Persist happens across several calls; find the one with the completed
+                // assistant message that carries the thinking duration.
+                const assistantMessage = (chatHistoryService.saveSession as jest.Mock).mock.calls
+                    .flatMap((call) => call[0] as any[])
+                    .find((m: any) => m?.role === 'assistant' && m?.thinkingSeconds !== undefined);
                 expect(assistantMessage).toBeDefined();
-                expect(assistantMessage.thinkingSeconds).toBeDefined();
                 expect(assistantMessage.thinkingSeconds).toBeGreaterThanOrEqual(0);
             });
         });
@@ -827,10 +891,12 @@ describe('ChatInterface', () => {
                 updatedAt: Date.now(),
             };
 
+            // With no `session` id in the URL, restore goes through loadLastActiveSession.
             (chatHistoryService.getLastActiveSessionId as jest.Mock).mockReturnValue('last-session');
-            (chatHistoryService.getSession as jest.Mock).mockImplementation((id: string) =>
-                id === 'last-session' ? mockSession : null
-            );
+            (chatHistoryService.loadLastActiveSession as jest.Mock).mockReturnValue({
+                sessionId: mockSession.id,
+                messages: mockSession.messages,
+            });
 
             render(
                 <MemoryRouter initialEntries={['/?chat=true']}>

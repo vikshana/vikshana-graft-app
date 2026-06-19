@@ -8,14 +8,10 @@ import {
     findPanelByStrictTitle,
     listDashboardPanels,
     normalizePanelTitleForMatch,
-    type DashboardPanelEntry,
 } from './panelDiscovery';
 import type { PanelRenameRequest } from './panelRenameParse';
 import { formatPanelRenameNotFoundClarification } from './panelRenameParse';
-import {
-    type DashboardSearchHit,
-    parseSearchHitsFromMcpText,
-} from './dashboardSearchParse';
+import { parseSearchHitsFromMcpText } from './dashboardSearchParse';
 
 export interface ProgrammaticPanelRenameResult {
     ok: boolean;

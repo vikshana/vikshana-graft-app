@@ -221,7 +221,7 @@ export async function runProgrammaticAddPeerRfPanel(
 
     const template = buildPeerRfPanelTemplate(machineId);
     const sanitized = sanitizeInfluxFluxPanel(template) as PanelRecord;
-    const repaired = repairInfluxFluxPanel(sanitized, baseline.panels);
+    const repaired = repairInfluxFluxPanel(sanitized, baseline.panels as unknown[] | undefined);
     const newPanel = repaired.panel as PanelRecord;
     newPanel.id = maxPanelId(entries) + 1;
     newPanel.gridPos = gridPosBesidePeerBand(peerRef, entries);

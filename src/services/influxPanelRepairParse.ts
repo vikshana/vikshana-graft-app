@@ -1,6 +1,5 @@
 import { extractRequestedDashboardTitle, findMachineIdsInText } from './dashboardCloneParse';
 import { extractAllDashboardUids, extractPanelIdFromMessage, extractPanelTitleFromMessage } from './dashboardMentionParse';
-import { panelFluxOnPrometheusDatasource } from './fluxPeerBandFix';
 
 export interface InfluxPanelRepairRequest {
     dashboardUid?: string;

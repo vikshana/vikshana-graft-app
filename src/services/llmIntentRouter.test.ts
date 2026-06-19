@@ -2,8 +2,10 @@ import { classifyLlmIntent } from './llmIntentRouter';
 import { DASHBOARD_REVIEW_EXAMPLE_PROMPT } from './dashboardReviewParse';
 
 describe('classifyLlmIntent', () => {
-    it('classifies review prompts as read_only', () => {
-        expect(classifyLlmIntent(DASHBOARD_REVIEW_EXAMPLE_PROMPT)).toBe('read_only');
+    it('routes review prompts to the programmatic review handler', () => {
+        // Dashboard-review requests have a dedicated programmatic handler
+        // (programmaticDashboardReview), so they classify as 'programmatic'.
+        expect(classifyLlmIntent(DASHBOARD_REVIEW_EXAMPLE_PROMPT)).toBe('programmatic');
     });
 
     it('classifies panel rename as programmatic', () => {
@@ -19,8 +21,10 @@ describe('classifyLlmIntent', () => {
     });
 
     it('classifies mutating dashboard work', () => {
+        // No dashboard target (uid/context) means no programmatic handler applies,
+        // so this falls through to the LLM 'mutating' path.
         expect(classifyLlmIntent('Create 50 panels covering every available metric on the dashboard')).toBe(
-            'programmatic'
+            'mutating'
         );
     });
 

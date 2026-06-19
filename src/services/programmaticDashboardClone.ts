@@ -234,7 +234,7 @@ export async function runProgrammaticDashboardClone(
     const getSourceStep = pendingTool('get_dashboard_by_uid');
     toolExecutions.push(getSourceStep);
     const sourceFetch = await callMcpTool(mcpClient, 'get_dashboard_by_uid', { uid: sourceResolved.uid });
-    toolExecutions[toolExecutions.length - 1] = finishTool(sourceFetch, {
+    toolExecutions[toolExecutions.length - 1] = finishTool(getSourceStep, {
         ...sourceFetch,
         userReference: sourceFetch.ok ? formatPanelIndexFromDashboardJson(parseJsonFromMcpText(sourceFetch.text)) : undefined,
     });
@@ -251,7 +251,7 @@ export async function runProgrammaticDashboardClone(
     const searchTargetStep = pendingTool('search_dashboards');
     toolExecutions.push(searchTargetStep);
     const targetSearch = await callMcpTool(mcpClient, 'search_dashboards', { query: targetMachine });
-    toolExecutions[toolExecutions.length - 1] = finishTool(targetSearch, targetSearch);
+    toolExecutions[toolExecutions.length - 1] = finishTool(searchTargetStep, targetSearch);
 
     if (targetSearch.ok) {
         const hits = parseSearchHits(targetSearch.text);
@@ -274,7 +274,7 @@ export async function runProgrammaticDashboardClone(
             const getTargetStep = pendingTool('get_dashboard_by_uid');
             toolExecutions.push(getTargetStep);
             const targetFetch = await callMcpTool(mcpClient, 'get_dashboard_by_uid', { uid: targetUid });
-            toolExecutions[toolExecutions.length - 1] = finishTool(targetFetch, targetFetch);
+            toolExecutions[toolExecutions.length - 1] = finishTool(getTargetStep, targetFetch);
             if (targetFetch.ok) {
                 const targetExtracted = extractDashboardFromGetByUid(targetFetch.text);
                 if (targetExtracted) {

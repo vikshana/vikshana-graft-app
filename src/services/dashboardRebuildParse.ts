@@ -13,7 +13,10 @@ function normalizeMessageQuotes(text: string): string {
 }
 
 function mentionsPowerTechConventions(text: string): boolean {
-    return /\b(powertech|power\s*tech)\b/i.test(text) && /\b(convention|standard|practice|best\s*practice)\b/i.test(text);
+    return (
+        /\b(powertech|power\s*tech)\b/i.test(text) &&
+        /\b(conventions?|standards?|practices?|best\s*practices?)\b/i.test(text)
+    );
 }
 
 function mentionsRebuildOrReorganize(text: string): boolean {

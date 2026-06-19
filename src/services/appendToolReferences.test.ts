@@ -40,15 +40,16 @@ describe('appendToolReferences', () => {
     });
 
     it('uses concise dashboard saved reply for any successful update_dashboard', () => {
-        const user = 'Change the overview panel title on 2505-200033 / Keysight';
-        const modelText = 'Updated the overview panel.\n\n' + panelTable;
+        // Dashboard-level change (no "panel" word, no panel-index table) → generic
+        // dashboard-saved reply, not the panel-fix reply.
+        const user = 'Update the default time range on 2505-200033 / Keysight dashboard';
+        const modelText = 'Updated the dashboard.';
         const tools: ToolExecution[] = [
             {
                 name: 'update_dashboard',
                 status: 'success' as const,
                 summary: 'Saved dashboard uid=abc123, version=5',
             },
-            { name: 'get_dashboard_summary', status: 'success' as const, userReference: panelTable },
         ];
         const out = appendDashboardReferencesToReply(modelText, tools, [user], user);
         expect(out).toContain('### Done (dashboard saved)');
@@ -89,7 +90,7 @@ describe('appendToolReferences', () => {
         ];
         const out = appendDashboardReferencesToReply(modelText, tools, [fixUser], fixUser);
         expect(out).toContain('### Done (panel fix)');
-        expect(out).toContain('no save was needed');
+        expect(out).toContain('No save was needed');
         expect(out).not.toContain('Panel index');
         expect(out).not.toContain('arrayIndex');
         expect(out.indexOf('### Done (panel fix)')).toBeGreaterThan(0);

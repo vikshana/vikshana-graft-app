@@ -24,7 +24,8 @@ describe('panelJsonDuplicateParse', () => {
         expect(req?.dashboardTitle).toBe('2406-176021 / Exsolve');
         expect(req?.machineId).toBe('2406-176021');
         expect(req?.sourcePanelTitle).toBe('Module 5 Current — History Comparison');
-        expect(req?.panelJson.title).toBe('Module 5 Current — RandomForest ML (Influx)');
+        // Legacy "RandomForest ML (Influx)" is normalized to the operator-facing label.
+        expect(req?.panelJson.title).toBe('Module 5 Current — History Comparison (historical / Influx)');
         expect((req?.panelJson.targets as unknown[]).length).toBe(4);
     });
 

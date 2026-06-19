@@ -9,7 +9,6 @@ import {
     describeDefaultSaveOutcome,
     extractSuccessLineFromModel,
     HARD_REFRESH_LINE,
-    hasSuccessfulDashboardSave,
     resolveSavedDashboardLabel,
     savedVersionFromTools,
 } from './dashboardSaveReplyUtils';

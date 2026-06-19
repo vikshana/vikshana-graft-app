@@ -35,6 +35,9 @@ describe('singlePanelCopyParse', () => {
             panelTitle: 'Pressure',
             sourceDashboardUid: undefined,
             targetDashboardUid: undefined,
+            sourceDashboardTitle: undefined,
+            // "on the 2505-200033 dashboard" → target dashboard title (used for resolution).
+            targetDashboardTitle: '2505-200033',
             sourceMachineId: '2210-177097',
             targetMachineId: '2505-200033',
             replaceExisting: true,

@@ -252,9 +252,23 @@ export function applyOperatorFriendlyPanelFixReply(
           ? `dashboard uid \`${dashboardUid}\``
           : 'your dashboard';
     const panelsFixed = extractPanelsMentionedInFixReply(stripped, latest);
+    // The same panel often appears twice (user's lower-case phrasing + the model's
+    // properly-cased title). Collapse case-insensitive duplicates, keeping the better-
+    // cased variant, so the reply doesn't list "total current, Total Current".
+    const dedupedPanels = (() => {
+        const best = new Map<string, string>();
+        for (const p of panelsFixed) {
+            const key = p.toLowerCase();
+            const existing = best.get(key);
+            if (!existing || (existing === existing.toLowerCase() && p !== p.toLowerCase())) {
+                best.set(key, p);
+            }
+        }
+        return [...best.values()];
+    })();
     const panelLabel =
-        panelsFixed.length > 0
-            ? panelsFixed.map((p) => `**${p}**`).join(', ')
+        dedupedPanels.length > 0
+            ? dedupedPanels.map((p) => `**${p}**`).join(', ')
             : '**the panel**';
     const panelScopeLabel = scoped
         ? formatScopedPanelCrossReference(latest, scoped, getPanelFixResolvedPanel())

@@ -149,7 +149,7 @@ export async function runProgrammaticInfluxPanelRepair(
         };
     }
 
-    const repair = repairInfluxFluxPanel(entry.panel as PanelRecord, baseline.panels);
+    const repair = repairInfluxFluxPanel(entry.panel as PanelRecord, baseline.panels as unknown[] | undefined);
     const legendComplete =
         !panelNeedsFluxLegendRepair(repair.panel) || hasFrameRefIdLegendOverrides(repair.panel);
     if (!repair.changed && !panelFluxOnPrometheusDatasource(entry.panel as PanelRecord) && legendComplete) {

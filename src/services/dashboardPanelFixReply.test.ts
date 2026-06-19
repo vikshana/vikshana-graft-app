@@ -103,7 +103,9 @@ describe('applyOperatorFriendlyPanelFixReply', () => {
         expect(out).toContain('aggregateWindow');
         expect(out).toContain('version 35');
         expect(out).not.toContain('Panel index');
-        expect(out.length).toBeLessThan(600);
+        // Concise panel-fix reply (note + status + refresh + token-saving hint),
+        // matching the sibling concise-reply budget.
+        expect(out.length).toBeLessThan(700);
     });
 
     const scopedFix =
@@ -130,7 +132,8 @@ describe('applyOperatorFriendlyPanelFixReply', () => {
         expect(out).toContain('### Not finished yet');
         expect(out).toContain('Module 5 Current');
         expect(out).toContain('panel id **99**');
-        expect(out).toContain('Reply **Continue**');
+        // The continue block now says "Use the **Continue** button below (or type `Continue`)".
+        expect(out).toContain('**Continue** button');
         expect(out).not.toContain('Include dashboard uid');
         expect(out).not.toMatch(/\*\*\*\*/);
     });
@@ -150,7 +153,7 @@ describe('applyOperatorFriendlyPanelFixReply', () => {
 
     it('scoped stuck after repeated no-save turns', () => {
         setPanelFixScope({ dashboardUid: '6gawrgawrgragg', panelId: 35 });
-        const tools = [{ name: 'get_dashboard_by_uid', status: 'success' }];
+        const tools = [{ name: 'get_dashboard_by_uid', status: 'success' as const }];
         applyOperatorFriendlyPanelFixReply('lookup only', tools, [scopedFix], scopedFix, { finalize: true });
         const out = applyOperatorFriendlyPanelFixReply('still no save', tools, [scopedFix], scopedFix, {
             finalize: true,

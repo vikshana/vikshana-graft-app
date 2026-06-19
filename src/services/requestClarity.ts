@@ -38,7 +38,6 @@ import {
     formatAmbiguousGraphCreateClarification,
     messageDescribesAmbiguousGraphCreate,
 } from './ambiguousGraphCreateParse';
-import { extractDashboardUidFromMessage } from './dashboardMentionParse';
 import { recordClarificationShown } from './graftPromptLearning';
 
 /** Enough to identify a dashboard for panel fix (uid, machine id, or title). */

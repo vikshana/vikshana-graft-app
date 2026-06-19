@@ -6,8 +6,6 @@ import {
     isHistoryComparisonPanel,
     isPeerBandPanel,
     panelUsesPrometheusPeerBandQueries,
-    peerBandQueryUsesCollapsedPeerUnion,
-    peerBandQueryUsesMeasurementFilter,
     stripFluxMachineMetricsMeasurement,
 } from './fluxPeerBandFix';
 
@@ -23,6 +21,18 @@ const build61Panel = {
         {
             refId: 'B',
             legendFormat: 'Peer Avg',
+            query:
+                'union(tables: [from(bucket: v.bucket) |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == "machine_metrics" and r.machine == "2406-176021" and r._field == "Module1_Current_A") |> keep(columns: ["_time", "_value"])]) |> group(columns: ["_time"]) |> mean(column: "_value")',
+        },
+        {
+            refId: 'C',
+            legendFormat: 'Upper Band',
+            query:
+                'union(tables: [from(bucket: v.bucket) |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == "machine_metrics" and r.machine == "2406-176021" and r._field == "Module1_Current_A") |> keep(columns: ["_time", "_value"])]) |> group(columns: ["_time"]) |> mean(column: "_value")',
+        },
+        {
+            refId: 'D',
+            legendFormat: 'Lower Band',
             query:
                 'union(tables: [from(bucket: v.bucket) |> range(start: v.timeRangeStart, stop: v.timeRangeStop) |> filter(fn: (r) => r._measurement == "machine_metrics" and r.machine == "2406-176021" and r._field == "Module1_Current_A") |> keep(columns: ["_time", "_value"])]) |> group(columns: ["_time"]) |> mean(column: "_value")',
         },
@@ -54,7 +64,10 @@ describe('applyModule5PeerBandFluxFixes build 72', () => {
             'Module3_Current_A'
         );
         expect(defaultPeerFieldsForActual('Module3_Current_A')).not.toContain('Module3_Current_A');
-        expect(defaultPeerFieldsForActual('Module3_Current_A')).toContain('Module5_Current_A');
+        // Peer band is "Modules 1–4,6–8" — Module 5 is the excluded anomaly module,
+        // never a peer. Self (Module 3) is also excluded.
+        expect(defaultPeerFieldsForActual('Module3_Current_A')).not.toContain('Module5_Current_A');
+        expect(defaultPeerFieldsForActual('Module3_Current_A')).toContain('Module4_Current_A');
     });
 
     it('labels Module 3 actual series from panel title', () => {

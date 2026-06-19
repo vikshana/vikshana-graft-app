@@ -40,6 +40,13 @@ describe('ChatHistory', () => {
         (chatHistoryService.getAllSessions as jest.Mock).mockReturnValue(mockSessions);
     });
 
+    // The page loads sessions asynchronously (await refreshSessions() → setSessions),
+    // so wait for the first card before querying cards/buttons.
+    async function renderAndWait() {
+        render(<ChatHistory />);
+        await screen.findByText('Pinned Session');
+    }
+
     describe('Rendering', () => {
         it('should render header with centered title', () => {
             render(<ChatHistory />);
@@ -47,15 +54,15 @@ describe('ChatHistory', () => {
             expect(screen.getByText('Back')).toBeInTheDocument();
         });
 
-        it('should render session cards with date at bottom right', () => {
-            render(<ChatHistory />);
+        it('should render session cards with date at bottom right', async () => {
+            await renderAndWait();
             expect(screen.getByText('Pinned Session')).toBeInTheDocument();
             expect(screen.getByText('Regular Session')).toBeInTheDocument();
             expect(screen.getByText('Another Session')).toBeInTheDocument();
         });
 
-        it('should show pinned sessions first', () => {
-            render(<ChatHistory />);
+        it('should show pinned sessions first', async () => {
+            await renderAndWait();
             const sessionCards = screen.getAllByText(/Session/);
             // First session should be "Pinned Session"
             expect(sessionCards[0]).toHaveTextContent('Pinned Session');
@@ -68,16 +75,16 @@ describe('ChatHistory', () => {
     });
 
     describe('Pinning UI', () => {
-        it('should show pinned icon for pinned sessions', () => {
-            render(<ChatHistory />);
+        it('should show pinned icon for pinned sessions', async () => {
+            await renderAndWait();
             const starButtons = screen.getAllByLabelText(/Pin conversation|Unpin conversation/);
             expect(starButtons.length).toBeGreaterThan(0);
         });
 
-        it('should toggle pin state when clicking pin button', () => {
+        it('should toggle pin state when clicking pin button', async () => {
             (chatHistoryService.togglePinSession as jest.Mock).mockReturnValue(true);
 
-            render(<ChatHistory />);
+            await renderAndWait();
             const pinButton = screen.getAllByLabelText(/Pin conversation|Unpin conversation/)[1];
 
             fireEvent.click(pinButton);
@@ -89,7 +96,7 @@ describe('ChatHistory', () => {
         it('should show modal when pin limit reached', async () => {
             (chatHistoryService.togglePinSession as jest.Mock).mockReturnValue(false);
 
-            render(<ChatHistory />);
+            await renderAndWait();
             const pinButton = screen.getAllByLabelText(/Pin conversation/)[0];
 
             fireEvent.click(pinButton);
@@ -104,7 +111,7 @@ describe('ChatHistory', () => {
         it('should dismiss pin limit modal when clicking Dismiss', async () => {
             (chatHistoryService.togglePinSession as jest.Mock).mockReturnValue(false);
 
-            render(<ChatHistory />);
+            await renderAndWait();
             const pinButton = screen.getAllByLabelText(/Pin conversation/)[0];
 
             fireEvent.click(pinButton);
@@ -124,7 +131,7 @@ describe('ChatHistory', () => {
 
     describe('Delete UI', () => {
         it('should show confirmation modal when clicking delete', async () => {
-            render(<ChatHistory />);
+            await renderAndWait();
             const deleteButtons = screen.getAllByLabelText('Delete conversation');
 
             fireEvent.click(deleteButtons[0]);
@@ -137,7 +144,7 @@ describe('ChatHistory', () => {
         });
 
         it('should keep session when clicking Cancel', async () => {
-            render(<ChatHistory />);
+            await renderAndWait();
             const deleteButtons = screen.getAllByLabelText('Delete conversation');
 
             fireEvent.click(deleteButtons[0]);
@@ -157,7 +164,7 @@ describe('ChatHistory', () => {
         });
 
         it('should delete session when clicking Delete', async () => {
-            render(<ChatHistory />);
+            await renderAndWait();
             const deleteButtons = screen.getAllByLabelText('Delete conversation');
 
             fireEvent.click(deleteButtons[0]);
@@ -178,8 +185,8 @@ describe('ChatHistory', () => {
     });
 
     describe('Search', () => {
-        it('should filter sessions by title', () => {
-            render(<ChatHistory />);
+        it('should filter sessions by title', async () => {
+            await renderAndWait();
             const searchInput = screen.getByPlaceholderText('Search...');
 
             fireEvent.change(searchInput, { target: { value: 'Regular' } });
@@ -199,8 +206,8 @@ describe('ChatHistory', () => {
             expect(screen.getByText('Try a different search term')).toBeInTheDocument();
         });
 
-        it('should show all sessions when search is cleared', () => {
-            render(<ChatHistory />);
+        it('should show all sessions when search is cleared', async () => {
+            await renderAndWait();
             const searchInput = screen.getByPlaceholderText('Search...');
 
             fireEvent.change(searchInput, { target: { value: 'Regular' } });

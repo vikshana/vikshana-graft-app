@@ -55,7 +55,7 @@ export async function revertDashboardToSnapshot(
     const getStep = pendingTool('get_dashboard_by_uid');
     toolExecutions.push(getStep);
     const current = await callMcpTool(mcpClient, 'get_dashboard_by_uid', { uid: snapshot.uid });
-    toolExecutions[toolExecutions.length - 1] = finishTool(current, current);
+    toolExecutions[toolExecutions.length - 1] = finishTool(getStep, current);
 
     if (!current.ok) {
         return { ok: false, error: current.error ?? 'Could not load current dashboard', toolExecutions };
@@ -80,7 +80,7 @@ export async function revertDashboardToSnapshot(
         overwrite: true,
         message: `Graft revert to snapshot from ${new Date(snapshot.capturedAt).toISOString()}`,
     });
-    toolExecutions[toolExecutions.length - 1] = finishTool(save, save);
+    toolExecutions[toolExecutions.length - 1] = finishTool(saveStep, save);
 
     if (!save.ok) {
         return { ok: false, error: save.error ?? 'Revert save failed', toolExecutions };

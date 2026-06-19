@@ -212,7 +212,7 @@ export async function runProgrammaticBulkModulePanelMatch(
                 'historical'
             );
             const sanitized = sanitizeInfluxFluxPanel(raw) as PanelRecord;
-            const repaired = repairInfluxFluxPanel(sanitized, proposed.panels);
+            const repaired = repairInfluxFluxPanel(sanitized, proposed.panels as unknown[] | undefined);
             const newPanel = repaired.panel as PanelRecord;
             newPanel.id = nextId++;
             if (!Array.isArray(proposed.panels)) {
@@ -233,7 +233,7 @@ export async function runProgrammaticBulkModulePanelMatch(
                 'peer_rf'
             );
             const sanitized = sanitizeInfluxFluxPanel(raw) as PanelRecord;
-            const repaired = repairInfluxFluxPanel(sanitized, proposed.panels);
+            const repaired = repairInfluxFluxPanel(sanitized, proposed.panels as unknown[] | undefined);
             const newPanel = repaired.panel as PanelRecord;
             newPanel.id = nextId++;
             if (!Array.isArray(proposed.panels)) {

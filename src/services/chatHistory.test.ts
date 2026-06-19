@@ -72,35 +72,15 @@ describe('ChatHistoryService', () => {
             expect(retrieved?.isPinned).toBeFalsy();
         });
 
-        it('should sort pinned sessions first', () => {
+        it('should sort pinned sessions first', async () => {
             const now = Date.now();
 
-            // Create sessions with different timestamps
-            const sessions = [
-                { id: 'session-1', updatedAt: now - 3000, isPinned: false },
-                { id: 'session-2', updatedAt: now - 2000, isPinned: true },
-                { id: 'session-3', updatedAt: now - 1000, isPinned: false },
-                { id: 'session-4', updatedAt: now, isPinned: true },
-            ];
-
-            sessions.forEach((s) => {
-                const messages = [{ role: 'user' as const, content: `Message for ${s.id}` }];
-                chatHistoryService.saveSession(messages, s.id);
-                if (s.isPinned) {
-                    chatHistoryService.togglePinSession(s.id);
-                }
-            });
-
-            // Manually update timestamps in localStorage to match test expectations
-            // because saveSession overwrites them with Date.now()
-            const storedSessions = JSON.parse(localStorage.getItem('graft_chat_history') || '[]');
-            storedSessions.forEach((s: any) => {
-                const target = sessions.find(session => session.id === s.id);
-                if (target) {
-                    s.updatedAt = target.updatedAt;
-                }
-            });
-            localStorage.setItem('graft_chat_history', JSON.stringify(storedSessions));
+            await seedSessions([
+                { id: 'session-1', title: '1', messages: [{ role: 'user', content: 'Message for session-1' }], createdAt: now - 3000, updatedAt: now - 3000, isPinned: false },
+                { id: 'session-2', title: '2', messages: [{ role: 'user', content: 'Message for session-2' }], createdAt: now - 2000, updatedAt: now - 2000, isPinned: true },
+                { id: 'session-3', title: '3', messages: [{ role: 'user', content: 'Message for session-3' }], createdAt: now - 1000, updatedAt: now - 1000, isPinned: false },
+                { id: 'session-4', title: '4', messages: [{ role: 'user', content: 'Message for session-4' }], createdAt: now, updatedAt: now, isPinned: true },
+            ]);
 
             const allSessions = chatHistoryService.getAllSessions();
 
@@ -215,7 +195,7 @@ describe('ChatHistoryService', () => {
             const messages = [{ role: 'user' as const, content: 'Hello' }];
             const saved = chatHistoryService.saveSession(messages);
 
-            chatHistoryService.deleteSession(saved.id);
+            chatHistoryService.deleteSession(saved!.id);
 
             expect(chatHistoryService.getLastActiveSessionId()).toBeNull();
         });
@@ -230,56 +210,41 @@ describe('ChatHistoryService', () => {
         });
     });
 
+    // The service caches sessions in memory and rewrites localStorage on every save,
+    // so manual localStorage edits between service calls get clobbered. Seed the full
+    // desired state into storage and reload once, then exercise the real behavior.
+    async function seedSessions(seed: ChatSession[]): Promise<void> {
+        localStorage.setItem('graft_chat_history', JSON.stringify(seed));
+        chatHistoryService.resetForTests();
+        await chatHistoryService.ensureLoaded();
+    }
+
     describe('Cleanup', () => {
-        it('should preserve pinned sessions during cleanup', () => {
-            const oldDate = Date.now() - (31 * 24 * 60 * 60 * 1000); // 31 days ago
-
-            // Create old pinned session
-            const oldPinnedMessages = [{ role: 'user' as const, content: 'Old pinned' }];
-            chatHistoryService.saveSession(oldPinnedMessages, 'old-pinned');
-
-            // Manually set old date
-            const sessions = JSON.parse(localStorage.getItem('graft_chat_history') || '[]');
-            sessions[0].createdAt = oldDate;
-            localStorage.setItem('graft_chat_history', JSON.stringify(sessions));
-
-            chatHistoryService.togglePinSession('old-pinned');
-
-            // Create old unpinned session
-            const oldUnpinnedMessages = [{ role: 'user' as const, content: 'Old unpinned' }];
-            chatHistoryService.saveSession(oldUnpinnedMessages, 'old-unpinned');
-
-            // Manually set old date
-            const sessions2 = JSON.parse(localStorage.getItem('graft_chat_history') || '[]');
-            sessions2[1].createdAt = oldDate;
-            localStorage.setItem('graft_chat_history', JSON.stringify(sessions2));
-
-            // Create recent session
-            const recentMessages = [{ role: 'user' as const, content: 'Recent' }];
-            chatHistoryService.saveSession(recentMessages, 'recent');
+        it('should preserve pinned sessions during cleanup', async () => {
+            const oldDate = Date.now() - 31 * 24 * 60 * 60 * 1000; // 31 days ago
+            const now = Date.now();
+            await seedSessions([
+                { id: 'old-pinned', title: 'Old pinned', messages: [{ role: 'user', content: 'Old pinned' }], createdAt: oldDate, updatedAt: oldDate, isPinned: true },
+                { id: 'old-unpinned', title: 'Old unpinned', messages: [{ role: 'user', content: 'Old unpinned' }], createdAt: oldDate, updatedAt: oldDate, isPinned: false },
+                { id: 'recent', title: 'Recent', messages: [{ role: 'user', content: 'Recent' }], createdAt: now, updatedAt: now, isPinned: false },
+            ]);
 
             chatHistoryService.cleanupOldSessions(50, 30);
 
             const allSessions = chatHistoryService.getAllSessions();
 
-            // Should have 2 sessions: old-pinned and recent
+            // Should have 2 sessions: old-pinned (kept because pinned) and recent
             expect(allSessions.length).toBe(2);
             expect(allSessions.some(s => s.id === 'old-pinned')).toBe(true);
             expect(allSessions.some(s => s.id === 'recent')).toBe(true);
             expect(allSessions.some(s => s.id === 'old-unpinned')).toBe(false);
         });
 
-        it('should remove old unpinned sessions', () => {
-            const oldDate = Date.now() - (31 * 24 * 60 * 60 * 1000);
-
-            // Create old session
-            const messages = [{ role: 'user' as const, content: 'Old message' }];
-            chatHistoryService.saveSession(messages, 'old-session');
-
-            // Manually set old date
-            const sessions = JSON.parse(localStorage.getItem('graft_chat_history') || '[]');
-            sessions[0].createdAt = oldDate;
-            localStorage.setItem('graft_chat_history', JSON.stringify(sessions));
+        it('should remove old unpinned sessions', async () => {
+            const oldDate = Date.now() - 31 * 24 * 60 * 60 * 1000;
+            await seedSessions([
+                { id: 'old-session', title: 'Old', messages: [{ role: 'user', content: 'Old message' }], createdAt: oldDate, updatedAt: oldDate, isPinned: false },
+            ]);
 
             chatHistoryService.cleanupOldSessions(50, 30);
 

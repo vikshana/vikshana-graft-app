@@ -1,6 +1,5 @@
 import type { ToolExecution } from '../types/llm.types';
 import {
-    isDashboardCloneSession,
     latestNonContinueUserMessage,
     resolveDashboardCloneIntent,
     userWantsDashboardPanelFix,

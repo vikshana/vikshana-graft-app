@@ -100,6 +100,16 @@ export function messageDescribesCrossDashboardPanelCopy(text: string): boolean {
 
     }
 
+    // A source-only "copy … from … uid" still counts as (incomplete) cross-dashboard
+    // copy intent so clarification can report the missing target uid. The full parse
+    // still returns null without a target, so routing is unaffected.
+
+    if (/\bfrom\b[^.\n]{0,80}?\buid\b/i.test(text)) {
+
+        return true;
+
+    }
+
     return extractAllDashboardUids(text).length >= 2;
 
 }

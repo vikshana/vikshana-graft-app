@@ -2,7 +2,6 @@ import type { ToolExecution } from '../types/llm.types';
 import { extractDashboardFromGetByUid } from './programmaticDashboardClone';
 import { callMcpTool } from './mcpToolClient';
 import type { McpClient } from './dashboardChunkedUpdate';
-import { stampDashboardForOverwrite } from './fluxQueryFix';
 import { normalizeUpdateDashboardArgs } from './updateDashboardArgs';
 import { listDashboardPanels, type DashboardPanelEntry } from './panelDiscovery';
 import { parseSearchHitsFromMcpText } from './dashboardSearchParse';
@@ -219,14 +218,15 @@ async function saveDashboard(
     proposed: Record<string, unknown>,
     toolExecutions: ToolExecution[]
 ): Promise<{ ok: boolean; version?: number; error?: string }> {
-    stampDashboardForOverwrite(proposed);
+    // `proposed` is a deep clone of the loaded dashboard, so it already carries the
+    // baseline version/id/uid needed for an in-place overwrite.
     const updateStep = pendingTool('update_dashboard');
     toolExecutions.push(updateStep);
     const args = normalizeUpdateDashboardArgs({ dashboard: proposed });
     const update = await callMcpTool(mcpClient, 'update_dashboard', args);
-    toolExecutions[toolExecutions.length - 1] = finishTool(update, update);
+    toolExecutions[toolExecutions.length - 1] = finishTool(updateStep, update);
     if (!update.ok) {
-        return { error: update.error ?? 'update_dashboard failed' };
+        return { ok: false, error: update.error ?? 'update_dashboard failed' };
     }
     const versionMatch = update.text?.match(/version[:\s]+(\d+)/i);
     return { ok: true, version: versionMatch ? parseInt(versionMatch[1], 10) : undefined };
@@ -276,7 +276,7 @@ export async function runProgrammaticAddOwnHistoryPanel(
     const influxUid = influxUidFromDashboard(proposed.panels);
     const raw = buildOwnHistoryPanel(machineId, mod, influxUid);
     const sanitized = sanitizeInfluxFluxPanel(raw) as PanelRecord;
-    const repaired = repairInfluxFluxPanel(sanitized, proposed.panels);
+    const repaired = repairInfluxFluxPanel(sanitized, proposed.panels as unknown[] | undefined);
     const newPanel = repaired.panel as PanelRecord;
     newPanel.id = maxPanelId(entries) + 1;
 
@@ -339,7 +339,7 @@ export async function runProgrammaticBulkOwnHistoryPanelCopy(
         }
         const raw = adaptOwnHistoryPanel(template.panel as PanelRecord, request.templateModule, moduleNum);
         const sanitized = sanitizeInfluxFluxPanel(raw) as PanelRecord;
-        const repaired = repairInfluxFluxPanel(sanitized, proposed.panels);
+        const repaired = repairInfluxFluxPanel(sanitized, proposed.panels as unknown[] | undefined);
         const newPanel = repaired.panel as PanelRecord;
         newPanel.id = nextId++;
         (proposed.panels as PanelRecord[]).push(newPanel);
@@ -355,7 +355,8 @@ export async function runProgrammaticBulkOwnHistoryPanelCopy(
         };
     }
 
-    const positions = computeModulePanelGridPositions(listDashboardPanels(proposed.panels));
+    // Preserve prior behavior: peer-RandomForest panels are not repositioned here.
+    const positions = computeModulePanelGridPositions(listDashboardPanels(proposed.panels), false);
     for (const { entry, gridPos } of positions) {
         (entry.panel as PanelRecord).gridPos = gridPos;
         const t = entry.title;
@@ -429,7 +430,7 @@ export async function runProgrammaticOwnHistoryCanonicalNaming(
     };
 }
 
-export function formatAddOwnHistoryPanelReply(result: OwnHistoryPanelResult, build: string): string {
+export function formatAddOwnHistoryPanelReply(result: OwnHistoryPanelResult, build: number): string {
     if (!result.ok) {
         return `### Own History panel — failed (build ${build})\n\n${result.error ?? 'Unknown error'}`;
     }
@@ -441,7 +442,7 @@ export function formatAddOwnHistoryPanelReply(result: OwnHistoryPanelResult, bui
     );
 }
 
-export function formatBulkOwnHistoryPanelReply(result: OwnHistoryPanelResult, build: string): string {
+export function formatBulkOwnHistoryPanelReply(result: OwnHistoryPanelResult, build: number): string {
     if (!result.ok) {
         return `### Copy Own History panels — failed (build ${build})\n\n${result.error ?? 'Unknown error'}`;
     }
@@ -453,7 +454,7 @@ export function formatBulkOwnHistoryPanelReply(result: OwnHistoryPanelResult, bu
     );
 }
 
-export function formatOwnHistoryNamingReply(result: OwnHistoryPanelResult, build: string): string {
+export function formatOwnHistoryNamingReply(result: OwnHistoryPanelResult, build: number): string {
     if (!result.ok) {
         return `### Own History naming — failed (build ${build})\n\n${result.error ?? 'Unknown error'}`;
     }

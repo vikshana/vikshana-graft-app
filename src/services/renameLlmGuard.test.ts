@@ -33,6 +33,7 @@ describe('renameLlmGuard', () => {
 
     it('runs programmatic rename when MCP client is available', async () => {
         const messages: Message[] = [{ role: 'user', content: prompt }];
+        let savedTitle: string | undefined;
         const mcpClient = {
             callTool: jest.fn(async ({ name, arguments: args }: { name: string; arguments: unknown }) => {
                 if (name === 'search_dashboards') {
@@ -54,11 +55,10 @@ describe('renameLlmGuard', () => {
                                 text: JSON.stringify({
                                     dashboard: {
                                         uid,
-                                        title:
-                                            uid === 'abc123'
-                                                ? '2505-200033 / Keysight'
-                                                : '2505-200033 / NewMachine',
-                                        version: 3,
+                                        // Reflect the persisted rename so the post-save
+                                        // verification step sees the new title.
+                                        title: savedTitle ?? '2505-200033 / Keysight',
+                                        version: savedTitle ? 4 : 3,
                                         panels: [],
                                     },
                                 }),
@@ -67,6 +67,8 @@ describe('renameLlmGuard', () => {
                     };
                 }
                 if (name === 'update_dashboard') {
+                    const dash = (args as { dashboard?: { title?: string } }).dashboard;
+                    savedTitle = dash?.title;
                     return {
                         content: [{ type: 'text', text: JSON.stringify({ uid: 'abc123', version: 4 }) }],
                     };
@@ -96,7 +98,7 @@ describe('renameLlmGuard', () => {
         const onUpdate = jest.fn();
         const result = await tryInterceptRenameBeforeLlm(
             [{ role: 'user', content: 'Fix panels on 2505-200033 / Keysight' }],
-            {},
+            {} as Parameters<typeof tryInterceptRenameBeforeLlm>[1],
             onUpdate
         );
         expect(result).toBeNull();
@@ -106,6 +108,7 @@ describe('renameLlmGuard', () => {
     it('runs programmatic panel rename for panel title prompts', async () => {
         const panelPrompt =
             'Rename the "Pressure Gauge" panel to "System Pressure" on dashboard UID = cfo0wckufbdhce.';
+        let savedPanels: { id?: number; title?: string; type?: string }[] | undefined;
         const mcpClient = {
             callTool: jest.fn(async ({ name, arguments: args }: { name: string; arguments: unknown }) => {
                 if (name === 'get_dashboard_by_uid') {
@@ -117,8 +120,11 @@ describe('renameLlmGuard', () => {
                                     dashboard: {
                                         uid: 'cfo0wckufbdhce',
                                         title: '2505-200033 / Keysight',
-                                        version: 69,
-                                        panels: [{ id: 10, title: 'Pressure Gauge', type: 'timeseries' }],
+                                        version: savedPanels ? 70 : 69,
+                                        // Reflect the persisted panel rename on re-fetch.
+                                        panels: savedPanels ?? [
+                                            { id: 10, title: 'Pressure Gauge', type: 'timeseries' },
+                                        ],
                                     },
                                 }),
                             },
@@ -126,6 +132,9 @@ describe('renameLlmGuard', () => {
                     };
                 }
                 if (name === 'update_dashboard') {
+                    const dash = (args as { dashboard?: { panels?: { id?: number; title?: string; type?: string }[] } })
+                        .dashboard;
+                    savedPanels = dash?.panels;
                     return {
                         content: [{ type: 'text', text: JSON.stringify({ uid: 'cfo0wckufbdhce', version: 70 }) }],
                     };

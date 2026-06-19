@@ -131,7 +131,10 @@ function suggestFromText(text: string, intent: string): SuggestedRegistryRow | n
         };
     }
 
-    if (userWantsDashboardClone(msg)) {
+    // Looser than live routing on purpose: this only categorizes a logged
+    // failure, so a machine-id-only "visual copy of 2103-176030" still maps to
+    // the clone handler even without the literal word "dashboard".
+    if (userWantsDashboardClone(msg) || /\b(visual copy|clone)\b/i.test(msg)) {
         return {
             kind: 'dashboard_clone',
             triggers: 'visual copy / clone dashboard for new machine',

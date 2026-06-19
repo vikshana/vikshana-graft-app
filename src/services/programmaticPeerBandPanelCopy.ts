@@ -400,7 +400,9 @@ export async function runProgrammaticPeerBandPanelCopy(
     }
 
     const sourceReference = findReferenceFluxPeerBandPanel(
-        sourceEntries.map((e) => e.panel).concat(listDashboardPanels(sourceDashboard.panels))
+        sourceEntries
+            .map((e) => e.panel)
+            .concat(listDashboardPanels(sourceDashboard.panels).map((e) => e.panel))
     );
 
     const targetResults: TargetPeerBandCopyResult[] = [];

@@ -80,14 +80,23 @@ describe('programmaticPanelRename', () => {
             ],
         };
         let savedPanelId: number | undefined;
+        let savedPanels: { id?: number; title?: string }[] | undefined;
         const client = {
             callTool: jest.fn(async ({ name, arguments: args }: { name: string; arguments: unknown }) => {
                 if (name === 'get_dashboard_by_uid') {
+                    // Reflect the persisted rename on re-fetch so the post-save
+                    // verification step can confirm the new title.
                     return {
                         content: [
                             {
                                 type: 'text',
-                                text: JSON.stringify({ dashboard: withPressure }),
+                                text: JSON.stringify({
+                                    dashboard: {
+                                        ...withPressure,
+                                        version: savedPanels ? 71 : withPressure.version,
+                                        panels: savedPanels ?? withPressure.panels,
+                                    },
+                                }),
                             },
                         ],
                     };
@@ -95,6 +104,7 @@ describe('programmaticPanelRename', () => {
                 if (name === 'update_dashboard') {
                     const dash = (args as { dashboard?: { panels?: { id?: number; title?: string }[] } })
                         .dashboard;
+                    savedPanels = dash?.panels;
                     const renamed = dash?.panels?.find((p) => p.title === 'System Pressure');
                     savedPanelId = renamed?.id;
                     return {

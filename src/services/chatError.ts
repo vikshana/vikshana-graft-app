@@ -69,12 +69,14 @@ export function stripRateLimitWaitNotice(content: string): string {
 /** Some models emit XML-style tool markup in plain text instead of native tool_calls. */
 export function stripLeakedToolCallMarkup(content: string): string {
     return content
-        .replace(/<function_calls>[\s\S]*?<\/function_calls>/gi, '')
-        .replace(/<function_calls>[\s\S]*$/gi, '')
-        .replace(/<function_response>[\s\S]*?<\/function_response>/gi, '')
-        .replace(/<function_response>[\s\S]*$/gi, '')
-        .replace(/<invoke\s+name="[^"]*">[\s\S]*?<\/invoke>/gi, '')
-        .replace(/<invoke\s+name="[^"]*">[\s\S]*$/gi, '')
+        // Consume the newline that preceded a leaked block so removing markup that sat
+        // on its own line doesn't leave a stray blank line behind.
+        .replace(/\n?[ \t]*<function_calls>[\s\S]*?<\/function_calls>/gi, '')
+        .replace(/\n?[ \t]*<function_calls>[\s\S]*$/gi, '')
+        .replace(/\n?[ \t]*<function_response>[\s\S]*?<\/function_response>/gi, '')
+        .replace(/\n?[ \t]*<function_response>[\s\S]*$/gi, '')
+        .replace(/\n?[ \t]*<invoke\s+name="[^"]*">[\s\S]*?<\/invoke>/gi, '')
+        .replace(/\n?[ \t]*<invoke\s+name="[^"]*">[\s\S]*$/gi, '')
         .replace(/<\/invoke>/gi, '')
         .replace(/<\/?parameter[^>]*>/gi, '')
         .replace(/\n{3,}/g, '\n\n')

@@ -75,6 +75,9 @@ jest.mock('../../../services/chatHistory', () => ({
   chatHistoryService: {
     getSession: jest.fn(),
     saveSession: jest.fn(),
+    ensureLoaded: jest.fn().mockResolvedValue(undefined),
+    refreshSessions: jest.fn().mockResolvedValue(undefined),
+    getAllSessions: jest.fn().mockReturnValue([]),
   },
 }));
 

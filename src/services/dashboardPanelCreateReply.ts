@@ -111,10 +111,16 @@ export function applyOperatorFriendlyPanelCreateReply(
     const savedLine =
         parsed.headline?.replace(/^✅\s*/u, '').trim() ??
         `New ${typeLabel} panel **${panelTitle}** created and saved to ${dashboard}`;
+    // Surface the new panel's title even when the model supplied its own headline,
+    // so the operator can see exactly which panel was added.
+    const titleBit =
+        parsed.panelTitle && !savedLine.includes(parsed.panelTitle)
+            ? ` — panel **${parsed.panelTitle}**`
+            : '';
 
     return (
         `### Done (panel added)\n\n` +
-        `✅ ${savedLine}${panelIdBit}. Dashboard saved${versionBit}.\n\n` +
+        `✅ ${savedLine}${titleBit}${panelIdBit}. Dashboard saved${versionBit}.\n\n` +
         HARD_REFRESH_LINE.replace('see changes', 'see the new panel')
     );
 }

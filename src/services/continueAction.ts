@@ -15,13 +15,12 @@ export const CONTINUE_ACTION_HEADING = '### ⏸ Action required';
 
 /** Prominent block appended to operator-facing status messages. */
 export function formatContinueActionBlock(detail?: string): string {
-    const line =
-        detail ??
-        'Graft stopped before finishing. Use the **Continue** button below (or type `Continue`) — you do not need panel numbers or UIDs.';
+    const line = detail ?? 'Graft stopped before finishing.';
     return (
         `\n\n${CONTINUE_ACTION_HEADING}\n\n` +
         `> **${line}**\n>\n` +
-        `> Graft will also try to **continue automatically** when possible.\n`
+        '> Use the **Continue** button below (or type `Continue`) — you do not need panel numbers or UIDs. ' +
+        `Graft will also try to **continue automatically** when possible.\n`
     );
 }
 

@@ -58,7 +58,10 @@ describe('PromptLibrary', () => {
         fireEvent.click(promptItem);
 
         expect(mockNavigate).toHaveBeenCalledWith('..', {
-            state: { prompt: expect.stringContaining('Rename the dashboard for the 2505-200033 machine') },
+            state: {
+                prompt: expect.stringContaining('Rename the dashboard for the 2505-200033 machine'),
+                autoSend: true,
+            },
         });
     });
 
