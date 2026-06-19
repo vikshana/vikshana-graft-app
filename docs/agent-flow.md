@@ -401,54 +401,123 @@ validated queries and datasource UIDs to a dashboard agent in wave 2.
 **Model:** `llm.Model.LARGE` — stronger structural reasoning for complex JSON.  
 **Tools:** Hardcoded to `['dashboards', 'datasources']` only — cannot call any
 query tools regardless of what the plan step says.  
-**Iteration limit:** `Math.min(maxToolIterations × 2, 100)` — double the
-configured limit to accommodate multi-step construction.
+**Iteration budget:** Split across phases; total cap `Math.min(maxToolIterations × 2, 100)`.
 
-#### Happy path — DataFindings with validated queries
+#### Design principle
 
-The system prompt includes the exact datasource JSON alongside each query:
+**Code owns control flow; the LLM owns content.**
 
+The agent runs as an explicit four-phase state machine. Each phase has a
+code-enforced exit gate — the agent cannot advance (or declare success) until
+the gate is satisfied. This eliminates the "skeleton then stop" failure mode
+where the model would create an empty `panels: []` dashboard and declare victory.
+
+#### Phase 1 — PLAN
+
+A single LLM completion (no tools) reads the enriched `DataFindings` + user
+request and emits a **JSON panel todo list** — the completeness contract:
+
+```json
+{
+  "panels": [
+    { "title": "...", "query": "...", "datasourceType": "prometheus",
+      "viz": "timeseries", "unit": "reqps", "rowGroup": "Request Rate" }
+  ],
+  "variables": [...],
+  "timeRange": { "from": "now-1h", "to": "now" },
+  "layoutHint": "RED"
+}
 ```
-1. Description: Error rate by service
-   LogQL expr: {service="api", detected_level="error"}
-   Datasource JSON: {"type": "loki", "uid": "abc123"}
+
+**Gate:** parsed JSON must contain ≥ 1 panel entry. Re-prompted (up to 2×)
+if the output is empty or unparseable.
+
+The todo list is carried forward into every subsequent phase. VERIFY compares
+the live dashboard against it — any planned panel missing from the live
+dashboard triggers REPAIR.
+
+#### Phase 2 — CREATE
+
+The LLM receives the todo list and a system prompt that instructs:
+
+> **"Build the COMPLETE dashboard — all rows, all panels, all variables — in
+> a SINGLE `update_dashboard` call. An empty dashboard (`panels: []`) is a
+> FAILURE."**
+
+There is no skeleton step. The model assembles the full panel JSON locally,
+then calls `update_dashboard` once with the complete dashboard.
+
+**Gate:** `update_dashboard` succeeded and a UID was extracted from the
+response. On error, the error message is fed back and the phase retries
+(up to 2×) before continuing to VERIFY.
+
+`update_dashboard` arguments use `folderUid` (string, per mcp-grafana v0.11.4
+schema) — not the legacy `folderId` integer.
+
+#### Phase 3 — VERIFY + REPAIR loop (up to 3 rounds)
+
+Code (not the LLM) calls two tools immediately after CREATE:
+
+| Tool | What it tells us |
+|---|---|
+| `get_dashboard_summary` | `panelCount`, per-panel `{id, title, type, description, queryCount}`, variables, time range |
+| `get_dashboard_panel_queries` | Per-panel `{title, query, datasource:{uid,type}}` — the datasource-correctness signal |
+
+`assessDashboardCompleteness(summary, panelQueries, plannedTitles)` returns:
+
+```ts
+interface DashboardGaps {
+    emptyDashboard: boolean;          // panelCount === 0 (the regression case)
+    missingPanels: string[];          // planned titles absent from live dashboard
+    datasourceMismatches: Array<…>;  // LogQL on prometheus / PromQL on loki
+    panelsWithoutDescription: string[];
+    livePanelCount: number;
+}
 ```
 
-The agent copies both verbatim into panel targets. No datasource lookup needed.
+**Clean exit:** if all gaps are empty the loop exits immediately.
 
-#### Fallback path — no findings or empty validatedQueries
+**REPAIR:** when gaps exist, the LLM receives a structured gap report and is
+instructed to apply **patch operations** (preferred) or a full-JSON rewrite:
 
-Triggered when either:
-- No data specialist ran upstream (shouldn't happen after `sanitisePlan` Pass 2,
-  but treated defensively), or
-- All candidate queries were filtered out by the per-query validation gate.
+```json
+// Append a missing panel via patch
+{ "uid": "abc", "operations": [{ "op": "add", "path": "$.panels/- ", "value": { ... } }], "overwrite": true }
 
-The system prompt's fallback branch instructs the agent to:
-1. Call `list_datasources` to discover available datasources and their types.
-2. Select the datasource by **type** (not by name or guessed UID):
-   - LogQL / log panels → a datasource of type `"loki"`
-   - PromQL / metric panels → a datasource of type `"prometheus"`
-3. Never attach a LogQL expression to a Prometheus datasource or vice versa.
+// Fix a datasource mismatch
+{ "uid": "abc", "operations": [{ "op": "replace", "path": "$.panels[2].targets[0].datasource", "value": { "type": "loki", "uid": "..." } }], "overwrite": true }
+```
 
-#### Mandatory post-write verification
+After each REPAIR the loop returns to VERIFY. The agent **cannot return
+`status: 'success'`** while `emptyDashboard` or `missingPanels` is non-empty.
 
-After writing all panels, the agent must:
-1. Call `get_dashboard_panel_queries` to inspect each panel's datasource type
-   against its query expression.
-2. **Fix** any mismatch (not just flag it): repoint the panel to the correct
-   datasource and call `update_dashboard` again with the corrected target.
-3. Re-run `get_dashboard_panel_queries` after corrections to confirm no
-   mismatches remain.
-4. **Not finish** while any panel's datasource type contradicts its query language.
+#### Phase 4 — DONE
 
-#### Construction process
+Composes the final summary. Guarantees `[Open dashboard](/d/{uid})` is present
+even when the LLM's prose omitted it (UID extracted in code from the
+`update_dashboard` response, passed to the Synthesiser via `dashboardUid`).
 
-1. Create an empty dashboard skeleton (`update_dashboard` with empty panels).
-2. Fetch the assigned UID (`get_dashboard_by_uid`) — note the UID immediately
-   for the final response link.
-3. Build all panels and write them in a single `update_dashboard` call.
-4. Verify panel count (`get_dashboard_by_uid`).
-5. Run `get_dashboard_panel_queries` and fix any datasource mismatches.
+#### V2 schema (dormant)
+
+When `schemaCapabilityHint = 'v2-capable'` (injected by the orchestrator from
+the Grafana build-info context), the CREATE prompt includes V2 rules
+(`elements/layout/variables`). If `update_dashboard` returns
+`"Kubernetes-capable Grafana is required"`, the agent falls back to Classic v1
+immediately and rebuilds. At mcp-grafana v0.11.4 (current bundled version) this
+field is always absent, so v1 is always used in practice.
+
+#### mcp-grafana v0.11.4 tool schemas (authoritative)
+
+| Tool | Arguments | Result (unwrapped) |
+|---|---|---|
+| `update_dashboard` | `{ dashboard?, uid?, operations?, folderUid?, message?, overwrite? }` | `{ uid, id, status, version, slug, url }` |
+| `get_dashboard_by_uid` | `{ uid }` | `{ dashboard: { panels[], templating, ... }, meta, isV2? }` |
+| `get_dashboard_summary` | `{ uid }` | `{ uid, title, panelCount, panels:[{id,title,type,description,queryCount}], variables, timeRange }` |
+| `get_dashboard_panel_queries` | `{ uid, panelId?, variables? }` | `[{ title, query, datasource:{uid,type}, refId? }]` |
+| `get_dashboard_property` | `{ uid, jsonPath }` | JSONPath result |
+
+All results arrive double-encoded: `result.content = [{type:"text", text:"<JSON>"}]`.
+Parse chain: `JSON.stringify(result.content)` → `JSON.parse` → `[0].text` → `JSON.parse` → struct.
 
 **Source:** `src/services/agents/dashboardAgent.ts`
 
