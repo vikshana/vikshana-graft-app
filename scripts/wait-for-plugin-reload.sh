@@ -25,8 +25,17 @@ set -e
 GRAFANA_URL="${GRAFANA_URL:-http://localhost:3000}"
 PLUGIN_ID="vikshana-graft-app"
 MODULE_URL="${GRAFANA_URL}/public/plugins/${PLUGIN_ID}/module.js"
-TIMEOUT="${1:-60}"
 POLL_INTERVAL=2
+
+# Validate timeout argument is a positive integer
+_raw_timeout="${1:-60}"
+case "${_raw_timeout}" in
+  ''|*[!0-9]*)
+    echo "Error: timeout_seconds must be a positive integer, got: '${_raw_timeout}'" >&2
+    exit 1
+    ;;
+esac
+TIMEOUT="${_raw_timeout}"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
