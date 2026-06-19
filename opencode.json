@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "chrome-devtools": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "chrome-devtools-mcp@1.3.0",
+        "--isolated",
+        "--screenshot-format=jpeg",
+        "--no-usage-statistics"
+      ],
+      "enabled": true
+    }
+  }
+}

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.3.0...graft-v0.4.0) (2026-06-18)
+
+
+### Features and enhancements
+
+* **agents:** multi-agent orchestration and configurable tool allowlist ([#11](https://github.com/vikshana/vikshana-graft-app/issues/11)) ([c9055d0](https://github.com/vikshana/vikshana-graft-app/commit/c9055d0d78ba998cb8de7693c756689f92f646ed))
+
 ## [0.3.0](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.2.0...graft-v0.3.0) (2026-06-15)
 
 
