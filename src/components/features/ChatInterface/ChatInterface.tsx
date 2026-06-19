@@ -46,6 +46,10 @@ import {
     formatAmbiguousGraphCreateClarification,
     messageDescribesAmbiguousGraphCreate,
 } from '../../../services/ambiguousGraphCreateParse';
+import {
+    formatUnsupportedAdminReply,
+    messageDescribesUnsupportedAdminRequest,
+} from '../../../services/adminCapabilityParse';
 import { clearActiveCloneIntent } from '../../../services/cloneSessionStorage';
 import { GRAFT_BUILD_NUMBER } from '../../../buildInfo';
 import {
@@ -278,6 +282,15 @@ const formatContext = (dashboard: DashboardContext, user: UserContext, dataSourc
     `You are Graft, an AI assistant embedded in Grafana. ` +
     `You help users query metrics and logs, build and edit dashboards, and understand their observability data. ` +
     `If a request is unrelated to Grafana, metrics, logs, or dashboards, politely decline.`
+  );
+  lines.push('');
+
+  // Capability boundary — Graft has NO admin/user/org tools.
+  lines.push(
+    `Capability boundary: your tools are limited to dashboards, folders, datasources, Prometheus, and Loki. ` +
+    `You CANNOT create or manage Grafana users, organizations, teams, roles, permissions, API keys, or any admin-API operation — no such tool exists. ` +
+    `For those requests: in ONE reply, state plainly that this is a Grafana Admin task you cannot perform, give the brief Administration-UI steps, then offer the closest supported action (e.g. clone a system dashboard, build dashboards, or create a folder). ` +
+    `Do NOT ask "would you like…" / "should I…" follow-up questions, do NOT say "Continue", and do NOT claim you performed an admin action.`
   );
   lines.push('');
 
@@ -976,6 +989,32 @@ export const ChatInterface = () => {
         };
         const finalMessages = [...newMessages, finalAssistantMessage];
         const savedSession = chatHistoryService.saveSession(finalMessages, currentSessionId);
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      const unsupportedAdminRequest = messageDescribesUnsupportedAdminRequest(content);
+      if (unsupportedAdminRequest) {
+        errorPathTag = 'unsupported-admin-request';
+        finalContent = formatUnsupportedAdminReply(unsupportedAdminRequest, content);
+        clearPendingDashboardTask();
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = { role: 'assistant', content: finalContent };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
         if (savedSession) {
           setCurrentSessionId(savedSession.id);
           currentSessionIdRef.current = savedSession.id;

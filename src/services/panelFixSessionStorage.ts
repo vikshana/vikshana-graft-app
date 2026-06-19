@@ -1,6 +1,7 @@
 import { setPendingRevertBaseline } from './dashboardRevertStorage';
 import type { ScopedPanelFixTarget } from './panelFixScope';
 import type { PanelFixResolvedPanel } from './panelCrossReference';
+import { scopedStorageKey } from './storageScope';
 
 const SCOPE_KEY = 'graft_panel_fix_scope';
 const BASELINE_KEY = 'graft_panel_fix_baseline';
@@ -9,9 +10,12 @@ const NO_SAVE_STREAK_KEY = 'graft_panel_fix_no_save_streak';
 const NO_SAVE_RECORDED_TURN_KEY = 'graft_panel_fix_no_save_recorded_turn';
 const ASSISTANT_TURN_KEY = 'graft_panel_fix_assistant_turn';
 const RESOLVED_PANEL_KEY = 'graft_panel_fix_resolved_panel';
+
+// All keys are scoped per (org, user) so cached panel-fix state never bleeds
+// between users/orgs sharing a browser profile.
 function readJson<T>(key: string): T | null {
     try {
-        const raw = sessionStorage.getItem(key);
+        const raw = sessionStorage.getItem(scopedStorageKey(key));
         if (!raw) {
             return null;
         }
@@ -23,7 +27,15 @@ function readJson<T>(key: string): T | null {
 
 function writeJson(key: string, value: unknown): void {
     try {
-        sessionStorage.setItem(key, JSON.stringify(value));
+        sessionStorage.setItem(scopedStorageKey(key), JSON.stringify(value));
+    } catch {
+        // ignore
+    }
+}
+
+function removeKey(key: string): void {
+    try {
+        sessionStorage.removeItem(scopedStorageKey(key));
     } catch {
         // ignore
     }
@@ -38,17 +50,13 @@ export function getPanelFixScope(): ScopedPanelFixTarget | null {
 }
 
 export function clearPanelFixScope(): void {
-    try {
-        sessionStorage.removeItem(SCOPE_KEY);
-        sessionStorage.removeItem(BASELINE_KEY);
-        sessionStorage.removeItem(REVERTED_KEY);
-        sessionStorage.removeItem(NO_SAVE_STREAK_KEY);
-        sessionStorage.removeItem(NO_SAVE_RECORDED_TURN_KEY);
-        sessionStorage.removeItem(ASSISTANT_TURN_KEY);
-        sessionStorage.removeItem(RESOLVED_PANEL_KEY);
-    } catch {
-        // ignore
-    }
+    removeKey(SCOPE_KEY);
+    removeKey(BASELINE_KEY);
+    removeKey(REVERTED_KEY);
+    removeKey(NO_SAVE_STREAK_KEY);
+    removeKey(NO_SAVE_RECORDED_TURN_KEY);
+    removeKey(ASSISTANT_TURN_KEY);
+    removeKey(RESOLVED_PANEL_KEY);
 }
 
 export function setPanelFixResolvedPanel(info: PanelFixResolvedPanel): void {
@@ -62,11 +70,7 @@ export function getPanelFixResolvedPanel(): PanelFixResolvedPanel | null {
 /** Start a new assistant turn so no-save streak increments at most once per reply. */
 export function beginPanelFixAssistantTurn(): void {
     writeJson(ASSISTANT_TURN_KEY, String(Date.now()));
-    try {
-        sessionStorage.removeItem(NO_SAVE_RECORDED_TURN_KEY);
-    } catch {
-        // ignore
-    }
+    removeKey(NO_SAVE_RECORDED_TURN_KEY);
 }
 
 export function recordPanelFixNoSaveTurn(): number {
@@ -83,11 +87,7 @@ export function recordPanelFixNoSaveTurn(): number {
 }
 
 export function clearPanelFixNoSaveStreak(): void {
-    try {
-        sessionStorage.removeItem(NO_SAVE_STREAK_KEY);
-    } catch {
-        // ignore
-    }
+    removeKey(NO_SAVE_STREAK_KEY);
 }
 
 export function getPanelFixNoSaveStreak(): number {

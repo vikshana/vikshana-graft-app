@@ -8,6 +8,7 @@ import {
 } from './dashboardCloneProgress';
 import { userWantsDashboardWork } from './llm';
 import { assistantAwaitingModuleReorderConfirm, userWantsModulePanelReorder } from './modulePanelReorderParse';
+import { describesCapabilityLimitation } from './adminCapabilityParse';
 import type { ToolExecution } from '../types/llm.types';
 
 export type PendingDashboardTaskKind =
@@ -125,6 +126,10 @@ export function isShortFollowUpMessage(message: string): boolean {
 export function assistantAskedPendingQuestion(assistantContent: string): boolean {
     const text = assistantContent.trim();
     if (!text) {
+        return false;
+    }
+    // Declined / capability-limit replies are not pending dashboard tasks.
+    if (describesCapabilityLimitation(text)) {
         return false;
     }
     if (assistantAwaitingModuleReorderConfirm(text)) {

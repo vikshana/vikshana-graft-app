@@ -1,7 +1,10 @@
 import { getEffectiveCloneFieldsFromIntent, isMachineId, parseCloneIntentMessage } from './dashboardCloneParse';
+import { scopedStorageKey } from './storageScope';
 
-const CLONE_INTENT_KEY = 'graft_active_clone_intent';
-const CLONE_META_KEY = 'graft_clone_session_meta';
+// Scoped per (org, user) so an in-progress clone job never carries across an
+// in-tab org switch or between users sharing a browser profile.
+const CLONE_INTENT_KEY = (): string => scopedStorageKey('graft_active_clone_intent');
+const CLONE_META_KEY = (): string => scopedStorageKey('graft_clone_session_meta');
 
 export interface CloneSessionMeta {
     intent: string;
@@ -26,7 +29,7 @@ export interface CloneSessionMeta {
 
 function readMeta(): CloneSessionMeta | null {
     try {
-        const raw = sessionStorage.getItem(CLONE_META_KEY);
+        const raw = sessionStorage.getItem(CLONE_META_KEY());
         if (!raw) {
             return null;
         }
@@ -38,7 +41,7 @@ function readMeta(): CloneSessionMeta | null {
 
 function writeMeta(meta: CloneSessionMeta): void {
     try {
-        sessionStorage.setItem(CLONE_META_KEY, JSON.stringify(meta));
+        sessionStorage.setItem(CLONE_META_KEY(), JSON.stringify(meta));
     } catch {
         // ignore
     }
@@ -47,7 +50,7 @@ function writeMeta(meta: CloneSessionMeta): void {
 export function setActiveCloneIntent(intent: string): void {
     const trimmed = intent.trim();
     try {
-        sessionStorage.setItem(CLONE_INTENT_KEY, trimmed);
+        sessionStorage.setItem(CLONE_INTENT_KEY(), trimmed);
     } catch {
         // ignore
     }
@@ -94,7 +97,7 @@ export function clearCloneNotStartedStreak(): void {
 
 export function getActiveCloneIntent(): string | undefined {
     try {
-        const v = sessionStorage.getItem(CLONE_INTENT_KEY)?.trim();
+        const v = sessionStorage.getItem(CLONE_INTENT_KEY())?.trim();
         return v || undefined;
     } catch {
         return undefined;
@@ -149,8 +152,8 @@ export function updateCloneSessionMeta(patch: Partial<CloneSessionMeta>): void {
 
 export function clearActiveCloneIntent(): void {
     try {
-        sessionStorage.removeItem(CLONE_INTENT_KEY);
-        sessionStorage.removeItem(CLONE_META_KEY);
+        sessionStorage.removeItem(CLONE_INTENT_KEY());
+        sessionStorage.removeItem(CLONE_META_KEY());
     } catch {
         // ignore
     }

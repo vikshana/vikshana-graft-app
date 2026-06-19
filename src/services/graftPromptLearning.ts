@@ -1,5 +1,6 @@
 import { extractDashboardUidFromMessage } from './dashboardMentionParse';
 import { promptLibraryService } from './promptLibrary';
+import { scopedStorageKey } from './storageScope';
 
 export type ClarificationKind = 'ambiguous-graph-create' | 'generic-clarification';
 
@@ -19,8 +20,12 @@ export interface LearnedPrompt {
     title: string;
 }
 
-const PENDING_KEY = 'graft_pending_clarification';
-const LEARNED_KEY = 'graft_learned_prompts';
+const PENDING_KEY_BASE = 'graft_pending_clarification';
+const LEARNED_KEY_BASE = 'graft_learned_prompts';
+// Scope per (org, user) so learned prompts / pending clarifications never bleed
+// between users or orgs sharing the same browser profile.
+const PENDING_KEY = (): string => scopedStorageKey(PENDING_KEY_BASE);
+const LEARNED_KEY = (): string => scopedStorageKey(LEARNED_KEY_BASE);
 const MAX_LEARNED = 40;
 const LEARNED_CATEGORY = 'Learned';
 
@@ -29,7 +34,7 @@ function readPending(): PendingClarification | null {
         return null;
     }
     try {
-        const raw = sessionStorage.getItem(PENDING_KEY);
+        const raw = sessionStorage.getItem(PENDING_KEY());
         return raw ? (JSON.parse(raw) as PendingClarification) : null;
     } catch {
         return null;
@@ -42,9 +47,9 @@ function writePending(value: PendingClarification | null): void {
     }
     try {
         if (!value) {
-            sessionStorage.removeItem(PENDING_KEY);
+            sessionStorage.removeItem(PENDING_KEY());
         } else {
-            sessionStorage.setItem(PENDING_KEY, JSON.stringify(value));
+            sessionStorage.setItem(PENDING_KEY(), JSON.stringify(value));
         }
     } catch {
         // ignore
@@ -56,7 +61,7 @@ function readLearned(): LearnedPrompt[] {
         return [];
     }
     try {
-        const raw = localStorage.getItem(LEARNED_KEY);
+        const raw = localStorage.getItem(LEARNED_KEY());
         const parsed = raw ? (JSON.parse(raw) as LearnedPrompt[]) : [];
         return Array.isArray(parsed) ? parsed : [];
     } catch {
@@ -68,7 +73,7 @@ function writeLearned(rows: LearnedPrompt[]): void {
     if (typeof localStorage === 'undefined') {
         return;
     }
-    localStorage.setItem(LEARNED_KEY, JSON.stringify(rows.slice(0, MAX_LEARNED)));
+    localStorage.setItem(LEARNED_KEY(), JSON.stringify(rows.slice(0, MAX_LEARNED)));
 }
 
 function normalizePrompt(text: string): string {

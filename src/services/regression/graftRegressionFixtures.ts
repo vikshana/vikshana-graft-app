@@ -11,6 +11,7 @@ export type RegressionHandlerId =
     | 'dashboard-row-with-panels'
     | 'bulk-gauge-panel-rename'
     | 'ambiguous-graph-clarify'
+    | 'unsupported-admin'
     | 'llm-save-guard';
 
 export interface RegressionCase {
@@ -155,5 +156,27 @@ export const REGRESSION_CASES: RegressionCase[] = [
         expectLlmIntent: 'mutating',
         expectReplyContains: ['Need clarification', 'machine_metrics'],
         expectReplyNotContains: ['### Done (panel added)', 'comprehensive monitoring panels'],
+    },
+    {
+        id: 'create-organization-admin',
+        failure:
+            'Create-org request let the LLM improvise, then looped on the Continue nudge',
+        prompt: 'Create a new organization with the dashboard of an existing system.',
+        expectHandler: 'unsupported-admin',
+        expectProgrammatic: true,
+        expectLlmIntent: 'programmatic',
+        expectReplyContains: ['Outside Graft', 'organization', 'clone'],
+        expectReplyNotContains: ['Reply **Continue**', 'stopped for confirmation'],
+    },
+    {
+        id: 'add-user-admin',
+        failure:
+            'Add-user request produced an informational reply that looped 3× on the Continue nudge',
+        prompt: 'Add a new user that only has access to Skywater-MN Organization.',
+        expectHandler: 'unsupported-admin',
+        expectProgrammatic: true,
+        expectLlmIntent: 'programmatic',
+        expectReplyContains: ['Outside Graft', 'user'],
+        expectReplyNotContains: ['Reply **Continue**', 'stopped for confirmation'],
     },
 ];

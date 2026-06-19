@@ -18,6 +18,7 @@ import {
 import { applyOperatorFriendlyDashboardReply } from './dashboardTaskStatus';
 import { isDashboardDataInvestigationQuestion } from './dashboardInvestigation';
 import { formatClarificationIfNeeded } from './requestClarity';
+import { describesCapabilityLimitation } from './adminCapabilityParse';
 import { isExplicitSinglePanelCopyRequest } from './singlePanelCopyParse';
 import { messageDescribesPanelRename, userWantsPanelRename } from './panelRenameParse';
 import { appendSuggestedQueryHint } from './suggestedQueryHint';
@@ -122,6 +123,9 @@ export function appendDashboardReferencesToReply(
 
 /** True if the model claimed a dashboard save without a successful update_dashboard tool call. */
 export function claimsDashboardSaveWithoutTool(content: string, toolExecutions: ToolExecution[]): boolean {
+    if (describesCapabilityLimitation(content)) {
+        return false;
+    }
     const claimed =
         /\b(successfully updated|I've updated|dashboard was saved|titles now read|all \d+ panel)/i.test(content);
     const saved = toolExecutions.some((t) => t.name === 'update_dashboard' && t.status === 'success');
@@ -135,6 +139,10 @@ export function asksUserToChooseWithoutSave(
 ): boolean {
     const saved = toolExecutions.some((t) => t.name === 'update_dashboard' && t.status === 'success');
     if (saved) {
+        return false;
+    }
+    // Capability-limit / declined replies are informational — never a save to "Continue".
+    if (describesCapabilityLimitation(content)) {
         return false;
     }
     return (

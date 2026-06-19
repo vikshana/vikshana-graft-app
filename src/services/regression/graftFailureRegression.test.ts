@@ -3,6 +3,12 @@ import {
     formatAmbiguousGraphCreateClarification,
     messageDescribesAmbiguousGraphCreate,
 } from '../ambiguousGraphCreateParse';
+import {
+    describesCapabilityLimitation,
+    formatUnsupportedAdminReply,
+    messageDescribesUnsupportedAdminRequest,
+} from '../adminCapabilityParse';
+import { asksUserToChooseWithoutSave } from '../appendToolReferences';
 import { responseNeedsContinueAction } from '../continueAction';
 import {
     parseDashboardMetricPanelsRequest,
@@ -154,6 +160,18 @@ function assertHandlerRouting(c: RegressionCase): void {
             expect(messageDescribesPanelCreate(prompt)).toBe(false);
             expect(formatClarificationIfNeeded(prompt)).toContain('Need clarification');
             break;
+        case 'unsupported-admin': {
+            const adminReq = messageDescribesUnsupportedAdminRequest(prompt);
+            expect(adminReq).not.toBeNull();
+            expect(messageDescribesAmbiguousGraphCreate(prompt)).toBe(false);
+            expect(messageDescribesPanelCreate(prompt)).toBe(false);
+            expect(userWantsDashboardMetricPanels(prompt)).toBe(false);
+            const reply = formatUnsupportedAdminReply(adminReq!, prompt);
+            expect(responseNeedsContinueAction(reply)).toBe(false);
+            expect(asksUserToChooseWithoutSave(reply, [])).toBe(false);
+            expect(describesCapabilityLimitation(reply)).toBe(true);
+            break;
+        }
         default:
             throw new Error(`Unhandled handler ${c.expectHandler as string}`);
     }
@@ -161,8 +179,8 @@ function assertHandlerRouting(c: RegressionCase): void {
 
 describe('graft historical failure regression', () => {
     describe('fixture catalog', () => {
-        it('documents eleven known failure patterns', () => {
-            expect(REGRESSION_CASES).toHaveLength(11);
+        it('documents thirteen known failure patterns', () => {
+            expect(REGRESSION_CASES).toHaveLength(13);
             const ids = REGRESSION_CASES.map((c) => c.id);
             expect(new Set(ids).size).toBe(ids.length);
         });
@@ -438,6 +456,7 @@ describe('graft historical failure regression', () => {
             'dashboard-row-with-panels',
             'bulk-gauge-panel-rename',
             'ambiguous-graph-clarify',
+            'unsupported-admin',
         ];
 
         it.each(handlers)('%s prompt does not collide with unrelated handlers', (handlerId) => {
@@ -471,6 +490,9 @@ describe('graft historical failure regression', () => {
             }
             if (handlerId !== 'ambiguous-graph-clarify') {
                 expect(messageDescribesAmbiguousGraphCreate(c.prompt)).toBe(false);
+            }
+            if (handlerId !== 'unsupported-admin') {
+                expect(messageDescribesUnsupportedAdminRequest(c.prompt)).toBeNull();
             }
         });
     });

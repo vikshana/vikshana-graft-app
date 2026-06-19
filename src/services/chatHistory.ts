@@ -3,6 +3,7 @@ import { config } from '@grafana/runtime';
 import type { Message } from '../types/llm.types';
 import type { ChatSession } from '../types/chat.types';
 import { loadChatHistoryFromServer, saveChatHistoryToServer } from './chatHistoryApi';
+import { getStorageSuffix, scopedStorageKey as storageKey } from './storageScope';
 
 // Re-export for backward compatibility
 export type { ChatSession };
@@ -14,24 +15,6 @@ const DEFAULT_MAX_HISTORY = 50;
 const DEFAULT_RETENTION_DAYS = 30;
 const MAX_PINNED_SESSIONS = 20;
 const GLOBAL_SERVICE_KEY = '__vikshanaGraftChatHistoryService';
-
-/** Stable per user — do not use user.id (can be missing on first paint and split storage). */
-function getStorageSuffix(): string {
-    try {
-        const user = config.bootData?.user;
-        if (user?.orgId != null && user.login) {
-            return `${user.orgId}_${user.login}`;
-        }
-    } catch {
-        // config may be unavailable in tests
-    }
-    return 'default';
-}
-
-function storageKey(base: string): string {
-    const suffix = getStorageSuffix();
-    return suffix === 'default' ? base : `${base}_${suffix}`;
-}
 
 /** Drop trailing empty assistant placeholders so mid-stream navigation still restores user turns. */
 export function prepareMessagesForStorage(messages: Message[]): Message[] {
@@ -247,40 +230,23 @@ class ChatHistoryService {
     }
 
     private readLocalBundle(): { sessions: ChatSession[]; lastActiveId: string | null } {
+        // Read ONLY the current user's scoped key. The bare base key is global and
+        // unattributable, so for a logged-in user we never merge it (cross-user leak).
         const historyKey = storageKey(STORAGE_KEY_BASE);
         const sessions = this.readJson<ChatSession[]>(historyKey) ?? [];
         const lastActiveId = localStorage.getItem(storageKey(LAST_ACTIVE_SESSION_KEY_BASE));
-        if (historyKey === STORAGE_KEY_BASE) {
-            return { sessions, lastActiveId };
-        }
-        const legacy = this.readJson<ChatSession[]>(STORAGE_KEY_BASE) ?? [];
-        if (legacy.length === 0) {
-            return { sessions, lastActiveId };
-        }
-        const merged = [...sessions];
-        const ids = new Set(sessions.map((s) => s.id));
-        for (const s of legacy) {
-            if (s?.id && !ids.has(s.id)) {
-                merged.push(s);
-            }
-        }
-        return { sessions: merged, lastActiveId };
+        return { sessions, lastActiveId };
     }
 
     private writeLocalBundle(): void {
+        // Write ONLY the current user's scoped key — never a global/un-suffixed copy.
         const historyKey = storageKey(STORAGE_KEY_BASE);
         const lastKey = storageKey(LAST_ACTIVE_SESSION_KEY_BASE);
         try {
             const data = JSON.stringify(this.sessions);
             localStorage.setItem(historyKey, data);
-            if (historyKey !== STORAGE_KEY_BASE) {
-                localStorage.setItem(STORAGE_KEY_BASE, data);
-            }
             if (this.lastActiveSessionId) {
                 localStorage.setItem(lastKey, this.lastActiveSessionId);
-                if (lastKey !== LAST_ACTIVE_SESSION_KEY_BASE) {
-                    localStorage.setItem(LAST_ACTIVE_SESSION_KEY_BASE, this.lastActiveSessionId);
-                }
             }
         } catch (e) {
             console.error('[Graft] Error writing local chat history cache:', e);
@@ -310,24 +276,11 @@ class ChatHistoryService {
         }
 
         const historyKey = storageKey(STORAGE_KEY_BASE);
-        const lastKey = storageKey(LAST_ACTIVE_SESSION_KEY_BASE);
 
         try {
-            const current = this.readJson<ChatSession[]>(historyKey);
-            if (!current?.length) {
-                const legacy = this.readJson<ChatSession[]>(STORAGE_KEY_BASE);
-                if (legacy?.length) {
-                    localStorage.setItem(historyKey, JSON.stringify(legacy));
-                }
-            }
-
-            if (!localStorage.getItem(lastKey)) {
-                const legacyLast = localStorage.getItem(LAST_ACTIVE_SESSION_KEY_BASE);
-                if (legacyLast) {
-                    localStorage.setItem(lastKey, legacyLast);
-                }
-            }
-
+            // Migrate ONLY from the older per-identity key (orgId_id). The bare
+            // un-suffixed key is global/unattributable and is intentionally NOT
+            // migrated, to avoid leaking a previous user's history on a shared browser.
             const suffix = getStorageSuffix();
             if (suffix !== 'default') {
                 const user = config.bootData?.user;
@@ -390,8 +343,9 @@ class ChatHistoryService {
         this.lastActiveSessionId = null;
         try {
             localStorage.removeItem(storageKey(LAST_ACTIVE_SESSION_KEY_BASE));
-            localStorage.removeItem(LAST_ACTIVE_SESSION_KEY_BASE);
             sessionStorage.removeItem(storageKey(ACTIVE_SNAPSHOT_KEY_BASE));
+            // Best-effort cleanup of any pre-existing global copies from older builds.
+            localStorage.removeItem(LAST_ACTIVE_SESSION_KEY_BASE);
             sessionStorage.removeItem(ACTIVE_SNAPSHOT_KEY_BASE);
         } catch (e) {
             console.error('[Graft] Error clearing last active session:', e);
@@ -414,7 +368,6 @@ class ChatHistoryService {
             const key = storageKey(ACTIVE_SNAPSHOT_KEY_BASE);
             const data = JSON.stringify(snap);
             sessionStorage.setItem(key, data);
-            sessionStorage.setItem(ACTIVE_SNAPSHOT_KEY_BASE, data);
         } catch (e) {
             console.error('[Graft] Error saving active snapshot:', e);
         }
@@ -423,7 +376,7 @@ class ChatHistoryService {
     loadActiveSnapshot(): ActiveSnapshot | null {
         try {
             const key = storageKey(ACTIVE_SNAPSHOT_KEY_BASE);
-            const raw = sessionStorage.getItem(key) ?? sessionStorage.getItem(ACTIVE_SNAPSHOT_KEY_BASE);
+            const raw = sessionStorage.getItem(key);
             if (!raw) {
                 return null;
             }

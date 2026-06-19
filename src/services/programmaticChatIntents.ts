@@ -1,4 +1,5 @@
 import { userWantsBulkPeerBandFix, messageMentionsPeerBandPanelsButNotBulkFix } from './bulkPeerBandFixParse';
+import { messageDescribesUnsupportedAdminRequest } from './adminCapabilityParse';
 import { messageMentionsAddPeerRfPanel, parseAddPeerRfPanelRequest } from './peerRfPanelAddParse';
 import { userWantsDashboardClone, userWantsDashboardPanelFix } from './dashboardCloneProgress';
 import {
@@ -70,6 +71,7 @@ export function messageHasProgrammaticHandler(message: string, contextDashboardU
     }
 
     return (
+        messageDescribesUnsupportedAdminRequest(text) != null ||
         userWantsBulkGaugePanelRenameProgrammatic(text, contextDashboardUid) ||
         messageDescribesBulkGaugePanelRename(text) ||
         parseBulkGaugePanelRenameRequest(text, { contextDashboardUid }) != null ||

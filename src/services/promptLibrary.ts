@@ -1,12 +1,19 @@
 // Import types from centralized location
 import type { UserPrompt, CategoryDef, PreConfiguredPrompts } from '../types/prompt.types';
 import { PRE_CONFIGURED_PROMPTS } from '../data/prompts';
+import { scopedStorageKey } from './storageScope';
 
 // Re-export for backward compatibility
 export type { UserPrompt };
 
-const STORAGE_KEY = 'graft_user_prompts';
+const STORAGE_KEY_BASE = 'graft_user_prompts';
+const PINNED_PRECONFIGURED_KEY_BASE = 'graft_pinned_preconfigured';
 const PIN_LIMIT = 20;
+
+// Scope user-authored prompt storage per (org, user) so it never bleeds between
+// users/orgs sharing a browser profile.
+const STORAGE_KEY = (): string => scopedStorageKey(STORAGE_KEY_BASE);
+const PINNED_PRECONFIGURED_KEY = (): string => scopedStorageKey(PINNED_PRECONFIGURED_KEY_BASE);
 
 let configuredPrompts: CategoryDef[] = [];
 
@@ -31,7 +38,7 @@ export const promptLibraryService = {
 
     getUserPrompts: (): UserPrompt[] => {
         try {
-            const stored = localStorage.getItem(STORAGE_KEY);
+            const stored = localStorage.getItem(STORAGE_KEY());
             return stored ? JSON.parse(stored) : [];
         } catch (e) {
             console.error('Failed to load user prompts', e);
@@ -62,14 +69,14 @@ export const promptLibraryService = {
             prompts.push(savedPrompt);
         }
 
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(prompts));
+        localStorage.setItem(STORAGE_KEY(), JSON.stringify(prompts));
         return savedPrompt;
     },
 
     deleteUserPrompt: (id: string) => {
         const prompts = promptLibraryService.getUserPrompts();
         const filtered = prompts.filter(p => p.id !== id);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+        localStorage.setItem(STORAGE_KEY(), JSON.stringify(filtered));
     },
 
     togglePin: (id: string): boolean => {
@@ -91,7 +98,7 @@ export const promptLibraryService = {
             prompt.isPinned = false;
         }
 
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(prompts));
+        localStorage.setItem(STORAGE_KEY(), JSON.stringify(prompts));
         return true;
     },
 
@@ -124,7 +131,7 @@ export const promptLibraryService = {
     // Pre-configured prompts pinning
     getPinnedPreConfiguredPrompts: (): string[] => {
         try {
-            const stored = localStorage.getItem('graft_pinned_preconfigured');
+            const stored = localStorage.getItem(PINNED_PRECONFIGURED_KEY());
             return stored ? JSON.parse(stored) : [];
         } catch (e) {
             console.error('Failed to load pinned preconfigured prompts', e);
@@ -148,7 +155,7 @@ export const promptLibraryService = {
             newPinned = [...pinned, content];
         }
 
-        localStorage.setItem('graft_pinned_preconfigured', JSON.stringify(newPinned));
+        localStorage.setItem(PINNED_PRECONFIGURED_KEY(), JSON.stringify(newPinned));
         return index === -1; // Returns true if it was pinned, false if unpinned
     },
 

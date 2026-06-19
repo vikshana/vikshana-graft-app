@@ -2,11 +2,14 @@ import { getBackendSrv, getTemplateSrv, config, getDataSourceSrv } from '@grafan
 
 // Import types from centralized location
 import type { DashboardContext, UserContext, DataSourceContext } from '../types/context.types';
+import { scopedStorageKey } from './storageScope';
 
 // Re-export for backward compatibility
 export type { DashboardContext, UserContext, DataSourceContext };
 
-const LAST_DASHBOARD_UID_KEY = 'graft_last_dashboard_uid';
+// Scoped per (org, user) so a stale dashboard UID can't carry across an in-tab
+// org switch or between users sharing a browser profile.
+const lastDashboardUidKey = (): string => scopedStorageKey('graft_last_dashboard_uid');
 
 export const contextService = {
     getDashboardUid(): string | null {
@@ -15,7 +18,7 @@ export const contextService = {
         const match = path.match(/\/d\/([^/]+)/);
         if (match) {
             try {
-                sessionStorage.setItem(LAST_DASHBOARD_UID_KEY, match[1]);
+                sessionStorage.setItem(lastDashboardUidKey(), match[1]);
             } catch {
                 // ignore storage errors
             }
@@ -23,7 +26,7 @@ export const contextService = {
         }
 
         try {
-            return sessionStorage.getItem(LAST_DASHBOARD_UID_KEY);
+            return sessionStorage.getItem(lastDashboardUidKey());
         } catch {
             return null;
         }

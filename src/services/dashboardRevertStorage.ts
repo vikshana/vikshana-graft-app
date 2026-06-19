@@ -5,8 +5,12 @@ export interface DashboardRevertSnapshot {
     capturedAt: number;
 }
 
-const REVERT_SNAPSHOT_KEY = 'graft_dashboard_revert_snapshot';
-const PENDING_REVERT_KEY = 'graft_dashboard_revert_pending';
+import { scopedStorageKey } from './storageScope';
+
+// Scoped per (org, user) so cached dashboard JSON never carries across an in-tab
+// org switch or between users sharing a browser profile.
+const REVERT_SNAPSHOT_KEY = (): string => scopedStorageKey('graft_dashboard_revert_snapshot');
+const PENDING_REVERT_KEY = (): string => scopedStorageKey('graft_dashboard_revert_pending');
 
 function readJson<T>(key: string): T | null {
     try {
@@ -34,7 +38,7 @@ export function setPendingRevertBaseline(
     dashboard: Record<string, unknown>,
     title?: string
 ): void {
-    writeJson(PENDING_REVERT_KEY, {
+    writeJson(PENDING_REVERT_KEY(), {
         uid,
         title,
         dashboard,
@@ -43,20 +47,20 @@ export function setPendingRevertBaseline(
 }
 
 export function commitRevertSnapshotAfterSave(savedUid: string): void {
-    const pending = readJson<DashboardRevertSnapshot>(PENDING_REVERT_KEY);
+    const pending = readJson<DashboardRevertSnapshot>(PENDING_REVERT_KEY());
     if (!pending || pending.uid !== savedUid) {
         return;
     }
-    writeJson(REVERT_SNAPSHOT_KEY, pending);
+    writeJson(REVERT_SNAPSHOT_KEY(), pending);
     try {
-        sessionStorage.removeItem(PENDING_REVERT_KEY);
+        sessionStorage.removeItem(PENDING_REVERT_KEY());
     } catch {
         // ignore
     }
 }
 
 export function getDashboardRevertSnapshot(): DashboardRevertSnapshot | null {
-    return readJson<DashboardRevertSnapshot>(REVERT_SNAPSHOT_KEY);
+    return readJson<DashboardRevertSnapshot>(REVERT_SNAPSHOT_KEY());
 }
 
 export function hasDashboardRevertSnapshot(): boolean {
@@ -65,8 +69,8 @@ export function hasDashboardRevertSnapshot(): boolean {
 
 export function clearDashboardRevertSnapshot(): void {
     try {
-        sessionStorage.removeItem(REVERT_SNAPSHOT_KEY);
-        sessionStorage.removeItem(PENDING_REVERT_KEY);
+        sessionStorage.removeItem(REVERT_SNAPSHOT_KEY());
+        sessionStorage.removeItem(PENDING_REVERT_KEY());
     } catch {
         // ignore
     }

@@ -1,0 +1,97 @@
+import {
+    describesCapabilityLimitation,
+    formatUnsupportedAdminReply,
+    messageDescribesUnsupportedAdminRequest,
+} from './adminCapabilityParse';
+import { responseNeedsContinueAction } from './continueAction';
+import { asksUserToChooseWithoutSave } from './appendToolReferences';
+
+describe('adminCapabilityParse', () => {
+    it('detects create-organization requests', () => {
+        const req = messageDescribesUnsupportedAdminRequest(
+            'Create a new organization with the dashboard of an existing system.'
+        );
+        expect(req?.kind).toBe('create_organization');
+        expect(req?.mentionsDashboard).toBe(true);
+    });
+
+    it('detects add-user requests', () => {
+        const req = messageDescribesUnsupportedAdminRequest('Add a new user to access Grafana.');
+        expect(req?.kind).toBe('manage_users');
+    });
+
+    it('detects org-scoped user access requests as user management', () => {
+        const req = messageDescribesUnsupportedAdminRequest(
+            'Add a new user that only has access to Skywater-MN Organization.'
+        );
+        expect(req?.kind).toBe('manage_users');
+    });
+
+    it('detects role/permission management', () => {
+        const req = messageDescribesUnsupportedAdminRequest(
+            'Change the permissions so editors can manage teams.'
+        );
+        expect(req?.kind).toBe('manage_access');
+    });
+
+    it('does NOT match dashboard create/edit prompts that worked', () => {
+        expect(
+            messageDescribesUnsupportedAdminRequest(
+                'Update the *Summary Dashboard to include a section from Keysight. Keep it the same as the other sections on the *Summary currently.'
+            )
+        ).toBeNull();
+        expect(
+            messageDescribesUnsupportedAdminRequest(
+                'Create a new dashboard for a new system that has the same data as another system that already has a dashboard.'
+            )
+        ).toBeNull();
+        expect(
+            messageDescribesUnsupportedAdminRequest(
+                'Create a gauge panel, time series panel, table panel, and stat panel for dashboard with UID = cfo0wckufbdhce.'
+            )
+        ).toBeNull();
+    });
+
+    it('reply does not trigger the Continue auto-loop or pending-question machinery', () => {
+        const cases: string[] = [
+            'Add a new user to access Grafana.',
+            'Create a new organization with the dashboard of an existing system.',
+            'Add a new user that only has access to Skywater-MN Organization.',
+        ];
+        for (const prompt of cases) {
+            const req = messageDescribesUnsupportedAdminRequest(prompt)!;
+            const reply = formatUnsupportedAdminReply(req, prompt);
+            expect(reply).toContain('Outside Graft');
+            expect(responseNeedsContinueAction(reply)).toBe(false);
+            expect(asksUserToChooseWithoutSave(reply, [])).toBe(false);
+            expect(describesCapabilityLimitation(reply)).toBe(true);
+        }
+    });
+
+    it('describesCapabilityLimitation matches the production "I cannot" replies', () => {
+        expect(
+            describesCapabilityLimitation(
+                "I cannot create organizations — that requires admin access outside of Grafana's dashboard API."
+            )
+        ).toBe(true);
+        expect(
+            describesCapabilityLimitation(
+                'I don’t have tools available to create users in Grafana. User management requires admin access.'
+            )
+        ).toBe(true);
+        // Normal dashboard replies are NOT capability limitations.
+        expect(describesCapabilityLimitation('Done — added the panel and saved the dashboard.')).toBe(false);
+        expect(
+            describesCapabilityLimitation('Would you like me to also reorder the panels?')
+        ).toBe(false);
+    });
+
+    it('offers a dashboard clone alternative', () => {
+        const req = messageDescribesUnsupportedAdminRequest(
+            'Create a new organization with the dashboard of an existing system.'
+        )!;
+        const reply = formatUnsupportedAdminReply(req, 'Create a new organization with the dashboard of an existing system.');
+        expect(reply.toLowerCase()).toContain('clone');
+        expect(reply.toLowerCase()).toContain('what graft can do');
+    });
+});
