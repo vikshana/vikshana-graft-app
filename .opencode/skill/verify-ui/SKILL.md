@@ -5,99 +5,78 @@ description: Use when verifying that a frontend code change, LLM harness edit, o
 
 # Skill: Verify UI (Graft Plugin)
 
-Use this skill whenever you need to verify that a code change produces the expected result in the running Graft plugin UI, before handing off to the developer for manual checks.
+Use this skill to verify that a code change produces the expected result in the running Graft plugin UI before handing off to the developer for manual checks.
 
-This skill uses the **Chrome DevTools MCP** (`chrome-devtools` in `opencode.json`) to drive a real, headed, isolated Chrome session against the local Grafana instance.
-
----
-
-## When to use
-
-Load this skill when:
-- You have made frontend code changes and need to confirm the UI renders as expected.
-- You are iterating on the LLM harness (`src/services/llm.ts`) or system prompts and need to verify the chat flow behaves correctly against a live model.
-- The developer has reported a UI difference from what you expected — use this to reproduce and diagnose it before making further changes.
-- You are about to hand off to the developer for manual review — run a verification pass first so you can say "I have confirmed X in the browser; please spot-check Y."
+Uses the **Chrome DevTools MCP** (`chrome-devtools` tools) to drive a real, headed, isolated Chrome session against the local Grafana instance.
 
 ---
 
 ## Prerequisites
 
-Before running verification, confirm all of the following:
+Before running verification, check the following using the Bash tool:
 
-1. **Grafana is running** on `http://localhost:3000` via `npm run server` (docker compose).
-2. **The plugin is built** — `dist/` exists and contains `module.js`. Run `npm run build` (one-shot) or ensure `npm run dev` (watch) has compiled the latest changes.
-3. **Local Chrome** is installed (Google Chrome, not just Chromium). The Chrome DevTools MCP requires it. On macOS: `/Applications/Google Chrome.app`.
-4. **The `chrome-devtools` MCP server** is configured in `opencode.json` (already done — `npx -y chrome-devtools-mcp@latest --isolated --screenshot-format=jpeg --no-usage-statistics`).
+1. **`dist/module.js` exists** — run `ls dist/module.js` to confirm. If missing, run `npm run build` first.
+2. **Grafana is reachable** — run `curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/api/health`. If not 200, tell the developer to run `npm run server` and wait ~15s.
+3. **Google Chrome is installed** — run `ls "/Applications/Google Chrome.app"` on macOS. Required by Chrome DevTools MCP.
 
-Run the precheck script and act on its output before proceeding:
-
-```sh
-sh scripts/verify-ui-precheck.sh
-```
+Do not use the shell scripts directly from this skill — invoke them as Bash tool calls instead if needed:
+- Precheck: use the Bash tool with command `sh scripts/verify-ui-precheck.sh`
+- Reload wait: use the Bash tool with command `sh scripts/wait-for-plugin-reload.sh`
 
 ---
 
 ## The Verification Loop
 
-### Step 1 — Wait for the plugin to reload after a rebuild
+### Step 1 — Confirm the built bundle is current
 
-After making and building code changes, Grafana must serve the new `module.js` before the browser will reflect the change. Do **not** navigate the browser while a stale bundle is running.
+After a code change, confirm the plugin's `module.js` was rebuilt before navigating the browser. Use the Bash tool:
 
-```sh
-sh scripts/wait-for-plugin-reload.sh
+```
+ls -la dist/module.js
 ```
 
-If the script is not available or you are in a live-editing session (`npm run dev` watch), use the `evaluate_script` tool to poll for the updated asset:
+If running in watch mode (`npm run dev`), wait for webpack to finish its current compilation before proceeding. Check the webpack output in the terminal.
+
+If a fresh build is needed, use the Bash tool to run `npm run build` and wait for it to complete.
+
+### Step 2 — Check the LLM plugin health gate (chat verification only)
+
+Before running any chat scenario, check whether the Grafana LLM plugin is configured. Use the `evaluate_script` Chrome DevTools MCP tool after navigating to Grafana:
 
 ```js
-// Run via evaluate_script on http://localhost:3000 — repeat until version changes
-fetch('/api/plugins/vikshana-graft-app/settings')
-  .then(r => r.json())
-  .then(d => d.info?.version ?? 'unknown')
-```
-
-### Step 2 — Check the LLM plugin health gate
-
-Before running any chat verification, confirm the Grafana LLM plugin is configured with a live provider. Use `evaluate_script` (on the Grafana page) or inspect the network:
-
-```js
-// evaluate_script on http://localhost:3000
 const r = await fetch('/api/plugins/grafana-llm-app/health');
 const d = await r.json();
 const ok = d?.details?.llmProvider?.ok === true &&
            d?.details?.llmProvider?.models?.base?.ok === true;
 console.log('LLM ready:', ok, JSON.stringify(d?.details?.llmProvider));
-ok
+return ok;
 ```
 
-**If the result is `false` or the endpoint 404s:**
+**If `ok` is false:** Stop. Tell the developer:
+> "The Grafana LLM plugin is not configured. Please open http://localhost:3000, go to Administration → Plugins → Grafana LLM App → Configuration, add a provider API key, and click Save & Test. Let me know when done and I will continue."
 
-> STOP. Do not proceed with chat verification. Tell the developer:
-> "The Grafana LLM plugin is not configured. Please open http://localhost:3000, go to Administration → Plugins → Grafana LLM App → Configuration, and add a provider API key (e.g. OpenAI). Then click Save. Come back to me when the LLM health check passes."
+Wait for confirmation before proceeding with chat verification.
 
-After they configure it, re-run the health check before continuing.
-
-**For non-chat pages** (history, prompts, config) you can skip this gate — the LLM is not involved.
+**For non-chat pages** (history, prompts, config page) — skip this gate entirely.
 
 ### Step 3 — Navigate and dismiss the Grafana portal backdrop
 
-Grafana 13 Enterprise renders a trial/licence modal inside `#grafana-portal-container` on startup. It intercepts pointer events and will cause all subsequent clicks to fail silently.
+Use the `navigate_page` Chrome DevTools MCP tool to open the plugin:
 
-Always dismiss it immediately after navigating:
+```
+navigate_page: http://localhost:3000/a/vikshana-graft-app
+```
 
-1. Navigate to the page under test:
-   ```
-   navigate_page → http://localhost:3000/a/vikshana-graft-app
-   ```
+Grafana 13 Enterprise renders a trial/licence modal in `#grafana-portal-container` on startup that intercepts all pointer events — clicks will silently fail if it is present. Dismiss it immediately:
 
-2. Use `take_snapshot` to inspect the DOM. If a dismissible modal is present (look for `button[aria-label="Close dialogue"]`, `"Maybe later"`, `"Skip"`, or `"Close"`), click it:
-   ```
-   click → button[aria-label="Close dialogue"]
-   ```
-   Try each selector in order; skip if none are present.
-
-3. Confirm the backdrop is gone using `evaluate_script`:
+1. Use `take_snapshot` to inspect the DOM.
+2. If any of these are visible, `click` the first one found:
+   - `button[aria-label="Close dialogue"]`
+   - `button[aria-label="Close"]`
+   - `button` containing text "Maybe later"
+   - `button` containing text "Skip"
+   - `button` containing text "Close"
+3. Use `evaluate_script` to confirm the backdrop is gone:
    ```js
    const portal = document.getElementById('grafana-portal-container');
    if (!portal) return true;
@@ -108,61 +87,56 @@ Always dismiss it immediately after navigating:
    });
    return !blocking;
    ```
-   If this returns `false`, wait 1s and repeat the dismissal attempt.
+4. If still blocked, wait 1 second and retry the dismissal.
 
 ### Step 4 — Run the scenario
 
-Drive the browser through the specific user flow relevant to your change. Use the test ID inventory below to locate elements. Always `take_snapshot` before clicking something new — it gives you the actual DOM state to work from rather than guessing.
+Drive the browser through the user flow for the specific change being verified. Use the test ID inventory below to locate elements.
 
-**General pattern:**
-```
-take_snapshot            → inspect DOM, find elements by data-testid
-click / fill / type_text → interact
-wait_for                 → wait for expected element or text to appear
-take_screenshot          → capture evidence to output/<scenario>-<step>.jpeg
-list_console_messages    → check for JS errors after each major interaction
-```
+Always `take_snapshot` before clicking something new — it gives you the current DOM state rather than guessing at selectors.
 
-### Step 5 — Inspect console and network (mandatory)
+General interaction pattern using Chrome DevTools MCP tools:
+- `take_snapshot` — inspect DOM, find elements by `data-testid`
+- `click` — interact with elements (use CSS selector or visible text)
+- `fill` or `type_text` — enter text into inputs
+- `wait_for` — wait for an expected element or text to appear
+- `take_screenshot` — capture evidence; save to `output/<scenario>-<step>.jpeg`
+- `press_key` — keyboard interactions (e.g. Enter to submit)
 
-After running the scenario, always check:
+### Step 5 — Inspect console and network (mandatory after every scenario)
 
-```
-list_console_messages
-```
+Always run these two checks after any scenario — they are the primary diagnostic tools:
 
-Look for:
-- `[ERROR]` or uncaught exceptions — these explain blank panels and missing renders.
-- `[WARN]` from Grafana's plugin loader about the plugin failing to load.
-- React render errors from the ErrorBoundary.
+**Console — use `list_console_messages`:**
+- `[ERROR]` entries explain blank panels and missing renders
+- `[WARN]` from Grafana's plugin loader indicate the plugin failed to load
+- React render errors from the `ErrorBoundary` component
 
-```
-list_network_requests
-```
+**Network — use `list_network_requests`:**
 
-For chat flows, filter for requests to:
-- `**/api/plugins/grafana-llm-app/settings` — must return 200 with `enabled: true`
-- `**/api/plugins/grafana-llm-app/health` — must return 200 with `llmProvider.ok: true`
-- `**/api/plugins/grafana-llm-app/openai/v1/chat/completions` — the actual LLM call; must return 200 and contain a non-empty `choices[0].message`
+For chat flows, check for these requests:
+- `/api/plugins/grafana-llm-app/settings` — must be 200, `enabled: true`
+- `/api/plugins/grafana-llm-app/health` — must be 200, `llmProvider.ok: true`
+- `/api/plugins/grafana-llm-app/openai/v1/chat/completions` — must be 200, non-empty response
 
-If the LLM call is missing from the network log, the frontend did not reach the call — look for an earlier error in the console.
+If the chat/completions call is missing entirely, the frontend did not reach it — look for an earlier error in the console log.
 
 ### Step 6 — Assert structure and behaviour
 
-**Do NOT assert exact LLM response text** — model output is non-deterministic. Assert structure instead:
+Do **not** assert exact LLM response text — model output is non-deterministic. Assert structure:
 
 | What to verify | How |
 |---|---|
-| Chat response rendered | `wait_for` + `take_snapshot` — check a message bubble element is present |
-| Tool call executed | Snapshot shows a `[data-testid="tool-call-container"]` or tool-result block |
+| Chat response rendered | `wait_for` + `take_snapshot` — assistant message bubble present |
+| Tool call executed | Snapshot shows `[data-testid="tool-call-container"]` or tool-result block |
 | Plan block rendered | Snapshot shows `[data-testid="plan-block-header"]` |
 | Thinking block rendered | Snapshot shows a thinking/reasoning block element |
 | No JS errors | `list_console_messages` — zero `[ERROR]` entries |
-| LLM call returned 200 | `list_network_requests` — chat/completions request shows status 200 |
-| Response non-empty | Snapshot — at least one assistant message bubble with non-empty text content |
+| LLM call returned 200 | `list_network_requests` — chat/completions shows status 200 |
+| Response non-empty | Snapshot — at least one assistant message bubble with non-empty text |
 
 For non-chat pages, assert concrete DOM state:
-- Correct page title / heading visible in snapshot
+- Correct heading visible in snapshot
 - Expected components present by `data-testid`
 - No error boundary fallback rendered
 
@@ -170,85 +144,85 @@ For non-chat pages, assert concrete DOM state:
 
 If the assertion fails:
 
-1. **Check console first** — a JS error usually explains a blank render. Fix the error in source, rebuild, go to Step 1.
-2. **Check network** — if the LLM call returned non-200 or was never made, the issue is in `src/services/llm.ts` or the health check logic. Fix, rebuild, loop.
-3. **For LLM harness/prompt issues** (response rendered but structure wrong — e.g. no tool calls, no plan block):
-   - Examine the raw response from `list_network_requests` → chat/completions
-   - Consider adjusting the system prompt in `src/services/llm.ts` or the tool definitions
-   - Rebuild and re-verify — this loop may take several iterations; that is expected
-4. **Take a screenshot** at each iteration to `output/<scenario>-attempt-N.jpeg` so you have a visual trail.
+1. **Console errors first** — a JS error almost always explains a blank render. Fix the source, rebuild (Bash tool: `npm run build`), go back to Step 1.
+2. **Network next** — if the LLM call returned non-200 or was never made, the issue is in `src/services/llm.ts` or the health check logic. Fix, rebuild, loop.
+3. **LLM harness/prompt issues** — if the response renders but structure is wrong (no tool calls, no plan block):
+   - Inspect the raw `chat/completions` response body from `list_network_requests`
+   - Adjust the system prompt or tool definitions in `src/services/llm.ts`
+   - Rebuild and re-verify — multiple iterations are expected for harness changes
+4. Take a screenshot at each iteration to `output/<scenario>-attempt-N.jpeg` for a visual trail.
 
 ### Step 8 — Hand off
 
-Only hand off to the developer when:
-- The scenario runs without JS errors (`list_console_messages` clean)
+Only hand off when:
+- The scenario completed without JS errors (`list_console_messages` clean)
 - The expected UI structure is present in the snapshot
-- For chat: the LLM network call returned 200 and a response is rendered
-- Screenshots exist in `output/` as visual evidence
+- For chat: `chat/completions` returned 200 and a response is rendered
+- At least one screenshot exists in `output/`
 
-Present a hand-off summary:
+Present this summary to the developer:
 
 ```
 ## Verification complete — ready for manual review
 
-**Scenario:** <what you tested>
+**Scenario:** <what was tested>
 **Screenshots:** output/<list of files>
 **Console:** Clean — no errors
 **Network:** LLM health ✓, chat/completions ✓ (200)
-**Asserted:** <what structure/behaviour you confirmed>
+**Asserted:** <what structure/behaviour was confirmed>
 
 **Please manually confirm:**
-- <specific thing 1 that requires human judgement — e.g. visual styling looks correct>
-- <specific thing 2 — e.g. the response text is on-topic and helpful>
+- <thing 1 requiring human judgement — e.g. visual styling looks right>
+- <thing 2 — e.g. response text is on-topic and helpful>
 ```
 
 ---
 
 ## Data-testid Inventory
 
-These are the real `data-testid` values used in the codebase (inline in JSX, not from `src/components/testIds.ts` which is stale scaffold).
+Real `data-testid` values from the codebase (inline in component JSX — `src/components/testIds.ts` is stale scaffold, do not use it):
 
-| Page / Component | `data-testid` value | Notes |
-|---|---|---|
-| Chat — landing | `landing-title` | Main chat page heading |
-| Chat — input | `chat-input` | Message textarea |
-| Chat — send | `send-message-button` | Submit button |
-| Chat — mode toggle | `mode-button-standard` | Standard model mode |
-| Chat — mode toggle | `mode-button-deep-research` | Deep Research model mode |
-| Chat — nav | `previous-conversations-link` | Link to history page |
-| Chat — nav | `settings-button` | Settings/config link |
-| Chat — nav | `prompt-library-link` | Prompt library link |
-| Chat — plan block | `plan-block-header` | Rendered plan section header |
-| Chat — step group | `step-group-header-step_1` | First step in a plan |
-| History page | `history-search-input` | Search box |
-| History page | `session-card` | Individual history session card |
-| History page | `back-button` | Back navigation |
-| Agent config | `tier-header-oss` | OSS tools section header |
-| Agent config | `tool-category-loki` | Loki tool category |
-| Agent config | `max-tool-iterations-input` | Max iterations input |
+| Page / Component | `data-testid` value |
+|---|---|
+| Chat — landing heading | `landing-title` |
+| Chat — message input | `chat-input` |
+| Chat — send button | `send-message-button` |
+| Chat — standard mode | `mode-button-standard` |
+| Chat — deep research mode | `mode-button-deep-research` |
+| Chat — history nav link | `previous-conversations-link` |
+| Chat — settings link | `settings-button` |
+| Chat — prompt library link | `prompt-library-link` |
+| Chat — plan block header | `plan-block-header` |
+| Chat — plan step group | `step-group-header-step_1` |
+| History — search input | `history-search-input` |
+| History — session card | `session-card` |
+| History — back button | `back-button` |
+| Agent config — OSS header | `tier-header-oss` |
+| Agent config — Loki category | `tool-category-loki` |
+| Agent config — max iterations | `max-tool-iterations-input` |
 
-To find additional test IDs: `grep -r 'data-testid' src/` in the repo.
+To find additional IDs: use the Bash tool with `grep -r 'data-testid' src/`.
 
 ---
 
 ## Known Pitfalls
 
-1. **Stale bundle**: The most common cause of "I tested it but it looks different". Always run `wait-for-plugin-reload.sh` or confirm the webpack hash has changed before navigating.
+1. **Stale bundle** — the most common cause of "I tested it but it looks different". Always confirm `dist/module.js` mtime changed after a rebuild before navigating.
 
-2. **Grafana portal backdrop**: Grafana 13 Enterprise renders a full-viewport modal on first load. If clicks do nothing, the backdrop is intercepting them. See Step 3 dismissal sequence.
+2. **Grafana portal backdrop** — Grafana 13 Enterprise renders a full-viewport modal on first load. If clicks appear to do nothing, this backdrop is the cause. See Step 3 dismissal sequence.
 
-3. **Anonymous auth**: Local Grafana uses anonymous Admin auth — no login needed. If you ever see a login page, the container may have started with `ANONYMOUS_AUTH_ENABLED=false` (CI mode). Restart with `npm run server` (which uses defaults).
+3. **Anonymous auth** — local Grafana uses anonymous Admin auth; no login needed. If a login page appears, the container started with `ANONYMOUS_AUTH_ENABLED=false`. Restart with `npm run server`.
 
-4. **Plugin not loaded**: If `/a/vikshana-graft-app` shows "Plugin not found", `dist/` may be empty or the container has not mounted it. Check `docker ps` and `docker logs vikshana-graft-app`.
+4. **Plugin not loaded** — if `/a/vikshana-graft-app` shows "Plugin not found", check with Bash tool: `docker logs vikshana-graft-app | tail -20`.
 
-5. **`grafana-llm-app` auto-install lag**: On first container start, `GF_PLUGINS_PREINSTALL` downloads the LLM plugin. The health endpoint may return 404 for ~30s. Wait and retry.
+5. **LLM plugin install lag** — on first container start, `GF_PLUGINS_PREINSTALL` downloads `grafana-llm-app`. The health endpoint may 404 for ~30s. Wait and retry.
 
-6. **Isolated Chrome profile**: The `--isolated` flag means each MCP session starts with a clean Chrome profile. LocalStorage (`graft_chat_history`) is empty — seed it via `evaluate_script` if testing history-dependent flows:
+6. **Isolated Chrome profile** — `--isolated` means clean LocalStorage each session. Seed history-dependent flows via `evaluate_script`:
    ```js
    localStorage.setItem('graft_chat_history', JSON.stringify([/* session objects */]));
    ```
 
-7. **`evaluate_script` scope**: Scripts run in the context of the currently active page. Navigate first, then evaluate.
+7. **`evaluate_script` scope** — scripts run in the active page's context. Always `navigate_page` first, then `evaluate_script`.
 
 ---
 
@@ -256,18 +230,18 @@ To find additional test IDs: `grep -r 'data-testid' src/` in the repo.
 
 | URL | Content |
 |---|---|
-| `http://localhost:3000/a/vikshana-graft-app` | Chat interface (default) |
-| `http://localhost:3000/a/vikshana-graft-app/history` | Chat history browser |
+| `http://localhost:3000/a/vikshana-graft-app` | Chat interface |
+| `http://localhost:3000/a/vikshana-graft-app/history` | Chat history |
 | `http://localhost:3000/a/vikshana-graft-app/prompts` | Prompt library |
-| `http://localhost:3000/plugins/vikshana-graft-app` | Plugin config page (AppConfig) |
-| `http://localhost:3000/api/plugins/grafana-llm-app/health` | LLM plugin health (JSON) |
-| `http://localhost:3000/api/plugins/grafana-llm-app/settings` | LLM plugin settings (JSON) |
+| `http://localhost:3000/plugins/vikshana-graft-app` | Plugin config (AppConfig) |
+| `http://localhost:3000/api/plugins/grafana-llm-app/health` | LLM health (JSON) |
+| `http://localhost:3000/api/plugins/grafana-llm-app/settings` | LLM settings (JSON) |
 
 ---
 
 ## Output
 
-Save all screenshots to `output/` with descriptive names:
+Screenshots land in `output/` (gitignored). Use descriptive names:
 
 ```
 output/chat-landing.jpeg
@@ -276,5 +250,3 @@ output/chat-tool-call-block.jpeg
 output/history-page.jpeg
 output/prompt-library.jpeg
 ```
-
-The `output/` directory is gitignored. Screenshots are ephemeral evidence for the current verification session.
