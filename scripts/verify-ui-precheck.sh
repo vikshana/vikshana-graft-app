@@ -55,12 +55,12 @@ fi
 # ── 3. Plugin app route loads ──────────────────────────────────────────────────
 if [ "${HTTP_STATUS}" = "200" ]; then
   printf "Checking plugin app route... "
-  # Follow redirects and capture both the final status and final URL.
-  # A redirect to /login means auth is not configured — treat as failure.
-  PLUGIN_EFFECTIVE_URL=$(curl -s -o /dev/null -w "%{url_effective}" --max-time 5 \
-    -L "${GRAFANA_URL}${PLUGIN_APP_PATH}" 2>/dev/null || echo "")
-  PLUGIN_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
-    -L "${GRAFANA_URL}${PLUGIN_APP_PATH}" 2>/dev/null || echo "000")
+  # Single request: capture both the final status and effective URL atomically.
+  # A redirect to /login means anonymous auth is misconfigured — treat as failure.
+  _plugin_out=$(curl -s -o /dev/null -w "%{http_code} %{url_effective}" --max-time 5 \
+    -L "${GRAFANA_URL}${PLUGIN_APP_PATH}" 2>/dev/null || echo "000 ")
+  PLUGIN_STATUS="${_plugin_out%% *}"
+  PLUGIN_EFFECTIVE_URL="${_plugin_out#* }"
   case "${PLUGIN_EFFECTIVE_URL}" in
     */login*|*/auth/login*)
       fail "Plugin route redirected to login page — anonymous auth may be disabled"
@@ -93,7 +93,10 @@ if [ "${HTTP_STATUS}" = "200" ]; then
   else
     # Specifically check details.llmProvider.ok — a shallow grep for "ok":true
     # can produce false positives when other nested fields contain an ok flag.
-    LLM_OK=$(echo "${LLM_BODY}" | python3 -c "
+    # Use python3 when available; fall back to a targeted grep on the llmProvider
+    # object only. printf '%s' avoids echo escape-handling differences in /bin/sh.
+    if command -v python3 > /dev/null 2>&1; then
+      LLM_OK=$(printf '%s' "${LLM_BODY}" | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -104,6 +107,16 @@ try:
 except Exception:
     print('false')
 " 2>/dev/null || echo "false")
+    else
+      # python3 not available — extract just the llmProvider object with awk so
+      # we don't match ok flags in other sections of the response.
+      _provider_json=$(printf '%s' "${LLM_BODY}" | \
+        awk 'BEGIN{p=0} /"llmProvider"/{p=1} p{print} p && /}/{p=0}')
+      case "${_provider_json}" in
+        *'"ok":true'*) LLM_OK="true" ;;
+        *)             LLM_OK="false" ;;
+      esac
+    fi
     if [ "${LLM_OK}" = "true" ]; then
       pass "grafana-llm-app is configured and healthy"
     else
