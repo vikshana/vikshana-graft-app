@@ -1,3 +1,8 @@
+---
+name: verify-ui
+description: Use when verifying that a frontend code change, LLM harness edit, or system prompt update produces the expected result in the running Graft plugin UI (http://localhost:3000/a/vikshana-graft-app). Drives a real headed Chrome session via Chrome DevTools MCP — navigate, click, inspect console errors, inspect network requests, take screenshots to output/, assert structure and behaviour, iterate until correct, then hand off to the developer. Use ONLY for this repo's Graft Grafana plugin.
+---
+
 # Skill: Verify UI (Graft Plugin)
 
 Use this skill whenever you need to verify that a code change produces the expected result in the running Graft plugin UI, before handing off to the developer for manual checks.
