@@ -437,19 +437,159 @@ Rules:
 - Output only the JSON object. No markdown fences, no explanation.`;
 }
 
+// ─── Code-side layout computation ────────────────────────────────────────────
+
+interface LayoutPanel {
+    id: number;
+    title: string;
+    type: 'row' | 'data';
+    viz?: string;           // for data panels
+    query?: string;
+    datasourceType?: string;
+    unit?: string;
+    description?: string;
+    rowGroup?: string;
+    gridPos: { x: number; y: number; w: number; h: number };
+}
+
 /**
- * CREATE phase: the LLM receives the full panel todo list and builds the
- * dashboard using an explicit skeleton → rows → panels sequence.
+ * Computes Grafana v1 gridPos for every panel (rows + data panels)
+ * from the PLAN todo list.
  *
- * The three-step sequence is mandatory and ordered:
- *   Step 1: update_dashboard with skeleton (panels: []) → extract UID from response
- *   Step 2: patch rows (one add op per row group, in order)
- *   Step 3: patch data panels per row group (one add op per panel)
+ * Layout rules (24-column grid):
+ * - Row header:              w=24, h=1
+ * - stat / gauge / bargauge: w=6,  h=4  (up to 4 across, then wrap)
+ * - timeseries / logs / table / heatmap: w=12, h=8  (2 across)
+ * - Any solo panel in a group: w=24, h=8  (full width)
  *
- * This avoids the "one giant JSON" failure mode where the model sends a
- * payload too large for the LLM context or the model omits panels.
- * get_dashboard_panel_queries must NOT be called here — only after VERIFY
- * confirms panelCount > 0.
+ * Running y increments after each row of panels is placed.
+ * The model must copy these exact values verbatim — it does NOT compute layout.
+ */
+export function computeLayout(panelTodos: any[]): LayoutPanel[] {
+    const COLS = 24;
+    const result: LayoutPanel[] = [];
+    let nextId = 1;
+    let runningY = 0;
+
+    // Group panels by rowGroup, preserving insertion order
+    const groups: Map<string, any[]> = new Map();
+    for (const p of panelTodos) {
+        const g = p.rowGroup || 'General';
+        if (!groups.has(g)) { groups.set(g, []); }
+        groups.get(g)!.push(p);
+    }
+
+    for (const [rowTitle, panels] of groups) {
+        // Row header
+        result.push({
+            id: nextId++,
+            title: rowTitle,
+            type: 'row',
+            gridPos: { x: 0, y: runningY, w: COLS, h: 1 },
+        });
+        runningY += 1;
+
+        // Determine column width per panel for this group
+        const isStat = (viz: string) =>
+            viz === 'stat' || viz === 'gauge' || viz === 'bargauge';
+        const allStat = panels.every(p => isStat(p.viz));
+        const STAT_W = 6;
+        const STAT_H = 4;
+        const WIDE_W = 12;
+        const WIDE_H = 8;
+
+        let cx = 0; // current x position
+        let rowH = 0; // height of the current visual row being filled
+
+        for (const p of panels) {
+            const panelW = isStat(p.viz) ? STAT_W : WIDE_W;
+            const panelH = isStat(p.viz) ? STAT_H : WIDE_H;
+
+            // Wrap to next row if this panel won't fit
+            if (cx + panelW > COLS) {
+                runningY += rowH;
+                cx = 0;
+                rowH = 0;
+            }
+
+            result.push({
+                id: nextId++,
+                title: p.title,
+                type: 'data',
+                viz: p.viz,
+                query: p.query,
+                datasourceType: p.datasourceType,
+                unit: p.unit,
+                description: p.description,
+                rowGroup: rowTitle,
+                gridPos: { x: cx, y: runningY, w: panelW, h: panelH },
+            });
+
+            cx += panelW;
+            rowH = Math.max(rowH, panelH);
+
+            // If stat panels exactly fill a row, reset
+            if (cx >= COLS) {
+                runningY += rowH;
+                cx = 0;
+                rowH = 0;
+            }
+        }
+
+        // Flush any partially-filled row
+        if (rowH > 0) {
+            runningY += rowH;
+            cx = 0;
+        }
+        void allStat; // suppress unused warning
+    }
+
+    return result;
+}
+
+/**
+ * Renders the pre-computed layout as a compact per-group block for the CREATE prompt.
+ * The model copies these exact values; it must not recalculate layout.
+ */
+function renderLayoutForPrompt(layout: LayoutPanel[]): string {
+    // Group into blocks: row header + its data panels
+    const blocks: string[] = [];
+    let currentRows: LayoutPanel[] = [];
+    let currentData: LayoutPanel[] = [];
+
+    const flush = () => {
+        if (currentRows.length === 0) { return; }
+        const rowPanel = currentRows[0];
+        const gp = (p: LayoutPanel) =>
+            `{"x":${p.gridPos.x},"y":${p.gridPos.y},"w":${p.gridPos.w},"h":${p.gridPos.h}}`;
+        const rowLine = `ROW id=${rowPanel.id} title="${rowPanel.title}" gridPos=${gp(rowPanel)}`;
+        const panelLines = currentData.map(p =>
+            `  PANEL id=${p.id} viz=${p.viz} gridPos=${gp(p)} title="${p.title}"`
+        );
+        blocks.push([rowLine, ...panelLines].join('\n'));
+        currentRows = [];
+        currentData = [];
+    };
+
+    for (const p of layout) {
+        if (p.type === 'row') {
+            flush();
+            currentRows = [p];
+        } else {
+            currentData.push(p);
+        }
+    }
+    flush();
+    return blocks.join('\n\n');
+}
+
+/**
+ * CREATE phase: the LLM receives the full panel todo list with pre-computed
+ * gridPos values and builds the dashboard via skeleton → group-by-group patches.
+ *
+ * KEY DESIGN: layout arithmetic is done in code (computeLayout), not by the LLM.
+ * The model copies exact gridPos values from the prompt — it never calculates them.
+ * This prevents the "all panels at y=0" overlap failure.
  */
 function buildCreatePhasePrompt(
     panelTodos: any[],
@@ -467,15 +607,9 @@ function buildCreatePhasePrompt(
         (dataFindings.loki?.validatedQueries?.length ?? 0) > 0 ||
         (dataFindings.prometheus?.validatedQueries?.length ?? 0) > 0;
 
-    // Derive unique row groups in order
-    const rowGroups: string[] = [];
-    for (const p of panelTodos) {
-        if (p.rowGroup && !rowGroups.includes(p.rowGroup)) { rowGroups.push(p.rowGroup); }
-    }
-
-    const panelList = panelTodos.map((p, i) =>
-        `${i + 1}. [${p.rowGroup}] ${p.title} | ${p.viz} | unit:${p.unit || 'short'} | ${p.datasourceType} | query: ${p.query}`
-    ).join('\n');
+    // Pre-compute layout in code — the model copies these values, never calculates them
+    const layout = computeLayout(panelTodos);
+    const layoutBlock = renderLayoutForPrompt(layout);
 
     const varList = variables.length > 0
         ? `\nTemplate variables to include in the skeleton's templating.list:\n${variables.map((v: any) =>
@@ -483,7 +617,9 @@ function buildCreatePhasePrompt(
         ).join('\n')}`
         : '';
 
-    const rowList = rowGroups.map((r, i) => `  Row ${i + 1}: "${r}"`).join('\n');
+    // Build a per-panel reference map: id → todo data (query, unit, datasourceType, etc.)
+    // so the model can look up the right query/unit by panel id
+    const dataLayouts = layout.filter(p => p.type === 'data');
 
     return `You are a dashboard construction agent for Graft, an AI assistant embedded in Grafana.
 
@@ -493,21 +629,32 @@ All queries below have been pre-validated — copy them VERBATIM.
 ${conversationDigest ? `## Recent conversation\n${conversationDigest}\n\n` : ''}\
 ${hasValidatedQueries ? `## Pre-validated data\n${findingsBlock}\n\n` :
   buildEmptyFindingsGuidance(preferredCategories) + '\n\n'}
-## Panel Todo List
-${panelList}
-${varList}
-
-## Row groups (in order)
-${rowList || '  (no rows — flat layout)'}
-
-Time range: ${timeRange?.from ?? 'now-1h'} to ${timeRange?.to ?? 'now'}
-
+${varList ? `${varList}\n\n` : ''}
 ${schemaRules}
+
+## PRE-COMPUTED LAYOUT (copy exact gridPos values — do NOT recalculate)
+
+The following layout has been computed for you. Each panel has an id, a pre-computed
+gridPos, and the query/unit to use. You MUST use these exact gridPos values verbatim —
+do not adjust, recalculate, or substitute different values.
+
+${layoutBlock}
+
+## Panel details (query + unit + datasource for each panel id)
+${dataLayouts.map(p => {
+    const ds = p.datasourceType === 'loki'
+        ? (dataFindings.loki ? `{"type":"loki","uid":"${dataFindings.loki.datasourceUid}"}` : '{"type":"loki","uid":"<loki-uid>"}')
+        : (dataFindings.prometheus ? `{"type":"prometheus","uid":"${dataFindings.prometheus.datasourceUid}"}` : '{"type":"prometheus","uid":"<prom-uid>"}');
+    return `Panel id=${p.id} "${p.title}"
+  viz: ${p.viz}  unit: ${p.unit || 'short'}  description: ${p.description || p.title}
+  datasource: ${ds}
+  expr: ${p.query}`;
+}).join('\n\n')}
 
 ## MANDATORY BUILD SEQUENCE — follow these steps IN ORDER
 
 ### Step 1 — Create the skeleton (empty panels: [])
-Call update_dashboard with a full JSON body. Use uid:"" and panels:[] — no panels yet.
+Call update_dashboard once with full JSON. Panels must be empty — NO panels yet.
 {
   "dashboard": {
     "title": "<descriptive title>",
@@ -526,46 +673,59 @@ Call update_dashboard with a full JSON body. Use uid:"" and panels:[] — no pan
   "folderUid": "",
   "overwrite": false
 }
-The response contains the assigned UID — note it immediately for all following patch steps.
+The response contains the assigned UID — note it immediately for all following steps.
 
 ### Step 2 — Add panels GROUP BY GROUP (one patch call per row group, in order)
 
-CRITICAL GRAFANA RULE: In the flat panels[] array, a row panel "owns" all the panels
-that follow it until the next row panel. You MUST interleave row panels and their data
-panels — do NOT add all rows first. The correct array structure is:
-  [Row1-panel, Row1-data-panel-A, Row1-data-panel-B, Row2-panel, Row2-data-panel-A, ...]
+CRITICAL GRAFANA RULE: a row panel "owns" all the panels that follow it in the array
+until the next row panel. You MUST add the row panel AND its data panels together,
+in a single patch call per group. Do NOT add all rows first then data panels — that
+puts every data panel under the LAST row.
 
-For EACH row group (in order), make ONE patch call that appends the row panel IMMEDIATELY
-followed by that row's data panels — all in a single operations array:
+For EACH row group (in order), call update_dashboard in patch mode:
 {
   "uid": "<uid from Step 1>",
   "operations": [
-    { "op": "add", "path": "$.panels/- ", "value": { "type": "row", "title": "<Row title>", "id": <id>, "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "panels": [] } },
-    { "op": "add", "path": "$.panels/- ", "value": { <complete data panel JSON for first panel in this row> } },
-    { "op": "add", "path": "$.panels/- ", "value": { <complete data panel JSON for second panel in this row> } }
+    { "op": "add", "path": "$.panels/- ", "value": {
+        "type": "row",
+        "title": "<row title>",
+        "id": <ROW id from layout above>,
+        "collapsed": false,
+        "panels": [],
+        "gridPos": <gridPos from layout above — copy exactly>
+      }
+    },
+    { "op": "add", "path": "$.panels/- ", "value": {
+        "id": <PANEL id from layout above>,
+        "title": "<panel title>",
+        "description": "<description>",
+        "type": "<viz>",
+        "gridPos": <gridPos from layout above — copy exactly>,
+        "fieldConfig": {
+          "defaults": { "unit": "<unit>", "color": { "mode": "palette-classic" } },
+          "overrides": []
+        },
+        "options": {},
+        "targets": [{
+          "refId": "A",
+          "datasource": <datasource JSON>,
+          "expr": "<query>",
+          "legendFormat": "{{job}}"
+        }]
+      }
+    }
   ],
   "overwrite": true
 }
-Then call the SAME pattern for the next row group. Repeat until all row groups are added.
-
-For each data panel include the full object: id, title, description, type, gridPos, fieldConfig (with unit), targets (with datasource + expr/query + legendFormat), options.
-- type: use the viz value from the Panel Todo List
-- fieldConfig.defaults.unit: use the unit from the Panel Todo List
-- targets[0].datasource: exact datasource JSON from the Pre-validated data section
-- targets[0].expr (Prometheus) or targets[0].expr (Loki): EXACT query from the list
-- targets[0].legendFormat: meaningful label e.g. "{{job}}" or static string
-- gridPos y: just use 0 for all panels — Grafana will re-layout automatically
-
-Assign sequential integer ids starting from 1 across all panels.
+Repeat for every row group. Use the exact id and gridPos values from the layout above.
 
 ### Step 3 — Confirm and report
-After all patch calls succeed, your final message must include:
+After all patch calls succeed, include in your final message:
 - [Open dashboard](/d/<uid>)
-- Number of panels added per row group
-- Any issues encountered
+- Number of panels per group
 
-DO NOT call get_dashboard_panel_queries or get_dashboard_summary — those are called by the system after you finish.
-${schemaCapability === 'v2-capable' ? '\nNOTE: V2 schema also supported on this Grafana — see rules above.' : ''}
+DO NOT call get_dashboard_panel_queries or get_dashboard_summary — those are called automatically after you finish.
+${schemaCapability === 'v2-capable' ? '\nNOTE: V2 schema also supported — see rules above.' : ''}
 
 ${context ? `## Current Grafana context\n${context}` : ''}`;
 }
@@ -573,6 +733,9 @@ ${context ? `## Current Grafana context\n${context}` : ''}`;
 /**
  * REPAIR phase: the LLM receives a structured gap report and applies targeted
  * patch operations to close each gap.
+ *
+ * For empty dashboards, the pre-computed layout is injected so the model can
+ * write correct gridPos values in the mandatory full-JSON rewrite.
  */
 function buildRepairPhasePrompt(
     gaps: DashboardGaps,
@@ -580,6 +743,7 @@ function buildRepairPhasePrompt(
     dataFindings: DataFindings,
     schemaRules: string,
     context: string,
+    layout: LayoutPanel[],
 ): string {
     const gapLines: string[] = [];
     if (gaps.emptyDashboard) {
@@ -598,6 +762,20 @@ function buildRepairPhasePrompt(
     }
 
     const findingsBlock = formatFindingsForPrompt(dataFindings);
+    const layoutBlock = layout.length > 0 ? renderLayoutForPrompt(layout) : '';
+    const dataLayouts = layout.filter(p => p.type === 'data');
+
+    const layoutDetails = dataLayouts.length > 0 ? `
+## PRE-COMPUTED LAYOUT (use exact gridPos values)
+${layoutBlock}
+
+## Panel details
+${dataLayouts.map(p => {
+    const ds = p.datasourceType === 'loki'
+        ? (dataFindings.loki ? `{"type":"loki","uid":"${dataFindings.loki.datasourceUid}"}` : '{"type":"loki","uid":"<loki-uid>"}')
+        : (dataFindings.prometheus ? `{"type":"prometheus","uid":"${dataFindings.prometheus.datasourceUid}"}` : '{"type":"prometheus","uid":"<prom-uid>"}');
+    return `Panel id=${p.id} "${p.title}" | viz:${p.viz} unit:${p.unit||'short'} | datasource:${ds} | expr:${p.query}`;
+}).join('\n')}` : '';
 
     return `You are a dashboard repair agent for Graft. Dashboard uid="${dashboardUid}" has quality gaps that MUST be fixed.
 
@@ -605,28 +783,29 @@ function buildRepairPhasePrompt(
 ${gapLines.join('\n\n')}
 
 ${findingsBlock ? `## Pre-validated queries (use these verbatim)\n${findingsBlock}\n` : ''}
+${layoutDetails}
 
 ## How to fix
 
 ${gaps.emptyDashboard ? `### EMPTY DASHBOARD — MANDATORY FULL-JSON REWRITE
-The dashboard has zero panels. The panels field is null/empty so patch operations CANNOT work here.
-You MUST use a full-JSON update_dashboard call with the complete panels array:
-  {
-    "dashboard": {
-      "title": "<descriptive title>",
-      "description": "<description>",
-      "uid": "${dashboardUid}",
-      "panels": [ /* ALL row panels AND data panels here */ ],
-      "schemaVersion": 38,
-      "time": { "from": "now-1h", "to": "now" },
-      "timepicker": {}, "refresh": "30s", "tags": [],
-      "templating": { "list": [] }, "annotations": { "list": [] }
-    },
-    "folderUid": "",
-    "overwrite": true
-  }
-DO NOT use patch operations (uid+operations) — they will silently fail on a null panels array.
-Build ALL panels in this single call.` :
+The dashboard has zero panels. patch operations CANNOT work on a null panels array.
+You MUST call update_dashboard with a full-JSON body containing ALL panels.
+Use the exact gridPos values from the PRE-COMPUTED LAYOUT above.
+Interleave rows and their panels: [Row1, Row1-panelA, Row1-panelB, Row2, Row2-panelA, ...]
+{
+  "dashboard": {
+    "title": "<descriptive title>",
+    "description": "<description>",
+    "uid": "${dashboardUid}",
+    "panels": [ /* all rows + data panels with correct gridPos from layout above */ ],
+    "schemaVersion": 38,
+    "time": { "from": "now-1h", "to": "now" },
+    "timepicker": {}, "refresh": "30s", "tags": [],
+    "templating": { "list": [] }, "annotations": { "list": [] }
+  },
+  "folderUid": "",
+  "overwrite": true
+}` :
 `### Adding missing panels (panels array already exists, patches safe)
 Use update_dashboard with patch operations to APPEND panels:
   { "uid": "${dashboardUid}", "operations": [{ "op": "add", "path": "$.panels/- ", "value": { <panel JSON> } }], "overwrite": true }
@@ -944,6 +1123,9 @@ export async function runDashboardAgent(
         const plannedTimeRange = planResult?.timeRange ?? { from: 'now-1h', to: 'now' };
         const plannedTitles = plannedPanels.map((p: any) => String(p.title ?? ''));
 
+        // Pre-compute layout once — used by both CREATE and REPAIR prompts
+        const layout = computeLayout(plannedPanels);
+
         // ═══════════════════════════════════════════════════════════════════
         // PHASE 2 — CREATE
         // Build and write the complete dashboard in one update_dashboard call.
@@ -1025,10 +1207,11 @@ export async function runDashboardAgent(
                     break;
                 }
 
-                // REPAIR — give the LLM the gap report and the original findings
+                // REPAIR — give the LLM the gap report, original findings, and pre-computed layout
                 const repairPrompt = buildRepairPhasePrompt(
                     gaps, createdDashboardUid,
                     enrichedFindings, schemaRules(), context,
+                    layout,
                 );
 
                 const gapSummary = [

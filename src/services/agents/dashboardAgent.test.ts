@@ -1,4 +1,4 @@
-import { runDashboardAgent, assessDashboardCompleteness } from './dashboardAgent';
+import { runDashboardAgent, assessDashboardCompleteness, computeLayout } from './dashboardAgent';
 import type { PlanStep, DataFindings } from './types';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -220,6 +220,143 @@ describe('assessDashboardCompleteness', () => {
         );
         expect(gaps.emptyDashboard).toBe(true);
         expect(gaps.livePanelCount).toBe(0);
+    });
+});
+
+// ─── computeLayout unit tests ─────────────────────────────────────────────────
+
+describe('computeLayout', () => {
+    it('produces row panel first then data panels (correct interleaving)', () => {
+        const todos = [
+            { title: 'P1', rowGroup: 'Receivers', viz: 'timeseries', unit: 'reqps' },
+            { title: 'P2', rowGroup: 'Receivers', viz: 'timeseries', unit: 'reqps' },
+        ];
+        const layout = computeLayout(todos);
+        expect(layout[0].type).toBe('row');
+        expect(layout[0].title).toBe('Receivers');
+        expect(layout[1].type).toBe('data');
+        expect(layout[1].title).toBe('P1');
+        expect(layout[2].type).toBe('data');
+        expect(layout[2].title).toBe('P2');
+    });
+
+    it('assigns sequential ids starting from 1', () => {
+        const todos = [
+            { title: 'P1', rowGroup: 'R1', viz: 'timeseries', unit: '' },
+            { title: 'P2', rowGroup: 'R1', viz: 'timeseries', unit: '' },
+            { title: 'P3', rowGroup: 'R2', viz: 'stat', unit: '' },
+        ];
+        const layout = computeLayout(todos);
+        expect(layout.map(p => p.id)).toEqual([1, 2, 3, 4, 5]);
+    });
+
+    it('row header is always y=0 for first group, then increments correctly', () => {
+        const todos = [
+            { title: 'P1', rowGroup: 'Receivers', viz: 'timeseries', unit: '' },
+            { title: 'P2', rowGroup: 'Exporters', viz: 'timeseries', unit: '' },
+        ];
+        const layout = computeLayout(todos);
+        const rows = layout.filter(p => p.type === 'row');
+        expect(rows[0].gridPos.y).toBe(0);
+        // Second row must start after first group's panels
+        // Row header h=1 + data panel h=8 = y should be 9 for second row
+        expect(rows[1].gridPos.y).toBe(9);
+    });
+
+    it('timeseries panels use w=12 (2 across)', () => {
+        const todos = [
+            { title: 'P1', rowGroup: 'R1', viz: 'timeseries', unit: '' },
+            { title: 'P2', rowGroup: 'R1', viz: 'timeseries', unit: '' },
+        ];
+        const layout = computeLayout(todos);
+        const dataPanel1 = layout.find(p => p.title === 'P1')!;
+        const dataPanel2 = layout.find(p => p.title === 'P2')!;
+        expect(dataPanel1.gridPos.w).toBe(12);
+        expect(dataPanel1.gridPos.x).toBe(0);
+        expect(dataPanel2.gridPos.w).toBe(12);
+        expect(dataPanel2.gridPos.x).toBe(12);
+        // Both at same y (same visual row)
+        expect(dataPanel1.gridPos.y).toBe(dataPanel2.gridPos.y);
+    });
+
+    it('stat panels use w=6 (4 across)', () => {
+        const todos = [
+            { title: 'S1', rowGroup: 'Health', viz: 'stat', unit: 'short' },
+            { title: 'S2', rowGroup: 'Health', viz: 'stat', unit: 'short' },
+            { title: 'S3', rowGroup: 'Health', viz: 'stat', unit: 'short' },
+            { title: 'S4', rowGroup: 'Health', viz: 'stat', unit: 'short' },
+        ];
+        const layout = computeLayout(todos);
+        const data = layout.filter(p => p.type === 'data');
+        expect(data.map(p => p.gridPos.w)).toEqual([6, 6, 6, 6]);
+        expect(data.map(p => p.gridPos.x)).toEqual([0, 6, 12, 18]);
+        // All 4 on the same visual row (same y)
+        expect(new Set(data.map(p => p.gridPos.y)).size).toBe(1);
+    });
+
+    it('stat panels wrap after 4 across (x resets at col 24)', () => {
+        const todos = Array.from({ length: 5 }, (_, i) => ({
+            title: `S${i + 1}`, rowGroup: 'Health', viz: 'stat', unit: 'short',
+        }));
+        const layout = computeLayout(todos);
+        const data = layout.filter(p => p.type === 'data');
+        // First 4 on row 1, 5th wraps to row 2
+        const ys = data.map(p => p.gridPos.y);
+        expect(ys[0]).toBe(ys[1]);
+        expect(ys[0]).toBe(ys[3]);
+        expect(ys[4]).toBeGreaterThan(ys[0]);
+    });
+
+    it('timeseries panels wrap correctly after 2 across (x resets at col 24)', () => {
+        const todos = [
+            { title: 'P1', rowGroup: 'R1', viz: 'timeseries', unit: '' },
+            { title: 'P2', rowGroup: 'R1', viz: 'timeseries', unit: '' },
+            { title: 'P3', rowGroup: 'R1', viz: 'timeseries', unit: '' }, // wraps to next row
+        ];
+        const layout = computeLayout(todos);
+        const data = layout.filter(p => p.type === 'data');
+        expect(data[0].gridPos.y).toBe(data[1].gridPos.y); // P1 and P2 same row
+        expect(data[2].gridPos.y).toBeGreaterThan(data[1].gridPos.y); // P3 wraps
+        expect(data[2].gridPos.x).toBe(0); // P3 starts at x=0
+    });
+
+    it('no two data panels overlap in y+h space within a group', () => {
+        const todos = Array.from({ length: 6 }, (_, i) => ({
+            title: `P${i+1}`, rowGroup: 'R1', viz: 'timeseries', unit: '',
+        }));
+        const layout = computeLayout(todos);
+        const data = layout.filter(p => p.type === 'data');
+        for (let i = 0; i < data.length; i++) {
+            for (let j = i + 1; j < data.length; j++) {
+                const a = data[i].gridPos;
+                const b = data[j].gridPos;
+                const xOverlap = a.x < b.x + b.w && a.x + a.w > b.x;
+                const yOverlap = a.y < b.y + b.h && a.y + a.h > b.y;
+                expect(xOverlap && yOverlap).toBe(false);
+            }
+        }
+    });
+
+    it('row header gridPos has h=1, w=24, x=0', () => {
+        const todos = [{ title: 'P1', rowGroup: 'R1', viz: 'timeseries', unit: '' }];
+        const layout = computeLayout(todos);
+        const row = layout.find(p => p.type === 'row')!;
+        expect(row.gridPos).toMatchObject({ h: 1, w: 24, x: 0 });
+    });
+
+    it('panels in different groups have non-overlapping y ranges', () => {
+        const todos = [
+            { title: 'P1', rowGroup: 'R1', viz: 'timeseries', unit: '' },
+            { title: 'P2', rowGroup: 'R1', viz: 'timeseries', unit: '' },
+            { title: 'P3', rowGroup: 'R2', viz: 'timeseries', unit: '' },
+        ];
+        const layout = computeLayout(todos);
+        const r1Panels = layout.filter(p => p.rowGroup === 'R1' && p.type === 'data');
+        const r2Panels = layout.filter(p => p.rowGroup === 'R2' && p.type === 'data');
+        const r1MaxY = Math.max(...r1Panels.map(p => p.gridPos.y + p.gridPos.h));
+        const r2MinY = Math.min(...r2Panels.map(p => p.gridPos.y));
+        // Account for row header between groups
+        expect(r2MinY).toBeGreaterThanOrEqual(r1MaxY);
     });
 });
 
