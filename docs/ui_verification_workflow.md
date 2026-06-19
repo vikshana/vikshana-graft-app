@@ -88,9 +88,25 @@ To run headless (e.g. in a quiet background check):
 "command": ["npx", "-y", "chrome-devtools-mcp@latest", "--isolated", "--headless", "--screenshot-format=jpeg", "--no-usage-statistics"]
 ```
 
-## The Verification Loop (agent perspective)
+### OpenCode files
 
-For details on the exact loop the agent follows, see the skill at `.opencode/skill/verify-ui/SKILL.md`.
+| File | Purpose |
+|---|---|
+| `opencode.json` | Chrome DevTools MCP server config |
+| `.opencode/commands/verify-ui.md` | Slash command — invoked when you type `/verify-ui` or use Ctrl+P → Commands → `verify-ui` |
+| `.opencode/skills/verify-ui/SKILL.md` | Skill — the full verification loop instructions loaded by the command |
+
+## How to Invoke
+
+Two equivalent entry points:
+
+1. **Slash command** (recommended): type `/verify-ui` in the OpenCode TUI, or use **Ctrl+P → Commands → `verify-ui`**. Optionally pass a scenario:
+   ```
+   /verify-ui check the chat history page
+   ```
+2. **Natural language**: describe the task and the agent loads the skill automatically, e.g. *"verify the prompt library renders correctly"*.
+
+The `/verify-ui` command is registered in `.opencode/commands/verify-ui.md`. It instructs the agent to load the `verify-ui` skill from `.opencode/skills/verify-ui/SKILL.md`, which contains the full step-by-step verification loop.
 
 High level:
 

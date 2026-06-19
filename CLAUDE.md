@@ -231,13 +231,12 @@ After making frontend changes, **always verify the result in the actual running 
 
 ### How to trigger
 
-Load the `verify-ui` skill before starting a browser-driven verification pass:
+Two equivalent entry points — both load the same verification loop:
 
-```
-Load skill: verify-ui
-```
+1. **Slash command** (quick): type `/verify-ui` in the OpenCode TUI, or use Ctrl+P → Commands → `verify-ui`. Optionally pass a scenario: `/verify-ui check the history page`.
+2. **Natural language**: describe what you want verified (e.g. "verify the chat landing page") and the agent will load the skill automatically.
 
-The skill encodes the full verification loop: rebuild gate → plugin reload gate → LLM health gate → drive headed Chrome → inspect console + network → screenshot → assert → iterate → hand off.
+The command lives at `.opencode/commands/verify-ui.md`. It delegates to the `verify-ui` skill at `.opencode/skills/verify-ui/SKILL.md`, which encodes the full verification loop: rebuild gate → plugin reload gate → LLM health gate → drive headed Chrome → inspect console + network → screenshot → assert → iterate → hand off.
 
 ### Quick reference
 
