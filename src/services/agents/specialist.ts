@@ -1,6 +1,10 @@
 import { llm } from '@grafana/llm';
 import type { ToolExecution } from '../../types/llm.types';
-import type { PlanStep, SpecialistResult, DataFindings, LokiFindings, PrometheusFindings } from './types';
+import {
+    PlanStep, SpecialistResult, DataFindings, LokiFindings, PrometheusFindings,
+    ValidatedLokiQuery, ValidatedPrometheusQuery, PanelUnit, MetricType, SuggestedViz,
+    PanelThreshold,
+} from './types';
 import { TOOL_CATEGORIES } from '../toolFilter';
 import { normalizeToolArgs } from '../toolUtils';
 
@@ -57,7 +61,12 @@ const LOKI_OUTPUT_SCHEMA = `{
   "datasourceName": "<name of the Loki datasource>",
   "labels": { "<label_name>": ["<value1>", "<value2>"] },
   "validatedQueries": [
-    { "description": "<what this query shows>", "logql": "<the LogQL expression>" }
+    {
+      "description": "<what this query shows>",
+      "logql": "<the LogQL expression>",
+      "suggestedViz": "<one of: logs | timeseries | stat>",
+      "unit": "<Grafana unit id, e.g. short | none | bytes | s — omit if not applicable>"
+    }
   ]
 }`;
 
@@ -67,8 +76,20 @@ const LOKI_OUTPUT_SCHEMA = `{
 const PROMETHEUS_OUTPUT_SCHEMA = `{
   "datasourceUid": "<uid of the Prometheus datasource you used>",
   "datasourceName": "<name of the Prometheus datasource>",
+  "labels": { "<label_name>": ["<value1>", "<value2>"] },
   "validatedQueries": [
-    { "description": "<what this query shows>", "promql": "<the PromQL expression>" }
+    {
+      "description": "<what this query shows>",
+      "promql": "<the PromQL expression>",
+      "metricType": "<one of: counter | gauge | histogram | summary>",
+      "suggestedViz": "<one of: timeseries | stat | gauge | bargauge | heatmap | table>",
+      "unit": "<Grafana unit id — e.g. s for seconds, bytes, percent, reqps, short>",
+      "thresholds": [
+        { "value": null, "color": "green" },
+        { "value": 0.8, "color": "orange" },
+        { "value": 0.95, "color": "red" }
+      ]
+    }
   ]
 }`;
 
@@ -96,6 +117,16 @@ ${labelDiscovery}
 - Only include queries that actually returned results when you called ${queryTool}. If a query returns no data (empty result, no streams, no series), revise the expression or omit it entirely.
 - NEVER include a query in your output that you did not explicitly call ${queryTool} with and confirm returned data.
 - When you output the JSON, copy the EXACT expression string you used in the ${queryTool} call — do not rephrase, reformat, or reconstruct it from memory.
+
+Presentation metadata rules (fill for every query in validatedQueries):
+- suggestedViz: choose the best Grafana visualization for the data. ${hasLoki
+        ? 'Use "logs" for raw log streams, "timeseries" for rate/count-over-time metrics, "stat" for a single current value.'
+        : 'Use "timeseries" for time-varying metrics, "stat" for single current values (e.g. uptime, version), "gauge" for bounded ratios/percentages (0–1 or 0–100), "bargauge" for comparing values across labels, "heatmap" for histogram _bucket metrics, "table" for multi-column label breakdowns.'}
+- unit: set the Grafana fieldConfig unit id that matches the metric semantics. ${hasLoki
+        ? 'Examples: "short" for counts, "reqps" for request rates, "s" for durations, "bytes" for sizes, "none" if not applicable.'
+        : 'Examples: "s" for _seconds/_duration, "ms" for _milliseconds, "bytes" for _bytes, "percent" for ratios×100, "percentunit" for ratios 0–1, "reqps" for rate() on _total metrics, "short" for dimensionless counts. Omit if genuinely not applicable.'}
+${hasPrometheus ? `- metricType: "histogram" for _bucket metrics, "counter" for _total/_count, "gauge" for up/down metrics, "summary" for _quantile metrics.
+- thresholds: for stat/gauge/bargauge panels, provide 3 steps — base (null→green), warning→orange, critical→red. Use domain-appropriate values. Omit for timeseries/heatmap.` : ''}
 
 Output format (required): when you have finished, respond with ONLY a JSON object matching this schema — no prose, no markdown fences:
 ${schema}
@@ -155,6 +186,44 @@ function isPrometheusResultNonEmpty(raw: string): boolean {
  * `nonEmpty` is true when the result contained at least one stream/series.
  */
 type ExecutedQueryRecord = Map<string, boolean>;
+
+// Valid sets for presentation metadata — used to sanitise LLM output.
+const VALID_VIZ = new Set<SuggestedViz>(['timeseries', 'stat', 'gauge', 'bargauge', 'table', 'heatmap', 'logs']);
+const VALID_METRIC_TYPE = new Set<MetricType>(['counter', 'gauge', 'histogram', 'summary']);
+
+/**
+ * Extracts and sanitises per-query presentation metadata from the raw LLM
+ * output object. Unknown/invalid values are dropped so the enrichment layer
+ * can fill them with deterministic defaults.
+ */
+function extractQueryMeta(raw: any, exprField: string): Record<string, unknown> {
+    const out: Record<string, unknown> = {
+        description: raw.description ?? '',
+        [exprField]: raw[exprField],
+    };
+
+    if (typeof raw.unit === 'string' && raw.unit.length > 0) {
+        out.unit = raw.unit as PanelUnit;
+    }
+    if (typeof raw.suggestedViz === 'string' && VALID_VIZ.has(raw.suggestedViz as SuggestedViz)) {
+        out.suggestedViz = raw.suggestedViz as SuggestedViz;
+    }
+    if (typeof raw.metricType === 'string' && VALID_METRIC_TYPE.has(raw.metricType as MetricType)) {
+        out.metricType = raw.metricType as MetricType;
+    }
+    if (Array.isArray(raw.thresholds) && raw.thresholds.length > 0) {
+        const thresholds: PanelThreshold[] = raw.thresholds
+            .filter((t: any) => typeof t === 'object' && t !== null &&
+                (t.value === null || typeof t.value === 'number') &&
+                typeof t.color === 'string')
+            .map((t: any) => ({ value: t.value, color: t.color }));
+        if (thresholds.length > 0) {
+            out.thresholds = thresholds;
+        }
+    }
+
+    return out;
+}
 
 /**
  * Code-enforced query validation gate (per Anthropic best practices).
@@ -247,14 +316,14 @@ function parseDataFindings(
                 return false;
             }
             return true;
-        });
+        }).map(q => extractQueryMeta(q, exprField));
 
         if (hasLoki) {
             const findings: LokiFindings = {
                 datasourceUid: parsed.datasourceUid,
                 datasourceName: parsed.datasourceName ?? '',
                 labels: parsed.labels ?? {},
-                validatedQueries: filteredQueries,
+                validatedQueries: filteredQueries as unknown as ValidatedLokiQuery[],
             };
             return { loki: findings };
         }
@@ -262,7 +331,8 @@ function parseDataFindings(
         const findings: PrometheusFindings = {
             datasourceUid: parsed.datasourceUid,
             datasourceName: parsed.datasourceName ?? '',
-            validatedQueries: filteredQueries,
+            labels: parsed.labels ?? {},
+            validatedQueries: filteredQueries as unknown as ValidatedPrometheusQuery[],
         };
         return { prometheus: findings };
     } catch {
