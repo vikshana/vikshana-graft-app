@@ -1,10 +1,13 @@
 import { getBackendSrv, getTemplateSrv, getDataSourceSrv } from '@grafana/runtime';
 
 // Import types from centralized location
-import type { DashboardContext, UserContext, DataSourceContext } from '../types/context.types';
+import type {
+    DashboardContext, UserContext, DataSourceContext,
+    DashboardSchemaCapability, GrafanaBuildInfo,
+} from '../types/context.types';
 
 // Re-export for backward compatibility
-export type { DashboardContext, UserContext, DataSourceContext };
+export type { DashboardContext, UserContext, DataSourceContext, DashboardSchemaCapability, GrafanaBuildInfo };
 
 export const contextService = {
     getDashboardUid(): string | null {
@@ -32,6 +35,25 @@ export const contextService = {
             type: ds.type,
             uid: ds.uid,
         }));
+    },
+
+    /**
+     * Returns the running Grafana version and derived dashboard schema capability.
+     * Reads synchronously from the Grafana boot config — no network call required.
+     *
+     * Schema capability heuristic:
+     *   major ≥ 12 → 'v2-capable' (app-platform / dashboard.grafana.app API may be available)
+     *   otherwise  → 'v1' (Classic panels[]/templating.list only)
+     *
+     * This is a NECESSARY but not SUFFICIENT condition for V2 writes — the MCP server
+     * must also support it (mcp-grafana ≥ v0.16.0). The dashboard agent performs an
+     * authoritative runtime probe via get_dashboard_by_uid after creating the skeleton.
+     */
+    getBuildInfo(): GrafanaBuildInfo {
+        const version = (window as any).grafanaBootData?.settings?.buildInfo?.version ?? '0.0.0';
+        const major = parseInt(version.split('.')[0] ?? '0', 10);
+        const dashboardSchema: DashboardSchemaCapability = major >= 12 ? 'v2-capable' : 'v1';
+        return { version, dashboardSchema };
     },
 
     async getCurrentDashboard(): Promise<DashboardContext> {

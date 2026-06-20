@@ -70,7 +70,10 @@ describe('runPlanner', () => {
         );
     });
 
-    it('includes enabled category names in the prompt', async () => {
+    it('includes enabled category names in the prompt so the model knows available tool types', async () => {
+        // The planner must receive the enabled category names — without them the model
+        // cannot make valid toolCategories assignments. This is a structural contract,
+        // not a prose-wording check.
         mockChatCompletions.mockResolvedValue(makePlanResponse({
             complexity: 'simple',
             reasoning: 'test',
@@ -80,12 +83,15 @@ describe('runPlanner', () => {
         await runPlanner('test', '', ['loki', 'prometheus']);
 
         const call = mockChatCompletions.mock.calls[0][0];
-        const userContent = call.messages.find((m: any) => m.role === 'user')?.content ?? '';
-        expect(userContent).toContain('loki');
-        expect(userContent).toContain('prometheus');
+        const allContent = call.messages.map((m: any) => m.content ?? '').join('\n');
+        expect(allContent).toContain('loki');
+        expect(allContent).toContain('prometheus');
     });
 
-    it('includes the conversation digest in the prompt when provided', async () => {
+    it('includes the conversation digest text verbatim so the model can resolve references', async () => {
+        // The digest content must appear in the prompt — the model needs the actual
+        // conversation text to resolve references like "it" or "those services".
+        // We assert on the digest content, not the section heading.
         mockChatCompletions.mockResolvedValue(makePlanResponse({
             complexity: 'complex',
             reasoning: 'follow-up dashboard',
@@ -103,9 +109,9 @@ describe('runPlanner', () => {
         );
 
         const call = mockChatCompletions.mock.calls[0][0];
-        const userContent = call.messages.find((m: any) => m.role === 'user')?.content ?? '';
-        expect(userContent).toContain('Recent conversation');
-        expect(userContent).toContain('The logs come from Loki under unknown_service.');
+        const allContent = call.messages.map((m: any) => m.content ?? '').join('\n');
+        // Digest content must appear verbatim (so the model can resolve "it")
+        expect(allContent).toContain('The logs come from Loki under unknown_service.');
     });
 
     it('omits the conversation block when no digest is provided', async () => {

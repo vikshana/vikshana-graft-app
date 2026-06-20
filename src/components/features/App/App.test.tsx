@@ -101,7 +101,7 @@ describe('Components/App', () => {
     } as unknown as AppRootProps;
   });
 
-  test('renders without an error"', async () => {
+  test('renders without an error', async () => {
     const { queryByText } = render(
       <MemoryRouter>
         <App {...props} />

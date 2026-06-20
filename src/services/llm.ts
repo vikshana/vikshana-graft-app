@@ -2,6 +2,7 @@ import { llm } from '@grafana/llm';
 
 // Import types from centralized location
 import type { Message, ToolExecution } from '../types/llm.types';
+import { normalizeToolArgs } from './toolUtils';
 
 // Re-export types for backward compatibility
 export type { ToolExecution };
@@ -153,7 +154,7 @@ export const llmService = {
                                 throw new Error('MCP Client not available');
                             }
 
-                            const args = JSON.parse(toolCall.function.arguments);
+                            const args = normalizeToolArgs(JSON.parse(toolCall.function.arguments));
                             const result = await mcpClient.callTool({
                                 name: toolCall.function.name,
                                 arguments: args,

@@ -192,6 +192,7 @@ describe('runOrchestration', () => {
                 expect.anything(),        // onUpdate
                 expect.any(Array),        // preferredCategories
                 expect.any(String),       // conversationDigest
+                expect.any(String),       // schemaCapabilityHint
             );
         });
 
@@ -214,6 +215,7 @@ describe('runOrchestration', () => {
                 expect.anything(), expect.anything(),
                 expect.any(Array),   // preferredCategories
                 expect.any(String),  // conversationDigest
+                expect.any(String),  // schemaCapabilityHint
             );
         });
 
@@ -236,6 +238,7 @@ describe('runOrchestration', () => {
                 expect.anything(), expect.anything(),
                 expect.any(Array),   // preferredCategories
                 expect.any(String),  // conversationDigest
+                expect.any(String),  // schemaCapabilityHint
             );
         });
 
@@ -524,6 +527,7 @@ describe('sanitisePlan (Fix 1: code-enforced plan gate)', () => {
             expect.anything(), expect.anything(),
             expect.any(Array),   // preferredCategories
             expect.any(String),  // conversationDigest
+            expect.any(String),  // schemaCapabilityHint
         );
     });
 });
@@ -691,6 +695,7 @@ describe('sanitisePlan — data step injection for lone dashboard steps', () => 
             expect.anything(), expect.anything(),
             expect.any(Array),   // preferredCategories
             expect.any(String),  // conversationDigest
+            expect.any(String),  // schemaCapabilityHint
         );
     });
 
@@ -815,5 +820,81 @@ describe('inferDataCategoriesForDashboard', () => {
 
     it('scopes to enabled categories — loki keyword but only prometheus enabled', () => {
         expect(inferDataCategoriesForDashboard('logs dashboard', ['prometheus'] as any)).toEqual(['prometheus']);
+    });
+});
+
+// ─── extractSchemaCapabilityFromContext ───────────────────────────────────────
+// This function is the only mechanism by which V2 schema capability is
+// communicated from the context string into the orchestrator. A broken regex
+// silently defaults to 'v1', which is safe but means V2 never activates.
+
+describe('extractSchemaCapabilityFromContext — schema capability extraction', () => {
+    const userMsg: Message = { role: 'user', content: 'build a dashboard' };
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+        mockRunPlanner.mockResolvedValue({
+            complexity: 'complex',
+            reasoning: 'dashboard',
+            steps: [{
+                id: 'step_1', description: 'Build dashboard',
+                toolCategories: ['dashboards'], dependsOn: [],
+            }],
+        });
+        mockRunDashboardAgent.mockResolvedValue({
+            stepId: 'step_1', status: 'success', summary: 'done', toolExecutions: [],
+        });
+        mockRunSynthesiser.mockResolvedValue('done');
+    });
+
+    it('passes v2-capable to dashboard agent when context contains "Dashboard schema capability: v2-capable"', async () => {
+        const contextWithV2 = 'Grafana version: 12.3.0\nDashboard schema capability: v2-capable\nUser: testuser';
+
+        await runOrchestration(
+            [userMsg], contextWithV2, [], {}, 'standard', 10,
+            new AbortController().signal, undefined, jest.fn()
+        );
+
+        expect(mockRunDashboardAgent).toHaveBeenCalledWith(
+            expect.anything(), expect.anything(), expect.anything(),
+            expect.anything(), expect.anything(), expect.anything(),
+            expect.anything(), expect.anything(), expect.anything(),
+            expect.any(Array), expect.any(String),
+            'v2-capable',
+        );
+    });
+
+    it('passes v1 to dashboard agent when context contains "Dashboard schema capability: v1"', async () => {
+        const contextWithV1 = 'Grafana version: 11.0.0\nDashboard schema capability: v1\nUser: testuser';
+
+        await runOrchestration(
+            [userMsg], contextWithV1, [], {}, 'standard', 10,
+            new AbortController().signal, undefined, jest.fn()
+        );
+
+        expect(mockRunDashboardAgent).toHaveBeenCalledWith(
+            expect.anything(), expect.anything(), expect.anything(),
+            expect.anything(), expect.anything(), expect.anything(),
+            expect.anything(), expect.anything(), expect.anything(),
+            expect.any(Array), expect.any(String),
+            'v1',
+        );
+    });
+
+    it('defaults to v1 when context has no schema capability line', async () => {
+        const contextNoSchema = 'Grafana version: 12.0.0\nUser: testuser';
+
+        await runOrchestration(
+            [userMsg], contextNoSchema, [], {}, 'standard', 10,
+            new AbortController().signal, undefined, jest.fn()
+        );
+
+        expect(mockRunDashboardAgent).toHaveBeenCalledWith(
+            expect.anything(), expect.anything(), expect.anything(),
+            expect.anything(), expect.anything(), expect.anything(),
+            expect.anything(), expect.anything(), expect.anything(),
+            expect.any(Array), expect.any(String),
+            'v1',
+        );
     });
 });

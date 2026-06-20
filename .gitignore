@@ -55,6 +55,7 @@ ci/
 
 # Temporary files
 .temp/
+services/
 
 # UI verification screenshots (ephemeral, per-session evidence)
 /output/*.jpeg

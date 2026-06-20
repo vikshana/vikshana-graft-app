@@ -44,3 +44,4 @@ jobs:
           module: ${{ steps.find-module-ts.outputs.modulets }}
           comment-pr: 'no'
           fail-if-incompatible: 'yes'
+          targets: '@grafana/data,@grafana/ui,@grafana/runtime,@grafana/schema'

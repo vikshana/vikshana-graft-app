@@ -51,7 +51,12 @@ export async function runSynthesiser(
 
     const resultsSections: string[] = [];
 
+    // Collect any dashboard UIDs extracted in code by the dashboard agent.
+    // These are guaranteed even if the LLM omitted the link from its summary.
+    const dashboardUids: string[] = [];
+
     for (const r of successResults) {
+        if (r.dashboardUid) { dashboardUids.push(r.dashboardUid); }
         resultsSections.push(`### Step ${r.stepId} (succeeded)\n${r.summary}`);
     }
 
@@ -60,6 +65,13 @@ export async function runSynthesiser(
             `### Step ${r.stepId} (failed)\nError: ${r.error ?? 'Unknown error'}\nPartial output: ${r.summary}`
         );
     }
+
+    // Append structured dashboard link context so the synthesiser LLM can always
+    // produce a link — even when the dashboard agent's summary didn't include one.
+    const dashboardContext = dashboardUids.length > 0
+        ? `\n\nDashboard(s) created or updated (include clickable markdown links for all of these):\n` +
+          dashboardUids.map(uid => `- [Open dashboard](/d/${uid}) (uid: ${uid})`).join('\n')
+        : '';
 
     const systemPrompt = `You are the final response agent for Graft, an AI assistant embedded in Grafana.
 You have been given summaries of work completed by specialist agents in response to a user request.
@@ -78,7 +90,7 @@ Guidelines:
 ${userMessage}
 
 Agent results:
-${resultsSections.join('\n\n')}`;
+${resultsSections.join('\n\n')}${dashboardContext}`;
 
     const response = await llm.chatCompletions({
         model: modelType === 'thinking' ? llm.Model.LARGE : llm.Model.BASE,

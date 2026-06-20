@@ -75,12 +75,10 @@ describe('StepToolCallContainer', () => {
             toolExecutions: [{ name: 'query_loki_logs', status: 'error', error: 'timeout' }],
             error: 'timeout',
         })]} />);
-        // The tool row is rendered, not the step-level error block
+        // The tool row is rendered — tool name visible
         expect(screen.getByText('query_loki_logs')).toBeInTheDocument();
-        // The step-level error div (no tool rows guard) should NOT be present as duplicate
-        const errorTexts = screen.getAllByText('timeout');
-        // Only from the ToolRow error details, not a second step-level error block
-        expect(errorTexts.length).toBeGreaterThanOrEqual(0); // error details only visible when expanded
+        // The generic step-level error fallback text should NOT appear when tool rows are present
+        expect(screen.queryByText('Step failed with an unknown error.')).not.toBeInTheDocument();
     });
 
     it('collapses when step transitions from running to done', () => {
