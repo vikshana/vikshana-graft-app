@@ -420,17 +420,20 @@ ${context ? `## Current Grafana context\n${context}` : ''}
   "panels": [
     {
       "title": "<panel title>",
-      "description": "<what this panel shows>",
+      "description": "<what this panel shows and why it matters>",
       "query": "<EXACT PromQL/LogQL from findings, OR a PromQL expression using ONLY metric names from the available metrics list above>",
       "datasourceType": "<prometheus|loki>",
       "viz": "<timeseries|stat|gauge|bargauge|heatmap|table|logs>",
-      "unit": "<grafana unit id or empty string>",
+      "unit": "<grafana unit id — e.g. short, bytes, s, ms, percent, percentunit, reqps, Bps, cps>",
+      "legendFormat": "<label template for multi-series panels — e.g. {{job}}, {{pod}}, {{method}}; use '' for single-series panels>",
       "rowGroup": "<row title this panel belongs to>",
-      "thresholds": [{"value": null, "color": "green"}, ...] // only for stat/gauge/bargauge
+      "thresholds": [{"value": null, "color": "green"}, {"value": 0.8, "color": "orange"}, {"value": 0.95, "color": "red"}],
+      "min": 0,
+      "max": 1
     }
   ],
   "variables": [
-    { "name": "<var_name>", "label": "<Human Label>", "query": "label_values(<metric_from_available_list>, <label>)", "datasourceType": "<prometheus|loki>" }
+    { "name": "<var_name>", "label": "<Human Label>", "query": "label_values(<metric>, <label_name>)", "datasourceType": "<prometheus|loki>" }
   ],
   "timeRange": { "from": "now-1h", "to": "now" },
   "layoutHint": "<none|RED|USE|golden-signals>"
@@ -441,7 +444,10 @@ Rules:
 - If an available metrics list is shown above: write PromQL expressions using ONLY those exact metric names. Do NOT use metric names outside that list. Do NOT guess names that "should" exist.
 - If NO pre-validated queries AND NO available metrics list: set query to "DISCOVER" for every panel.
 - Include ONE entry per panel. Assign each panel to a rowGroup.
-- Wire template variables into queries: use {receiver=~"$receiver"}, {exporter=~"$exporter"}, {job=~"$job"} etc. where the label exists on the metric.
+- legendFormat: choose the label that best differentiates series (look at labels in the findings/available metrics). Set to "" for single-series panels. This is generic — use whatever label the metric actually has (e.g. {{job}}, {{pod}}, {{instance}}, {{service_name}}, {{datname}}).
+- thresholds: include only for stat/gauge/bargauge. Set values appropriate for the metric domain (e.g. 0.9/0.95 for error rates, 200000000/500000000 for bytes). Omit for timeseries/heatmap/logs/table.
+- min/max: include only for gauge panels to set the axis range (e.g. min:0, max:1 for a ratio). Omit for all other viz types.
+- Wire template variables into queries where the label exists on the metric (e.g. {job=~"$job"}, {instance=~"$instance"} — use the actual label names, not assumed ones).
 - Output only the JSON object. No markdown fences, no explanation.`;
 }
 
@@ -607,6 +613,171 @@ function renderLayoutForPrompt(layout: LayoutPanel[]): string {
     }
     flush();
     return blocks.join('\n\n');
+}
+
+// ─── Code-built dashboard JSON ────────────────────────────────────────────────
+
+/**
+ * Builds a complete Grafana v1 dashboard JSON object from the PLAN todo list,
+ * pre-computed layout, and datasource findings.
+ *
+ * Fully generic: works for any datasource and metric domain (OTel, Kubernetes,
+ * Postgres, nginx, JVM, …). The LLM's PLAN output drives all semantic decisions
+ * (queries, grouping, viz, units, thresholds, legendFormat). Code drives all
+ * structural decisions (gridPos, JSON envelope, fieldConfig shape).
+ */
+export function buildDashboardJson(
+    layout: LayoutPanel[],
+    panelTodos: any[],
+    variables: any[],
+    timeRange: any,
+    dataFindings: DataFindings,
+    title: string,
+    description: string,
+): Record<string, unknown> {
+    // Resolve default datasource from findings
+    const defaultDs = dataFindings.prometheus
+        ? { type: 'prometheus', uid: dataFindings.prometheus.datasourceUid }
+        : dataFindings.loki
+        ? { type: 'loki', uid: dataFindings.loki.datasourceUid }
+        : null;
+
+    // Map planned panel titles to their todo data (case-insensitive lookup)
+    const todoByTitle = new Map<string, any>();
+    for (const p of panelTodos) {
+        todoByTitle.set((p.title ?? '').toLowerCase().trim(), p);
+    }
+
+    const panels: any[] = [];
+
+    for (const lp of layout) {
+        if (lp.type === 'row') {
+            panels.push({
+                id: lp.id,
+                title: lp.title,
+                type: 'row',
+                collapsed: false,
+                panels: [],
+                gridPos: lp.gridPos,
+            });
+            continue;
+        }
+
+        const todo = todoByTitle.get((lp.title ?? '').toLowerCase().trim())
+            ?? { query: '', unit: lp.unit ?? 'short', viz: lp.viz ?? 'timeseries' };
+
+        const expr = (typeof todo.query === 'string' && todo.query !== 'DISCOVER') ? todo.query : '';
+        const viz = lp.viz ?? todo.viz ?? 'timeseries';
+        const unit = lp.unit || todo.unit || 'short';
+        const panelDesc = todo.description || lp.title;
+
+        // Datasource: use per-panel type from todo, fall back to default
+        const todoDsType = todo.datasourceType ?? (dataFindings.prometheus ? 'prometheus' : 'loki');
+        const panelDs = todoDsType === 'loki' && dataFindings.loki
+            ? { type: 'loki', uid: dataFindings.loki.datasourceUid }
+            : defaultDs ?? { type: 'prometheus', uid: '' };
+
+        const isStat = viz === 'stat' || viz === 'gauge' || viz === 'bargauge';
+
+        // fieldConfig: units + thresholds (only for stat-family panels)
+        const fieldConfig: any = {
+            defaults: { unit, color: { mode: isStat ? 'thresholds' : 'palette-classic' } },
+            overrides: [],
+        };
+        if (isStat) {
+            const hasThresholds = Array.isArray(todo.thresholds) && todo.thresholds.length > 0;
+            fieldConfig.defaults.thresholds = {
+                mode: 'absolute',
+                steps: hasThresholds
+                    ? todo.thresholds.map((t: any) => ({
+                        value: t.value ?? null,
+                        color: t.color ?? 'green',
+                    }))
+                    : [{ value: null, color: 'green' }],
+            };
+            // Gauge min/max — only when explicitly provided in the plan
+            if (viz === 'gauge') {
+                if (todo.min !== undefined && todo.min !== null) {
+                    fieldConfig.defaults.min = todo.min;
+                }
+                if (todo.max !== undefined && todo.max !== null) {
+                    fieldConfig.defaults.max = todo.max;
+                }
+            }
+        }
+
+        // Panel options by viz type
+        const options: any = viz === 'logs'
+            ? { dedupStrategy: 'none', showTime: true }
+            : (viz === 'stat' || viz === 'bargauge')
+            ? { reduceOptions: { calcs: ['lastNotNull'] }, colorMode: 'background' }
+            : viz === 'gauge'
+            ? { reduceOptions: { calcs: ['lastNotNull'] } }
+            : viz === 'heatmap'
+            ? { calculate: false, color: { mode: 'spectrum' }, yAxis: { unit } }
+            : { tooltip: { mode: 'multi', sort: 'desc' },
+                legend: { displayMode: 'list', placement: 'bottom' } };
+
+        // legendFormat: use the plan's value; empty string means Grafana auto-labels
+        // (generic — no domain-specific fallback)
+        const legendFormat = typeof todo.legendFormat === 'string' ? todo.legendFormat : '';
+
+        const targets = expr ? [{
+            refId: 'A',
+            datasource: panelDs,
+            expr,
+            legendFormat,
+        }] : [];
+
+        panels.push({
+            id: lp.id,
+            title: lp.title,
+            description: panelDesc,
+            type: viz,
+            gridPos: lp.gridPos,
+            fieldConfig,
+            options,
+            targets,
+        });
+    }
+
+    // Template variables
+    const templatingList = variables.map((v: any, i: number) => {
+        const varDs = v.datasourceType === 'loki' && dataFindings.loki
+            ? { type: 'loki', uid: dataFindings.loki.datasourceUid }
+            : defaultDs ?? { type: 'prometheus', uid: '' };
+        return {
+            name: v.name,
+            label: v.label || v.name,
+            type: 'query',
+            datasource: varDs,
+            query: v.query,
+            refresh: 2,
+            includeAll: true,
+            multi: true,
+            allValue: '.*',
+            sort: 1,
+            current: {},
+            options: [],
+            hide: 0,
+            id: `var_${i}`,
+        };
+    });
+
+    return {
+        title,
+        description,
+        uid: '',
+        id: null,
+        schemaVersion: 38,
+        time: { from: timeRange?.from ?? 'now-1h', to: timeRange?.to ?? 'now' },
+        timepicker: {},
+        refresh: '30s',
+        tags: [],
+        panels,
+        templating: { list: templatingList },
+        annotations: { list: [] },
+    };
 }
 
 /**
@@ -1180,31 +1351,73 @@ export async function runDashboardAgent(
         // Retry up to 2 times on error.
         // ═══════════════════════════════════════════════════════════════════
 
-        const createSystemPrompt = buildCreatePhasePrompt(
-            plannedPanels, plannedVariables, plannedTimeRange,
-            enrichedFindings, context, conversationDigest,
-            resolvedSchema, schemaRules(), preferredCategories,
-        );
+        // ═══════════════════════════════════════════════════════════════════
+        // PHASE 2 — CREATE (code-built, not LLM-built)
+        //
+        // Layout, gridPos, units, and viz type are determined entirely in code
+        // using buildDashboardJson + computeLayout. The LLM only supplied
+        // queries, titles, and descriptions in the PLAN phase.
+        //
+        // This is the key fix: the model can no longer produce incorrect
+        // gridPos values, mixed heights, or wrong stat/timeseries ordering.
+        //
+        // Gate: update_dashboard succeeded and UID extracted.
+        // ═══════════════════════════════════════════════════════════════════
 
-        let createAttempt = 0;
-        let createResult: LoopResult | undefined;
+        if (plannedPanels.length > 0 && mcpClient) {
+            // Generate a descriptive title from the user message
+            const dashTitle = userMessage.length < 60
+                ? userMessage.replace(/^(create|build|make|add)\s+a?\s*/i, '').trim()
+                    .replace(/\b\w/g, c => c.toUpperCase())
+                : step.description;
+            const dashDesc = `Auto-generated dashboard for: ${userMessage}`;
 
-        while (createAttempt < 2 && !createdDashboardUid) {
-            if (signal.aborted) { throw new Error('Aborted'); }
-            createAttempt++;
-
-            createResult = await runAgentLoop(
-                createSystemPrompt, userMessage,
-                scopedTools, mcpClient, createBudget, signal,
-                step, toolExecutions, onUpdate,
-                resolvedSchema, enrichedFindings, context,
-                preferredCategories, conversationDigest, createdDashboardUid,
+            const dashboardJson = buildDashboardJson(
+                layout, plannedPanels, plannedVariables, plannedTimeRange,
+                enrichedFindings, dashTitle, dashDesc,
             );
 
-            createdDashboardUid = createResult.createdDashboardUid;
-            resolvedSchema = createResult.resolvedSchema;
-            v2FallbackNote = createResult.v2FallbackNote;
-            finalContent = createResult.content;
+            try {
+                const rawResult = await callTool(
+                    mcpClient, 'update_dashboard',
+                    { dashboard: dashboardJson, folderUid: '', overwrite: false },
+                    toolExecutions, wrapOnUpdate,
+                );
+                createdDashboardUid = extractDashboardUid(rawResult);
+                finalContent = createdDashboardUid
+                    ? `Dashboard created: [Open dashboard](/d/${createdDashboardUid})`
+                    : 'Dashboard creation failed — no UID returned.';
+            } catch (err: any) {
+                finalContent = `Dashboard creation failed: ${err.message}`;
+            }
+        } else if (plannedPanels.length === 0) {
+            // No panels from PLAN — fall back to LLM-driven CREATE for discovery
+            const createSystemPrompt = buildCreatePhasePrompt(
+                plannedPanels, plannedVariables, plannedTimeRange,
+                enrichedFindings, context, conversationDigest,
+                resolvedSchema, schemaRules(), preferredCategories,
+            );
+
+            let createAttempt = 0;
+            let createResult: LoopResult | undefined;
+
+            while (createAttempt < 2 && !createdDashboardUid) {
+                if (signal.aborted) { throw new Error('Aborted'); }
+                createAttempt++;
+
+                createResult = await runAgentLoop(
+                    createSystemPrompt, userMessage,
+                    scopedTools, mcpClient, createBudget, signal,
+                    step, toolExecutions, onUpdate,
+                    resolvedSchema, enrichedFindings, context,
+                    preferredCategories, conversationDigest, createdDashboardUid,
+                );
+
+                createdDashboardUid = createResult.createdDashboardUid;
+                resolvedSchema = createResult.resolvedSchema;
+                v2FallbackNote = createResult.v2FallbackNote;
+                finalContent = createResult.content;
+            }
         }
 
         // ═══════════════════════════════════════════════════════════════════
