@@ -1,4 +1,4 @@
-import { getBackendSrv, getTemplateSrv, getDataSourceSrv, config } from '@grafana/runtime';
+import { getBackendSrv, getTemplateSrv, getDataSourceSrv } from '@grafana/runtime';
 
 // Import types from centralized location
 import type {
@@ -50,7 +50,7 @@ export const contextService = {
      * authoritative runtime probe via get_dashboard_by_uid after creating the skeleton.
      */
     getBuildInfo(): GrafanaBuildInfo {
-        const version = config.buildInfo?.version ?? '0.0.0';
+        const version = (window as any).grafanaBootData?.settings?.buildInfo?.version ?? '0.0.0';
         const major = parseInt(version.split('.')[0] ?? '0', 10);
         const dashboardSchema: DashboardSchemaCapability = major >= 12 ? 'v2-capable' : 'v1';
         return { version, dashboardSchema };
