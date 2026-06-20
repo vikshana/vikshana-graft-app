@@ -358,6 +358,77 @@ describe('computeLayout', () => {
         // Account for row header between groups
         expect(r2MinY).toBeGreaterThanOrEqual(r1MaxY);
     });
+
+    // ── Adaptive stat-width rules ─────────────────────────────────────────
+
+    it('adaptive: 1 stat alone → w=24 (full-width banner)', () => {
+        const todos = [
+            { title: 'Uptime', rowGroup: 'Health', viz: 'stat', unit: 's' },
+        ];
+        const layout = computeLayout(todos);
+        const stat = layout.find(p => p.type === 'data')!;
+        expect(stat.gridPos.w).toBe(24);
+        expect(stat.gridPos.h).toBe(4);
+    });
+
+    it('adaptive: 2 stats alone → w=12 each', () => {
+        const todos = [
+            { title: 'S1', rowGroup: 'Health', viz: 'stat', unit: 's' },
+            { title: 'S2', rowGroup: 'Health', viz: 'stat', unit: 's' },
+        ];
+        const layout = computeLayout(todos);
+        const data = layout.filter(p => p.type === 'data');
+        expect(data.map(p => p.gridPos.w)).toEqual([12, 12]);
+        expect(data[0].gridPos.y).toBe(data[1].gridPos.y);
+    });
+
+    it('adaptive: 3 stats alone → w=8 each', () => {
+        const todos = [
+            { title: 'S1', rowGroup: 'Health', viz: 'stat', unit: '' },
+            { title: 'S2', rowGroup: 'Health', viz: 'stat', unit: '' },
+            { title: 'S3', rowGroup: 'Health', viz: 'stat', unit: '' },
+        ];
+        const layout = computeLayout(todos);
+        const data = layout.filter(p => p.type === 'data');
+        expect(data.map(p => p.gridPos.w)).toEqual([8, 8, 8]);
+        expect(new Set(data.map(p => p.gridPos.y)).size).toBe(1);
+    });
+
+    it('adaptive: 1 stat + 1 timeseries → same row, stat w=6 + ts w=18', () => {
+        const todos = [
+            { title: 'Uptime', rowGroup: 'Health', viz: 'stat', unit: 's' },
+            { title: 'Rate',   rowGroup: 'Health', viz: 'timeseries', unit: 'reqps' },
+        ];
+        const layout = computeLayout(todos);
+        const stat = layout.find(p => p.title === 'Uptime')!;
+        const ts   = layout.find(p => p.title === 'Rate')!;
+        expect(stat.gridPos.w).toBe(6);
+        expect(ts.gridPos.w).toBe(18);
+        expect(stat.gridPos.y).toBe(ts.gridPos.y);
+    });
+
+    it('adaptive: 1 stat + 2 timeseries → stat w=24 banner, then ts panels below', () => {
+        const todos = [
+            { title: 'Uptime', rowGroup: 'Health', viz: 'stat',       unit: 's' },
+            { title: 'Rate',   rowGroup: 'Health', viz: 'timeseries', unit: 'reqps' },
+            { title: 'Errors', rowGroup: 'Health', viz: 'timeseries', unit: 'reqps' },
+        ];
+        const layout = computeLayout(todos);
+        const stat   = layout.find(p => p.title === 'Uptime')!;
+        const rateTs = layout.find(p => p.title === 'Rate')!;
+        expect(stat.gridPos.w).toBe(24);
+        expect(stat.gridPos.h).toBe(4);
+        expect(rateTs.gridPos.y).toBeGreaterThan(stat.gridPos.y);
+    });
+
+    it('adaptive: 1 wide panel alone → w=24', () => {
+        const todos = [
+            { title: 'Overview', rowGroup: 'Summary', viz: 'timeseries', unit: '' },
+        ];
+        const layout = computeLayout(todos);
+        const panel = layout.find(p => p.type === 'data')!;
+        expect(panel.gridPos.w).toBe(24);
+    });
 });
 
 // ─── runDashboardAgent integration tests ─────────────────────────────────────
@@ -478,11 +549,16 @@ describe('runDashboardAgent', () => {
 
         const dash = mockMcpClient.callTool.mock.calls[0][0].arguments.dashboard;
         const dataPanels = dash.panels.filter((p: any) => p.type !== 'row');
-        // Stats come first in array (stats-first two-pass layout)
-        expect(dataPanels[0].type).toBe('stat');
-        expect(dataPanels[1].type).toBe('timeseries');
-        // Stat is at y=1 (below row header), timeseries at y=1+4=5 (below stat strip)
-        expect(dataPanels[0].gridPos.y).toBeLessThan(dataPanels[1].gridPos.y);
+        const statPanel = dataPanels.find((p: any) => p.type === 'stat');
+        const tsPanel = dataPanels.find((p: any) => p.type === 'timeseries');
+        // 1 stat + 1 timeseries → same row (paired KPI + trend), stat w=6, ts w=18
+        expect(statPanel.gridPos.y).toBe(tsPanel.gridPos.y);
+        expect(statPanel.gridPos.w).toBe(6);
+        expect(tsPanel.gridPos.w).toBe(18);
+        // stat appears before timeseries in array
+        const statIdx = dataPanels.indexOf(statPanel);
+        const tsIdx = dataPanels.indexOf(tsPanel);
+        expect(statIdx).toBeLessThan(tsIdx);
     });
 
     it('code-built CREATE: folderUid is used, not folderId', async () => {

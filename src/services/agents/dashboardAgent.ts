@@ -472,15 +472,25 @@ interface LayoutPanel {
  *
  * Layout rules (24-column grid, professional dashboard style):
  *
- * Within each row group, panels are laid out in two passes:
- *   Pass 1 — stat / gauge / bargauge: w=6, h=4 (up to 4 across a full strip)
- *   Pass 2 — timeseries / logs / table / heatmap: w=12, h=8 (2 across)
+ * Stat/gauge/bargauge panels and timeseries/wide panels are laid out
+ * together using a context-aware algorithm that prevents the "lone tiny stat"
+ * problem and ensures every visual row is harmoniously filled.
  *
- * Stats are always grouped first in their own strip, timeseries below.
- * This prevents ragged height mismatches (stat h=4 next to timeseries h=8).
+ * Rules:
+ *   1 stat,  0 wide  → stat full-width (w=24, h=4) — single KPI banner
+ *   1 stat,  1 wide  → stat (w=6, h=8) + timeseries (w=18, h=8) — KPI + trend
+ *   1 stat,  2 wide  → stat (w=24, h=4) then paired timeseries below
+ *   1 stat, 3+ wide  → stat (w=24, h=4) then paired timeseries below
+ *   2 stats, 0 wide  → w=12 each (two half-width KPIs)
+ *   2 stats, N wide  → w=12 each, then timeseries below
+ *   3 stats          → w=8 each
+ *   4 stats          → w=6 each
+ *   5+ stats         → w=6 each, wrap after 4 per row
+ *   0 stats, 1 wide  → full-width (w=24)
+ *   0 stats, 2 wide  → w=12 each
+ *   0 stats, 3+ wide → w=12 paired, wrapping
  *
- * Running y increments after each visual strip is filled.
- * The model must copy these exact values verbatim — it does NOT compute layout.
+ * The model copies these exact gridPos values verbatim — it does NOT compute layout.
  */
 export function computeLayout(panelTodos: any[]): LayoutPanel[] {
     const COLS = 24;
@@ -489,10 +499,6 @@ export function computeLayout(panelTodos: any[]): LayoutPanel[] {
     let runningY = 0;
 
     const isStat = (viz: string) => viz === 'stat' || viz === 'gauge' || viz === 'bargauge';
-
-    const STAT_W = 6;
-    const STAT_H = 4;
-    const WIDE_W = 12;
     const WIDE_H = 8;
 
     // Group panels by rowGroup, preserving insertion order
@@ -513,58 +519,91 @@ export function computeLayout(panelTodos: any[]): LayoutPanel[] {
         });
         runningY += 1;
 
-        // Split panels into stats-first, then wide panels
         const statPanels = panels.filter(p => isStat(p.viz));
         const widePanels = panels.filter(p => !isStat(p.viz));
+        const nStats = statPanels.length;
+        const nWide = widePanels.length;
 
-        // Pass 1: stat strip (all stats together, 4 across)
-        if (statPanels.length > 0) {
+        // ── Determine stat width and whether stats are combined with first wide panel ──
+        //
+        // Special case: 1 stat + 1 wide → same row, stat w=6 h=8, wide w=18 h=8
+        // This is the most harmonious treatment for a KPI+trend-line pair.
+        if (nStats === 1 && nWide === 1) {
+            result.push({
+                id: nextId++, title: statPanels[0].title, type: 'data',
+                viz: statPanels[0].viz, query: statPanels[0].query,
+                datasourceType: statPanels[0].datasourceType,
+                unit: statPanels[0].unit, description: statPanels[0].description,
+                rowGroup: rowTitle,
+                gridPos: { x: 0, y: runningY, w: 6, h: WIDE_H },
+            });
+            result.push({
+                id: nextId++, title: widePanels[0].title, type: 'data',
+                viz: widePanels[0].viz, query: widePanels[0].query,
+                datasourceType: widePanels[0].datasourceType,
+                unit: widePanels[0].unit, description: widePanels[0].description,
+                rowGroup: rowTitle,
+                gridPos: { x: 6, y: runningY, w: 18, h: WIDE_H },
+            });
+            runningY += WIDE_H;
+            continue;
+        }
+
+        // ── Pass 1: stat strip ──────────────────────────────────────────────────────
+        if (nStats > 0) {
+            // Stat width: adaptive so strips always fill full width
+            const statW =
+                nStats === 1 ? COLS :           // 1 stat → full width banner
+                nStats === 2 ? 12 :             // 2 stats → half each
+                nStats === 3 ? 8 :              // 3 stats → thirds
+                6;                              // 4+ stats → quarters (wrap after 4)
+
+            const statH =
+                nStats === 1 && nWide === 0 ? 4 :  // single KPI banner: compact
+                nStats === 1 ? 4 :                  // stat strip above timeseries: compact
+                4;                                  // always 4 for stat strips
+
             let cx = 0;
             for (const p of statPanels) {
-                if (cx + STAT_W > COLS) {
-                    runningY += STAT_H;
+                if (cx + statW > COLS) {
+                    runningY += statH;
                     cx = 0;
                 }
                 result.push({
-                    id: nextId++,
-                    title: p.title,
-                    type: 'data',
-                    viz: p.viz,
-                    query: p.query,
+                    id: nextId++, title: p.title, type: 'data',
+                    viz: p.viz, query: p.query,
                     datasourceType: p.datasourceType,
-                    unit: p.unit,
-                    description: p.description,
+                    unit: p.unit, description: p.description,
                     rowGroup: rowTitle,
-                    gridPos: { x: cx, y: runningY, w: STAT_W, h: STAT_H },
+                    gridPos: { x: cx, y: runningY, w: statW, h: statH },
                 });
-                cx += STAT_W;
+                cx += statW;
             }
-            runningY += STAT_H;
+            runningY += statH;
         }
 
-        // Pass 2: timeseries / wide panels (2 across)
-        if (widePanels.length > 0) {
+        // ── Pass 2: wide panels ─────────────────────────────────────────────────────
+        if (nWide > 0) {
+            // Single wide panel → full width
+            const wideW = nWide === 1 ? COLS : 12;
+
             let cx = 0;
             let rowH = 0;
             for (const p of widePanels) {
-                if (cx + WIDE_W > COLS) {
+                if (cx + wideW > COLS) {
                     runningY += rowH;
                     cx = 0;
                     rowH = 0;
                 }
                 result.push({
-                    id: nextId++,
-                    title: p.title,
-                    type: 'data',
-                    viz: p.viz,
-                    query: p.query,
+                    id: nextId++, title: p.title, type: 'data',
+                    viz: p.viz, query: p.query,
                     datasourceType: p.datasourceType,
-                    unit: p.unit,
-                    description: p.description,
+                    unit: p.unit, description: p.description,
                     rowGroup: rowTitle,
-                    gridPos: { x: cx, y: runningY, w: WIDE_W, h: WIDE_H },
+                    gridPos: { x: cx, y: runningY, w: wideW, h: WIDE_H },
                 });
-                cx += WIDE_W;
+                cx += wideW;
                 rowH = WIDE_H;
                 if (cx >= COLS) {
                     runningY += rowH;
