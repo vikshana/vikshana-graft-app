@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.4.0...graft-v0.5.0) (2026-06-20)
+
+
+### Features and enhancements
+
+* **llm:** self-correcting dashboard agent with adaptive layout ([#16](https://github.com/vikshana/vikshana-graft-app/issues/16)) ([2d26241](https://github.com/vikshana/vikshana-graft-app/commit/2d26241df15915b5dfa1b016a810fa1c44874b8a))
+
 ## [0.4.0](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.3.0...graft-v0.4.0) (2026-06-18)
 
 
