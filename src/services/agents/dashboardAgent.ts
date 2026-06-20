@@ -464,13 +464,16 @@ interface LayoutPanel {
  * Computes Grafana v1 gridPos for every panel (rows + data panels)
  * from the PLAN todo list.
  *
- * Layout rules (24-column grid):
- * - Row header:              w=24, h=1
- * - stat / gauge / bargauge: w=6,  h=4  (up to 4 across, then wrap)
- * - timeseries / logs / table / heatmap: w=12, h=8  (2 across)
- * - Any solo panel in a group: w=24, h=8  (full width)
+ * Layout rules (24-column grid, professional dashboard style):
  *
- * Running y increments after each row of panels is placed.
+ * Within each row group, panels are laid out in two passes:
+ *   Pass 1 — stat / gauge / bargauge: w=6, h=4 (up to 4 across a full strip)
+ *   Pass 2 — timeseries / logs / table / heatmap: w=12, h=8 (2 across)
+ *
+ * Stats are always grouped first in their own strip, timeseries below.
+ * This prevents ragged height mismatches (stat h=4 next to timeseries h=8).
+ *
+ * Running y increments after each visual strip is filled.
  * The model must copy these exact values verbatim — it does NOT compute layout.
  */
 export function computeLayout(panelTodos: any[]): LayoutPanel[] {
@@ -478,6 +481,13 @@ export function computeLayout(panelTodos: any[]): LayoutPanel[] {
     const result: LayoutPanel[] = [];
     let nextId = 1;
     let runningY = 0;
+
+    const isStat = (viz: string) => viz === 'stat' || viz === 'gauge' || viz === 'bargauge';
+
+    const STAT_W = 6;
+    const STAT_H = 4;
+    const WIDE_W = 12;
+    const WIDE_H = 8;
 
     // Group panels by rowGroup, preserving insertion order
     const groups: Map<string, any[]> = new Map();
@@ -497,59 +507,67 @@ export function computeLayout(panelTodos: any[]): LayoutPanel[] {
         });
         runningY += 1;
 
-        // Determine column width per panel for this group
-        const isStat = (viz: string) =>
-            viz === 'stat' || viz === 'gauge' || viz === 'bargauge';
-        const allStat = panels.every(p => isStat(p.viz));
-        const STAT_W = 6;
-        const STAT_H = 4;
-        const WIDE_W = 12;
-        const WIDE_H = 8;
+        // Split panels into stats-first, then wide panels
+        const statPanels = panels.filter(p => isStat(p.viz));
+        const widePanels = panels.filter(p => !isStat(p.viz));
 
-        let cx = 0; // current x position
-        let rowH = 0; // height of the current visual row being filled
-
-        for (const p of panels) {
-            const panelW = isStat(p.viz) ? STAT_W : WIDE_W;
-            const panelH = isStat(p.viz) ? STAT_H : WIDE_H;
-
-            // Wrap to next row if this panel won't fit
-            if (cx + panelW > COLS) {
-                runningY += rowH;
-                cx = 0;
-                rowH = 0;
+        // Pass 1: stat strip (all stats together, 4 across)
+        if (statPanels.length > 0) {
+            let cx = 0;
+            for (const p of statPanels) {
+                if (cx + STAT_W > COLS) {
+                    runningY += STAT_H;
+                    cx = 0;
+                }
+                result.push({
+                    id: nextId++,
+                    title: p.title,
+                    type: 'data',
+                    viz: p.viz,
+                    query: p.query,
+                    datasourceType: p.datasourceType,
+                    unit: p.unit,
+                    description: p.description,
+                    rowGroup: rowTitle,
+                    gridPos: { x: cx, y: runningY, w: STAT_W, h: STAT_H },
+                });
+                cx += STAT_W;
             }
-
-            result.push({
-                id: nextId++,
-                title: p.title,
-                type: 'data',
-                viz: p.viz,
-                query: p.query,
-                datasourceType: p.datasourceType,
-                unit: p.unit,
-                description: p.description,
-                rowGroup: rowTitle,
-                gridPos: { x: cx, y: runningY, w: panelW, h: panelH },
-            });
-
-            cx += panelW;
-            rowH = Math.max(rowH, panelH);
-
-            // If stat panels exactly fill a row, reset
-            if (cx >= COLS) {
-                runningY += rowH;
-                cx = 0;
-                rowH = 0;
-            }
+            runningY += STAT_H;
         }
 
-        // Flush any partially-filled row
-        if (rowH > 0) {
-            runningY += rowH;
-            cx = 0;
+        // Pass 2: timeseries / wide panels (2 across)
+        if (widePanels.length > 0) {
+            let cx = 0;
+            let rowH = 0;
+            for (const p of widePanels) {
+                if (cx + WIDE_W > COLS) {
+                    runningY += rowH;
+                    cx = 0;
+                    rowH = 0;
+                }
+                result.push({
+                    id: nextId++,
+                    title: p.title,
+                    type: 'data',
+                    viz: p.viz,
+                    query: p.query,
+                    datasourceType: p.datasourceType,
+                    unit: p.unit,
+                    description: p.description,
+                    rowGroup: rowTitle,
+                    gridPos: { x: cx, y: runningY, w: WIDE_W, h: WIDE_H },
+                });
+                cx += WIDE_W;
+                rowH = WIDE_H;
+                if (cx >= COLS) {
+                    runningY += rowH;
+                    cx = 0;
+                    rowH = 0;
+                }
+            }
+            if (rowH > 0) { runningY += rowH; }
         }
-        void allStat; // suppress unused warning
     }
 
     return result;
