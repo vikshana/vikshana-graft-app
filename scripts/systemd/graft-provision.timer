@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodically provision Graft + LLM app (picks up newly created orgs)
+
+[Timer]
+# Run shortly after boot, then every 10 minutes. New orgs are configured
+# automatically on the next tick.
+OnBootSec=2min
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

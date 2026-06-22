@@ -5,6 +5,7 @@
     "bump:deploy": "node scripts/bump-deploy.mjs",
     "provision:orgs": "node scripts/provision-graft-orgs.mjs",
     "provision:sync": "bash scripts/sync-provisioning.sh",
+    "provision:timer": "bash scripts/install-auto-provision.sh",
     "deploy": "bash scripts/deploy-electramet.sh",
     "deploy:rsync": "bash scripts/deploy-electramet.sh --no-bump --rsync-only",
     "deploy:frontend": "bash scripts/deploy-electramet.sh --frontend-only",

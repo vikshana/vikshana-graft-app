@@ -1,0 +1,10 @@
+[Unit]
+Description=Provision Graft + Grafana LLM app across all Grafana orgs
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ec2-user
+# Reads admin creds + ANTHROPIC_API_KEY from the docker .env (see the script).
+ExecStart=/home/ec2-user/ptw_data/Cloud/Docker/grafana/provision/provision-graft-orgs.sh
