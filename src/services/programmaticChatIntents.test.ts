@@ -46,6 +46,17 @@ describe('programmaticChatIntents', () => {
         expect(isSimpleConversationalMessage(rename)).toBe(false);
     });
 
+    it('routes plural Grafana-noun queries to the tool path (not simple chat)', () => {
+        // Regression: plural forms previously slipped past \bdashboard\b and were
+        // misrouted to the tool-less conversational path → "I have no access" replies.
+        expect(isSimpleConversationalMessage('What dashboards are in this organization?')).toBe(false);
+        expect(isSimpleConversationalMessage('List the dashboards in this organization.')).toBe(false);
+        expect(isSimpleConversationalMessage('Search dashboards and show their titles and uids.')).toBe(false);
+        expect(isSimpleConversationalMessage('Show me the metrics available.')).toBe(false);
+        expect(isSimpleConversationalMessage('What folders exist?')).toBe(false);
+        expect(isSimpleConversationalMessage('List my datasources.')).toBe(false);
+    });
+
     it('allows send for programmatic prompts without LLM', () => {
         expect(
             canSendChatMessage({

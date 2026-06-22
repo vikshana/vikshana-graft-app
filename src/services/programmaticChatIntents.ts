@@ -126,8 +126,12 @@ export function isSimpleConversationalMessage(message: string): boolean {
     if (messageHasProgrammaticHandler(text)) {
         return false;
     }
+    // Any Grafana/observability noun routes to the tool-enabled path. Match singular
+    // AND plural forms — a prior bug let "dashboards"/"uids"/"metrics" slip through
+    // (\bdashboard\b never matches "dashboards"), misrouting real tool queries like
+    // "list the dashboards in this org" to the tool-less conversational path.
     if (
-        /\b(dashboard|dash\s*board|panels?|grafana|prometheus|loki|clone|copy of|fix|repair|machine|uid|metric|logql|promql)\b/i.test(
+        /\b(dashboards?|dash\s*boards?|panels?|grafana|prometheus|loki|clone|copy of|fix|repair|machines?|uids?|metrics?|logql|promql|folders?|datasources?|data\s*sources?|alerts?)\b/i.test(
             text
         )
     ) {
