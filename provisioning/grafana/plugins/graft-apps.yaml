@@ -1,0 +1,250 @@
+# Grafana app provisioning for Graft + the Grafana LLM app.
+#
+# Deploy target (EC2): /etc/grafana/provisioning/plugins/graft-apps.yaml
+#   Host path:  ~/ptw_data/Cloud/Docker/grafana/provisioning/plugins/graft-apps.yaml
+#   Mount:      ./grafana/provisioning/plugins:/etc/grafana/provisioning/plugins  (add to docker-compose grafana service)
+#   Apply via:  npm run provision:sync   (rsyncs this dir + recreates the grafana container)
+#
+# What this does, on every Grafana start, for each org listed below:
+#   - enables + pins the Graft app (vikshana-graft-app)
+#   - enables the Grafana LLM app (grafana-llm-app) and sets the model mapping
+#     so "Standard" mode (base) uses Sonnet — the weak Haiku default makes
+#     tool-calling unreliable.
+#
+# The Anthropic API key is intentionally NOT managed here. Provisioning that
+# OMITS secureJsonData preserves the key already stored in grafana.db (a
+# persistent volume), so this file is safe to (re)apply without wiping it.
+# A key only needs to be entered once per instance (Admin -> Plugins -> LLM,
+# or `npm run provision:orgs -- --anthropic-key <key>`). To fully automate the
+# key on fresh deploys instead, set ANTHROPIC_API_KEY in Cloud/Docker/.env and
+# add this to each grafana-llm-app entry:
+#     secureJsonData:
+#       anthropicKey: $ANTHROPIC_API_KEY
+#
+# NOTE: provisioning is keyed by org_id. New orgs created later are NOT
+# auto-provisioned — add an entry here (and re-sync) or run `npm run
+# provision:orgs` to configure them via the API.
+
+apiVersion: 1
+
+apps:
+  # Main Org.
+  - type: vikshana-graft-app
+    org_id: 1
+    disabled: false
+  - type: grafana-llm-app
+    org_id: 1
+    disabled: false
+    jsonData:
+      provider: anthropic
+      models:
+        default: base
+        mapping:
+          base: claude-sonnet-4-6
+          large: claude-sonnet-4-6
+      openAI:
+        disabled: false
+
+  # Skywater-MN
+  - type: vikshana-graft-app
+    org_id: 4
+    disabled: false
+  - type: grafana-llm-app
+    org_id: 4
+    disabled: false
+    jsonData:
+      provider: anthropic
+      models:
+        default: base
+        mapping:
+          base: claude-sonnet-4-6
+          large: claude-sonnet-4-6
+      openAI:
+        disabled: false
+
+  # Skywater-FL
+  - type: vikshana-graft-app
+    org_id: 5
+    disabled: false
+  - type: grafana-llm-app
+    org_id: 5
+    disabled: false
+    jsonData:
+      provider: anthropic
+      models:
+        default: base
+        mapping:
+          base: claude-sonnet-4-6
+          large: claude-sonnet-4-6
+      openAI:
+        disabled: false
+
+  # MicroLumen
+  - type: vikshana-graft-app
+    org_id: 6
+    disabled: false
+  - type: grafana-llm-app
+    org_id: 6
+    disabled: false
+    jsonData:
+      provider: anthropic
+      models:
+        default: base
+        mapping:
+          base: claude-sonnet-4-6
+          large: claude-sonnet-4-6
+      openAI:
+        disabled: false
+
+  # Ascend Elements (Westborough, MA)
+  - type: vikshana-graft-app
+    org_id: 7
+    disabled: false
+  - type: grafana-llm-app
+    org_id: 7
+    disabled: false
+    jsonData:
+      provider: anthropic
+      models:
+        default: base
+        mapping:
+          base: claude-sonnet-4-6
+          large: claude-sonnet-4-6
+      openAI:
+        disabled: false
+
+  # GreenSource
+  - type: vikshana-graft-app
+    org_id: 8
+    disabled: false
+  - type: grafana-llm-app
+    org_id: 8
+    disabled: false
+    jsonData:
+      provider: anthropic
+      models:
+        default: base
+        mapping:
+          base: claude-sonnet-4-6
+          large: claude-sonnet-4-6
+      openAI:
+        disabled: false
+
+  # Pentagon
+  - type: vikshana-graft-app
+    org_id: 9
+    disabled: false
+  - type: grafana-llm-app
+    org_id: 9
+    disabled: false
+    jsonData:
+      provider: anthropic
+      models:
+        default: base
+        mapping:
+          base: claude-sonnet-4-6
+          large: claude-sonnet-4-6
+      openAI:
+        disabled: false
+
+  # Exsolve
+  - type: vikshana-graft-app
+    org_id: 10
+    disabled: false
+  - type: grafana-llm-app
+    org_id: 10
+    disabled: false
+    jsonData:
+      provider: anthropic
+      models:
+        default: base
+        mapping:
+          base: claude-sonnet-4-6
+          large: claude-sonnet-4-6
+      openAI:
+        disabled: false
+
+  # Ascend Elements - APEX1
+  - type: vikshana-graft-app
+    org_id: 11
+    disabled: false
+  - type: grafana-llm-app
+    org_id: 11
+    disabled: false
+    jsonData:
+      provider: anthropic
+      models:
+        default: base
+        mapping:
+          base: claude-sonnet-4-6
+          large: claude-sonnet-4-6
+      openAI:
+        disabled: false
+
+  # Materion Brush
+  - type: vikshana-graft-app
+    org_id: 12
+    disabled: false
+  - type: grafana-llm-app
+    org_id: 12
+    disabled: false
+    jsonData:
+      provider: anthropic
+      models:
+        default: base
+        mapping:
+          base: claude-sonnet-4-6
+          large: claude-sonnet-4-6
+      openAI:
+        disabled: false
+
+  # Workshop
+  - type: vikshana-graft-app
+    org_id: 13
+    disabled: false
+  - type: grafana-llm-app
+    org_id: 13
+    disabled: false
+    jsonData:
+      provider: anthropic
+      models:
+        default: base
+        mapping:
+          base: claude-sonnet-4-6
+          large: claude-sonnet-4-6
+      openAI:
+        disabled: false
+
+  # Samsung
+  - type: vikshana-graft-app
+    org_id: 14
+    disabled: false
+  - type: grafana-llm-app
+    org_id: 14
+    disabled: false
+    jsonData:
+      provider: anthropic
+      models:
+        default: base
+        mapping:
+          base: claude-sonnet-4-6
+          large: claude-sonnet-4-6
+      openAI:
+        disabled: false
+
+  # Iota-093002
+  - type: vikshana-graft-app
+    org_id: 15
+    disabled: false
+  - type: grafana-llm-app
+    org_id: 15
+    disabled: false
+    jsonData:
+      provider: anthropic
+      models:
+        default: base
+        mapping:
+          base: claude-sonnet-4-6
+          large: claude-sonnet-4-6
+      openAI:
+        disabled: false
