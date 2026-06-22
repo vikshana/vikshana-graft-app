@@ -15,6 +15,7 @@ import {
     shouldUseConcisePanelReply,
 } from './dashboardPanelFixReply';
 import { applyOperatorFriendlyDashboardReply } from './dashboardTaskStatus';
+import { classifyLlmIntent } from './llmIntentRouter';
 import { isDashboardDataInvestigationQuestion } from './dashboardInvestigation';
 import { formatClarificationIfNeeded } from './requestClarity';
 import { describesCapabilityLimitation } from './adminCapabilityParse';
@@ -165,6 +166,18 @@ export function appendSaveVerificationWarning(
         hasSuccessfulDashboardSave(toolExecutions)
     ) {
         return content;
+    }
+    // Read-only / conversational turns (search, list, review, "what/which") have
+    // nothing to save, so never append a "stopped before saving — Continue" note.
+    // Offering next steps ("Would you like me to…") on a search must not be mistaken
+    // for a stalled mutation.
+    const userMsgForIntent =
+        fallbackUserMessage || recentUserMessages[recentUserMessages.length - 1] || '';
+    if (userMsgForIntent.trim()) {
+        const intent = classifyLlmIntent(userMsgForIntent);
+        if (intent === 'read_only' || intent === 'conversational') {
+            return content;
+        }
     }
     if (claimsDashboardSaveWithoutTool(content, toolExecutions)) {
         return (

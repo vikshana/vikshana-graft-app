@@ -280,6 +280,16 @@ const formatContext = (dashboard: DashboardContext, user: UserContext, dataSourc
   );
   lines.push('');
 
+  // Tool availability — counter weak models that deny having tools (primacy near top).
+  lines.push(
+    `You HAVE live Grafana tools in this conversation (e.g. search_dashboards, get_dashboard_by_uid, ` +
+    `get_dashboard_summary, get_dashboard_panel_queries, update_dashboard, list_datasources, and Prometheus/Loki tools). ` +
+    `NEVER claim you lack tools, API access, or the ability to call functions, and NEVER tell the user to use the Grafana UI, REST API, or CLI to do something a tool can do — call the tool instead. ` +
+    `To list or find dashboards, call search_dashboards. To inspect one, call get_dashboard_by_uid or get_dashboard_summary. ` +
+    `When a question can be answered with a tool, call it before replying.`
+  );
+  lines.push('');
+
   // Capability boundary — Graft has NO admin/user/org tools.
   lines.push(
     `Capability boundary: your tools are limited to dashboards, folders, datasources, Prometheus, and Loki. ` +

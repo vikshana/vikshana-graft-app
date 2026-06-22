@@ -141,4 +141,17 @@ describe('appendToolReferences', () => {
         );
         expect(out).toContain('No confirmed');
     });
+
+    it('does NOT append a save/continue warning on a read-only search turn', () => {
+        const tools: ToolExecution[] = [{ name: 'search_dashboards', status: 'success' as const }];
+        const reply = 'Here are the dashboards I found. Would you like me to open one of them?';
+        const out = appendSaveVerificationWarning(
+            reply,
+            tools,
+            ['Search the dashboards on this Grafana and list their titles'],
+            'Search the dashboards on this Grafana and list their titles'
+        );
+        expect(out).toBe(reply);
+        expect(out).not.toMatch(/Continue|before saving|No confirmed/i);
+    });
 });
