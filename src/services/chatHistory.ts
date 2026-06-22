@@ -293,6 +293,12 @@ class ChatHistoryService {
                         }
                     }
                 }
+                // A real user is in context, so the bare global keys are stale and
+                // unattributable. Delete them so a previous user's history / last-active
+                // pointer can't linger in a shared browser profile.
+                localStorage.removeItem(STORAGE_KEY_BASE);
+                localStorage.removeItem(LAST_ACTIVE_SESSION_KEY_BASE);
+                localStorage.removeItem(ACTIVE_SNAPSHOT_KEY_BASE);
             }
         } catch (e) {
             console.error('[Graft] Error migrating chat history keys:', e);

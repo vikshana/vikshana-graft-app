@@ -3,9 +3,36 @@ import {
     formatRegistrySuggestionMarkdown,
     suggestRegistryRowForFailure,
 } from './graftFailureRegistrySuggest';
+import { hasScopedUser, scopedStorageKey } from './storageScope';
 
-const STORAGE_KEY = 'graft-operator-failures';
+const STORAGE_KEY_BASE = 'graft-operator-failures';
 const MAX_ENTRIES = 200;
+
+/** Per-(org,user) key so failure entries (which include user message previews and
+ * dashboard structure) never bleed between users sharing a browser. */
+function storageKey(): string {
+    return scopedStorageKey(STORAGE_KEY_BASE);
+}
+
+let legacyGlobalCleared = false;
+/**
+ * Remove the bare un-suffixed key once a real user is in context. It is global and
+ * unattributable, so we never read it (it may belong to a previous user on a shared
+ * browser) and delete it to avoid leaking another user's messages/dashboards.
+ */
+function clearLegacyGlobalFailureLog(): void {
+    if (legacyGlobalCleared || typeof localStorage === 'undefined') {
+        return;
+    }
+    legacyGlobalCleared = true;
+    try {
+        if (hasScopedUser()) {
+            localStorage.removeItem(STORAGE_KEY_BASE);
+        }
+    } catch {
+        // ignore storage errors
+    }
+}
 
 const listeners = new Set<() => void>();
 
@@ -36,8 +63,9 @@ function readAll(): GraftFailureEntry[] {
     if (typeof localStorage === 'undefined') {
         return [];
     }
+    clearLegacyGlobalFailureLog();
     try {
-        const raw = localStorage.getItem(STORAGE_KEY);
+        const raw = localStorage.getItem(storageKey());
         if (!raw) {
             return [];
         }
@@ -52,7 +80,8 @@ function writeAll(entries: GraftFailureEntry[]): void {
     if (typeof localStorage === 'undefined') {
         return;
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries.slice(0, MAX_ENTRIES)));
+    clearLegacyGlobalFailureLog();
+    localStorage.setItem(storageKey(), JSON.stringify(entries.slice(0, MAX_ENTRIES)));
 }
 
 export function recordGraftFailure(
