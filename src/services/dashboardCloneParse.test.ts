@@ -98,10 +98,10 @@ describe('parseCloneIntentMessage', () => {
             expect(p.requestedTitle).toBe('2505-200033 / Keysight');
         });
 
-        it('prefixes a quoted bare label too', () => {
+        it('takes an explicit quoted name literally (no machine prefix)', () => {
             expect(
                 extractRequestedDashboardTitle('Create a dashboard named "Keysight"', '2505-200033')
-            ).toBe('2505-200033 / Keysight');
+            ).toBe('Keysight');
         });
 
         it('keeps a fully-qualified quoted title verbatim', () => {

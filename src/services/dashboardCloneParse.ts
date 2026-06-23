@@ -88,9 +88,10 @@ export function extractRequestedDashboardTitle(
     userContent: string,
     targetMachine?: string
 ): string | undefined {
+    // An explicit quoted name is taken literally (the user spelled out the exact title).
     const quoted = userContent.match(/\bnamed\s+"([^"]+)"/i);
     if (quoted?.[1]?.trim()) {
-        return composeTitleFromLabel(quoted[1], targetMachine);
+        return quoted[1].trim();
     }
     // Unquoted `named Keysight …` — capture the label up to the next clause keyword
     // ("for"/"that"/"with"/…) or punctuation so we don't swallow "for 2505-200033".
