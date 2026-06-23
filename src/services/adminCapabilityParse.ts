@@ -101,6 +101,15 @@ export function describesCapabilityLimitation(content: string): boolean {
 }
 
 function dashboardAlternative(message: string, mentionsDashboard: boolean): string {
+    // Pure admin requests that never mention a dashboard (e.g. "add a user") get a
+    // concise scope note instead of a clone pitch — leading with "clone a dashboard"
+    // on a user/access question reads as a non-sequitur.
+    if (!mentionsDashboard) {
+        return (
+            `**Once that exists in Grafana, Graft can take over the dashboards inside it** — ` +
+            `build, edit, clone, and reorganize panels and folders (Prometheus, Loki, Influx).`
+        );
+    }
     const uid = extractDashboardUidFromMessage(message);
     const cloneExample = uid
         ? `Clone a system dashboard, e.g. \`Create a new dashboard for <new system> with the same data as the dashboard with UID = ${uid}.\``
@@ -110,9 +119,7 @@ function dashboardAlternative(message: string, mentionsDashboard: boolean): stri
         `- ${cloneExample}\n` +
         `- Build, edit, or reorganize dashboards and panels (Prometheus, Loki, Influx)\n` +
         `- Create folders to organize dashboards (\`create_folder\`)\n` +
-        (mentionsDashboard
-            ? `\nIf you want, send the clone prompt above and Graft will copy the existing system dashboard now.`
-            : '')
+        `\nIf you want, send the clone prompt above and Graft will copy the existing system dashboard now.`
     );
 }
 

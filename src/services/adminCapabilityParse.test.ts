@@ -94,4 +94,28 @@ describe('adminCapabilityParse', () => {
         expect(reply.toLowerCase()).toContain('clone');
         expect(reply.toLowerCase()).toContain('what graft can do');
     });
+
+    it('does NOT lead with a clone pitch on pure user/access requests (no dashboard mentioned)', () => {
+        for (const prompt of [
+            'Add a new user to access Grafana.',
+            'Add a new user that only has access to Skywater-MN Organization.',
+            'Change the permissions so editors can manage teams.',
+        ]) {
+            const req = messageDescribesUnsupportedAdminRequest(prompt)!;
+            const reply = formatUnsupportedAdminReply(req, prompt);
+            // The off-topic clone PITCH (bulleted "what graft can do" + clone example) is dropped...
+            expect(reply.toLowerCase()).not.toContain('what graft can do');
+            expect(reply.toLowerCase()).not.toContain('create a new dashboard for');
+            // ...replaced by a concise on-point scope note (the word "clone" as a capability is fine).
+            expect(reply.toLowerCase()).toContain('graft can take over the dashboards');
+        }
+    });
+
+    it('still offers the clone block on a user request that DOES mention a dashboard', () => {
+        const prompt = 'Add a new user and give them the dashboard for Skywater.';
+        const req = messageDescribesUnsupportedAdminRequest(prompt)!;
+        const reply = formatUnsupportedAdminReply(req, prompt);
+        expect(reply.toLowerCase()).toContain('clone');
+        expect(reply.toLowerCase()).toContain('what graft can do');
+    });
 });
