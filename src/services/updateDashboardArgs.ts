@@ -4,6 +4,29 @@ import {
     type ScopedPanelFixTarget,
 } from './panelFixScope';
 
+/**
+ * Coerce a loosely-typed boolean (LLMs frequently emit the string "true"/"false")
+ * into a real boolean. Returns undefined when the value is not boolean-like.
+ */
+export function coerceBooleanLike(value: unknown): boolean | undefined {
+    if (typeof value === 'boolean') {
+        return value;
+    }
+    if (typeof value === 'number') {
+        return value !== 0;
+    }
+    if (typeof value === 'string') {
+        const v = value.trim().toLowerCase();
+        if (v === 'true' || v === '1' || v === 'yes' || v === 'y') {
+            return true;
+        }
+        if (v === 'false' || v === '0' || v === 'no' || v === 'n') {
+            return false;
+        }
+    }
+    return undefined;
+}
+
 /** Parse JSON embedded in a string field (common LLM mistake). */
 export function parseJsonField(value: unknown): unknown {
     if (typeof value !== 'string') {
@@ -47,6 +70,14 @@ export function normalizeUpdateDashboardArgs(args: Record<string, unknown>): Rec
 
     if (out.dashboard != null && typeof out.dashboard !== 'object') {
         delete out.dashboard;
+    }
+
+    // Grafana MCP's UpdateDashboardParams.overwrite is a Go bool — a stringified
+    // "true"/"false" (a common LLM mistake) fails with an unmarshal error and
+    // aborts the save mid-clone. Coerce it to a real boolean; default to true
+    // (our saves overwrite the existing dashboard) when present but unparseable.
+    if (out.overwrite !== undefined) {
+        out.overwrite = coerceBooleanLike(out.overwrite) ?? true;
     }
 
     return out;

@@ -1007,10 +1007,17 @@ export const ChatInterface = () => {
         return;
       }
 
-      const unsupportedAdminRequest = messageDescribesUnsupportedAdminRequest(content);
+      // Classify the user's ACTUAL typed message, not the post-resolution `content`.
+      // For "Continue"/short confirmations, resolveEffectiveUserMessage rewrites
+      // `content` into a verbose continuation ("User replied: …", "update_dashboard")
+      // whose words ("user" + a mutate verb) the admin classifier would misread as a
+      // user-management request — producing a bogus "cannot create users" reply
+      // mid-dashboard-clone. The raw message ("Continue") never matches.
+      const rawUserMessage = messageText.trim();
+      const unsupportedAdminRequest = messageDescribesUnsupportedAdminRequest(rawUserMessage);
       if (unsupportedAdminRequest) {
         errorPathTag = 'unsupported-admin-request';
-        finalContent = formatUnsupportedAdminReply(unsupportedAdminRequest, content);
+        finalContent = formatUnsupportedAdminReply(unsupportedAdminRequest, rawUserMessage);
         clearPendingDashboardTask();
         setMessages((prev) => {
           const updated = [...prev];

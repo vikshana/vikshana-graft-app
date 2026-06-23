@@ -5,6 +5,7 @@ import {
 } from './adminCapabilityParse';
 import { responseNeedsContinueAction } from './continueAction';
 import { asksUserToChooseWithoutSave } from './appendToolReferences';
+import { buildConfirmedIntent, type PendingDashboardTask } from './dashboardPendingTask';
 
 describe('adminCapabilityParse', () => {
     it('detects create-organization requests', () => {
@@ -109,6 +110,31 @@ describe('adminCapabilityParse', () => {
             // ...replaced by a concise on-point scope note (the word "clone" as a capability is fine).
             expect(reply.toLowerCase()).toContain('graft can take over the dashboards');
         }
+    });
+
+    it('raw "Continue" is never an admin request (clone-resume must NOT hit user-mgmt reply)', () => {
+        // ChatInterface must classify the RAW user message, not the resolved one.
+        expect(messageDescribesUnsupportedAdminRequest('Continue')).toBeNull();
+        expect(messageDescribesUnsupportedAdminRequest('Continue.')).toBeNull();
+    });
+
+    it('documents why the synthesized continuation must NOT be classified', () => {
+        // resolveEffectiveUserMessage rewrites "Continue" into this verbose intent.
+        // It contains "User replied:" (user) + "update_dashboard"/"Create" (mutate verb),
+        // so classifying IT (instead of the raw "Continue") wrongly yields manage_users —
+        // the exact "cannot create users" mid-clone regression. Lock the trap in place.
+        const cloneTask: PendingDashboardTask = {
+            kind: 'clone',
+            intentMessage:
+                'Create dashboard "2505-200033 / Keysight" — copy of 2103-176030, with data for machine 2505-200033.',
+            dashboardUid: '2103-176030',
+            dashboardTitle: '2505-200033 / Keysight',
+            updatedAt: Date.now(),
+        };
+        const synthesized = buildConfirmedIntent(cloneTask, 'Continue');
+        expect(synthesized).toMatch(/User replied/);
+        // The synthesized text DOES false-positive — which is precisely why we classify raw.
+        expect(messageDescribesUnsupportedAdminRequest(synthesized)?.kind).toBe('manage_users');
     });
 
     it('still offers the clone block on a user request that DOES mention a dashboard', () => {

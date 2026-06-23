@@ -10,6 +10,24 @@ describe('normalizeUpdateDashboardArgs', () => {
         expect(Array.isArray(args.operations)).toBe(true);
         expect((args.operations as unknown[]).length).toBe(1);
     });
+
+    it('coerces a stringified overwrite to a real boolean (MCP expects Go bool)', () => {
+        // Regression: the LLM emitted overwrite:"true" → "cannot unmarshal string
+        // into Go struct field UpdateDashboardParams.overwrite of type bool" mid-clone.
+        expect(normalizeUpdateDashboardArgs({ uid: 'a', overwrite: 'true' }).overwrite).toBe(true);
+        expect(normalizeUpdateDashboardArgs({ uid: 'a', overwrite: 'false' }).overwrite).toBe(false);
+        expect(normalizeUpdateDashboardArgs({ uid: 'a', overwrite: 'TRUE' }).overwrite).toBe(true);
+        expect(normalizeUpdateDashboardArgs({ uid: 'a', overwrite: true }).overwrite).toBe(true);
+        expect(normalizeUpdateDashboardArgs({ uid: 'a', overwrite: false }).overwrite).toBe(false);
+    });
+
+    it('leaves overwrite absent when not provided', () => {
+        expect('overwrite' in normalizeUpdateDashboardArgs({ uid: 'a' })).toBe(false);
+    });
+
+    it('defaults an unparseable overwrite string to true (avoid the unmarshal error)', () => {
+        expect(normalizeUpdateDashboardArgs({ uid: 'a', overwrite: 'maybe' }).overwrite).toBe(true);
+    });
 });
 
 describe('coerceScopedPanelFixUpdateArgs', () => {
