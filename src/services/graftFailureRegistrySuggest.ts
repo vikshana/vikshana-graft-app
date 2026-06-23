@@ -138,10 +138,10 @@ function suggestFromText(text: string, intent: string): SuggestedRegistryRow | n
         return {
             kind: 'dashboard_clone',
             triggers: 'visual copy / clone dashboard for new machine',
-            handler: 'runProgrammaticDashboardClone + forced continue',
-            implementIn: ['dashboardCloneParse.ts', 'programmaticDashboardClone.ts', 'programmaticLlmFallback.ts'],
-            status: 'missing',
-            matchedBecause: 'Prompt mentions dashboard clone — add to PROGRAMMATIC_FALLBACK_REGISTRY if LLM stalls',
+            handler: 'runProgrammaticDashboardClone (pre-LLM intercept in ChatInterface)',
+            implementIn: ['dashboardCloneParse.ts', 'programmaticDashboardClone.ts', 'ChatInterface.tsx'],
+            status: 'wired_fast_path',
+            matchedBecause: 'Prompt mentions dashboard clone — handled programmatically (all panels copied in one pass)',
         };
     }
 

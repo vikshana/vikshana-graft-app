@@ -1,8 +1,10 @@
 import { splitPanelsIntoChunks } from './dashboardCloneChunks';
 import {
     countPanelsInDashboard,
+    formatDashboardCloneReply,
     prepareClonedDashboard,
     replaceMachineLabelsInValue,
+    runProgrammaticDashboardClone,
 } from './programmaticDashboardClone';
 
 describe('chunked clone sizing', () => {
@@ -63,5 +65,102 @@ describe('countPanelsInDashboard', () => {
             ],
         });
         expect(n).toBe(3);
+    });
+});
+
+describe('formatDashboardCloneReply', () => {
+    it('reports a one-pass clone with no Continue needed', () => {
+        const reply = formatDashboardCloneReply(
+            {
+                ok: true,
+                targetUid: 'new-uid',
+                panelCount: 34,
+                targetTitle: '2505-200033 / Keysight',
+                sourceMachine: '2103-176030',
+                targetMachine: '2505-200033',
+                totalChunks: 6,
+                toolExecutions: [],
+            },
+            200
+        );
+        expect(reply).toContain('dashboard cloned');
+        expect(reply).toContain('2505-200033 / Keysight');
+        expect(reply).toContain('34');
+        expect(reply).toMatch(/no need to type Continue/i);
+    });
+});
+
+describe('runProgrammaticDashboardClone', () => {
+    beforeEach(() => {
+        sessionStorage.clear();
+    });
+
+    it('copies ALL panels in one turn (every batch) without manual Continue', async () => {
+        const sourcePanels = Array.from({ length: 34 }, (_, i) => ({
+            id: i + 1,
+            type: 'timeseries',
+            title: `Panel ${i + 1}`,
+            targets: [{ refId: 'A', expr: `machine_metrics{machine="2103-176030"}` }],
+            gridPos: { x: 0, y: i * 4, w: 12, h: 4 },
+        }));
+
+        const updateCalls: Array<Record<string, unknown>> = [];
+        const mcpClient = {
+            callTool: async ({ name, arguments: args }: { name: string; arguments: Record<string, unknown> }) => {
+                if (name === 'search_dashboards') {
+                    const query = String(args.query ?? '');
+                    if (query.includes('2103-176030')) {
+                        return {
+                            content: [
+                                {
+                                    type: 'text',
+                                    text: JSON.stringify({
+                                        dashboards: [{ uid: 'src-uid', title: '2103-176030 / Skywater-MN' }],
+                                    }),
+                                },
+                            ],
+                        };
+                    }
+                    return { content: [{ type: 'text', text: JSON.stringify({ dashboards: [] }) }] };
+                }
+                if (name === 'get_dashboard_by_uid') {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: JSON.stringify({
+                                    dashboard: { uid: 'src-uid', id: 5, title: '2103-176030 / Skywater-MN', panels: sourcePanels },
+                                    meta: { folderUid: 'folder1' },
+                                }),
+                            },
+                        ],
+                    };
+                }
+                if (name === 'update_dashboard') {
+                    updateCalls.push(args);
+                    return { content: [{ type: 'text', text: JSON.stringify({ uid: 'new-uid', version: updateCalls.length }) }] };
+                }
+                if (name === 'get_dashboard_summary') {
+                    return { content: [{ type: 'text', text: JSON.stringify({ uid: 'new-uid', title: '2505-200033 / Keysight' }) }] };
+                }
+                throw new Error(`unexpected tool ${name}`);
+            },
+        };
+
+        const result = await runProgrammaticDashboardClone(
+            mcpClient,
+            'Create dashboard "2505-200033 / Keysight" — copy of 2103-176030, with data for machine 2505-200033.'
+        );
+
+        expect(result.ok).toBe(true);
+        expect(result.panelCount).toBe(34);
+        expect(result.targetUid).toBe('new-uid');
+        // 34 panels → 6 batches, all saved in this single call (no user "Continue").
+        expect(updateCalls).toHaveLength(6);
+        // Machine labels were remapped in the saved dashboard JSON (the batch message
+        // legitimately names "source → target", so check the dashboard payload only).
+        const firstDash = JSON.stringify(updateCalls[0].dashboard);
+        expect(firstDash).toContain('2505-200033');
+        expect(firstDash).not.toContain('2103-176030');
     });
 });

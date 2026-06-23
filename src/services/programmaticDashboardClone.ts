@@ -15,6 +15,7 @@ import {
     updateCloneSessionMeta,
 } from './cloneSessionStorage';
 import { userWantsDashboardClone } from './dashboardCloneProgress';
+import { formatContinueActionBlock } from './continueAction';
 
 export interface ProgrammaticCloneResult {
     ok: boolean;
@@ -22,6 +23,11 @@ export interface ProgrammaticCloneResult {
     targetUid?: string;
     targetVersion?: number;
     panelCount?: number;
+    targetTitle?: string;
+    sourceMachine?: string;
+    targetMachine?: string;
+    chunksSaved?: number;
+    totalChunks?: number;
     toolExecutions: ToolExecution[];
 }
 
@@ -372,6 +378,11 @@ export async function runProgrammaticDashboardClone(
             ok: false,
             error: (chunkedSave.error ?? 'Chunked save failed') + chunkHint,
             targetUid: chunkedSave.uid,
+            targetTitle,
+            sourceMachine,
+            targetMachine,
+            chunksSaved: chunkedSave.chunksSaved,
+            totalChunks: chunkedSave.totalChunks,
             toolExecutions,
         };
     }
@@ -400,6 +411,52 @@ export async function runProgrammaticDashboardClone(
         ok: true,
         targetUid: savedUid,
         panelCount,
+        targetTitle,
+        sourceMachine,
+        targetMachine,
+        chunksSaved: chunkedSave.chunksSaved,
+        totalChunks: chunkedSave.totalChunks,
         toolExecutions,
     };
+}
+
+/** Human-readable reply for a programmatic dashboard clone. */
+export function formatDashboardCloneReply(
+    result: ProgrammaticCloneResult,
+    buildNumber: number
+): string {
+    if (!result.ok) {
+        const partial =
+            result.targetUid != null &&
+            result.totalChunks != null &&
+            result.chunksSaved != null &&
+            result.chunksSaved > 0 &&
+            result.chunksSaved < result.totalChunks;
+        const base =
+            `### Could not clone dashboard (Graft build ${buildNumber})\n\n` +
+            `${result.error ?? 'Unknown error'}\n\n` +
+            `**Example:** Create dashboard "2505-200033 / Keysight" — copy of 2103-176030, with data for machine 2505-200033.`;
+        // A partial save is resumable — surface the Continue action so the next
+        // run picks up the remaining panel batches from the saved chunk index.
+        return partial
+            ? base +
+                  formatContinueActionBlock(
+                      `Dashboard clone not finished — ${result.chunksSaved}/${result.totalChunks} panel batches saved. Resume the rest.`
+                  )
+            : base;
+    }
+
+    const batches =
+        result.totalChunks && result.totalChunks > 1
+            ? ` in ${result.totalChunks} batches`
+            : '';
+    return (
+        `### Done — dashboard cloned (Graft build ${buildNumber})\n\n` +
+        `- **New dashboard:** ${result.targetTitle ?? result.targetUid} (\`${result.targetUid}\`)\n` +
+        `- **Panels copied:** ${result.panelCount ?? 'all'}${batches}\n` +
+        (result.sourceMachine && result.targetMachine
+            ? `- **Machine remap:** ${result.sourceMachine} → ${result.targetMachine}\n`
+            : '') +
+        `\nAll panels were copied in one pass — no need to type Continue. Hard-refresh the dashboard to see it.`
+    );
 }

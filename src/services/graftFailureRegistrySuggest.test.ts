@@ -17,7 +17,7 @@ describe('graftFailureRegistrySuggest', () => {
         expect(userWantsDashboardRebuild(row.triggers)).toBe(false);
     });
 
-    it('marks missing clone handler', () => {
+    it('marks the clone handler implemented (programmatic one-pass clone)', () => {
         const row = suggestRegistryRowForFailure({
             id: '2',
             at: Date.now(),
@@ -27,6 +27,6 @@ describe('graftFailureRegistrySuggest', () => {
             error: 'rate limit',
         } as GraftFailureEntry);
         expect(row.kind).toBe('dashboard_clone');
-        expect(row.status).toBe('missing');
+        expect(row.status).toBe('wired_fast_path');
     });
 });

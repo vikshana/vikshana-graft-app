@@ -35,7 +35,10 @@ import {
 import { ContinueActionBanner } from './ContinueActionBanner';
 import { filterTools } from '../../../services/toolFilter';
 import { isSimpleConversationalMessage } from '../../../services/programmaticChatIntents';
-import { latestNonContinueUserMessage } from '../../../services/dashboardCloneProgress';
+import {
+  latestNonContinueUserMessage,
+  userWantsDashboardClone,
+} from '../../../services/dashboardCloneProgress';
 import { extractDashboardUidFromMessage } from '../../../services/dashboardMentionParse';
 import {
     formatAmbiguousGraphCreateClarification,
@@ -46,6 +49,11 @@ import {
     messageDescribesUnsupportedAdminRequest,
 } from '../../../services/adminCapabilityParse';
 import { clearActiveCloneIntent } from '../../../services/cloneSessionStorage';
+import { parseCloneIntentMessage } from '../../../services/dashboardCloneParse';
+import {
+  runProgrammaticDashboardClone,
+  formatDashboardCloneReply,
+} from '../../../services/programmaticDashboardClone';
 import { GRAFT_BUILD_NUMBER } from '../../../buildInfo';
 import {
   formatSinglePanelCopyClarification,
@@ -233,6 +241,7 @@ import { buildPowerTechOperatorGuide } from '../../../services/graftPowerTechGui
 import {
   clearPendingDashboardTask,
   resolveEffectiveUserMessage,
+  setPendingDashboardTask,
 } from '../../../services/dashboardPendingTask';
 
 // Local hooks
@@ -1398,6 +1407,68 @@ export const ChatInterface = () => {
               content: finalContent,
               toolExecutions:
                 finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      // Full dashboard clone — run programmatically so ALL panels are copied in one
+      // pass (chunked save loops every batch), instead of the LLM copying ~5 panels
+      // per turn and stalling on "Continue". Only intercept when the source/target
+      // are parseable; otherwise fall through to the LLM for clarification.
+      if (
+        mcpClient &&
+        userWantsDashboardClone(content) &&
+        parseCloneIntentMessage(content).valid
+      ) {
+        errorPathTag = 'dashboard-clone';
+        const cloneResult = await runProgrammaticDashboardClone(mcpClient, content);
+        if (cloneResult.ok) {
+          finalContent = formatDashboardCloneReply(cloneResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = cloneResult.toolExecutions;
+          clearPendingOnProgrammaticSuccess(true);
+        } else {
+          finalContent = formatDashboardCloneReply(cloneResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = cloneResult.toolExecutions;
+          // Preserve a pending task so a later "Continue" resumes the remaining batches.
+          setPendingDashboardTask({
+            kind: 'clone',
+            intentMessage: content,
+            dashboardUid: cloneResult.targetUid,
+            dashboardTitle: cloneResult.targetTitle,
+            updatedAt: Date.now(),
+          });
+          recordGraftFailure({
+            buildNumber: GRAFT_BUILD_NUMBER,
+            intent: 'dashboard_clone',
+            userMessagePreview: content,
+            error: cloneResult.error ?? 'Clone failed',
+          });
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
             };
           }
           return updated;
