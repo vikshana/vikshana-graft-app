@@ -6,6 +6,10 @@ import { llmService, runSimpleConversationalChat } from '../../../services/llm';
 import { runGraftChatTurn } from '../../../services/graftChatTurn';
 import { contextService } from '../../../services/context';
 import { chatHistoryService, prepareMessagesForStorage } from '../../../services/chatHistory';
+import {
+    runProgrammaticDashboardClone,
+    formatDashboardCloneReply,
+} from '../../../services/programmaticDashboardClone';
 
 
 // Mock dependencies
@@ -13,6 +17,19 @@ jest.mock('../../../services/llm');
 jest.mock('../../../services/graftChatTurn');
 jest.mock('../../../services/context');
 jest.mock('../../../services/chatHistory');
+
+// Keep the real clone NLU/parse (userWantsDashboardClone) but stub the network-bound
+// executor + formatter so we can assert handleSend ROUTING in isolation. This is the
+// layer that broke in builds 172-174 (clone fell through to the LLM, and "Continue"
+// misfired as a user-management request) and previously had zero ChatInterface coverage.
+jest.mock('../../../services/programmaticDashboardClone', () => {
+    const actual = jest.requireActual('../../../services/programmaticDashboardClone');
+    return {
+        ...actual,
+        runProgrammaticDashboardClone: jest.fn(),
+        formatDashboardCloneReply: jest.fn(),
+    };
+});
 
 // Mock @grafana/llm with health API
 const mockLlmHealth = jest.fn().mockResolvedValue({
@@ -907,6 +924,100 @@ describe('ChatInterface', () => {
             await waitFor(() => {
                 expect(screen.getByText('Remember me')).toBeInTheDocument();
             });
+        });
+    });
+
+    // Regression for the build 172-174 dashboard-clone breakage. These exercise the
+    // handleSend ROUTING layer (not just the parsers) — the gap that let the bugs ship:
+    //   1. A full clone request must hit the programmatic one-pass handler, never the LLM.
+    //   2. A clone prompt must NOT be misread as a "cannot create users" admin request.
+    describe('dashboard clone routing (regression: builds 172-174)', () => {
+        const CLONE_PROMPT =
+            'Create dashboard "2505-200033 / Keysight" — copy of 2103-176030, with data for machine 2505-200033.';
+
+        beforeEach(() => {
+            mockUseMCPClient.mockReturnValue({
+                enabled: true,
+                client: { listTools: jest.fn().mockResolvedValue({ tools: [] }) },
+            });
+            (formatDashboardCloneReply as jest.Mock).mockReturnValue(
+                'CLONE_DONE_NO_CONTINUE_MARKER'
+            );
+        });
+
+        it('routes a full clone request to the one-pass programmatic handler, not the LLM', async () => {
+            (runProgrammaticDashboardClone as jest.Mock).mockResolvedValue({
+                ok: true,
+                targetUid: 'cloned-uid',
+                targetTitle: '2505-200033 / Keysight',
+                panelCount: 34,
+                totalChunks: 4,
+                toolExecutions: [],
+            });
+
+            render(
+                <MemoryRouter>
+                    <ChatInterface />
+                </MemoryRouter>
+            );
+            await waitFor(() => {
+                expect(screen.getByTestId('send-message-button')).not.toBeDisabled();
+            });
+
+            fireEvent.change(screen.getByTestId('chat-input'), { target: { value: CLONE_PROMPT } });
+            await act(async () => {
+                fireEvent.click(screen.getByLabelText('Send message'));
+            });
+
+            // Routed to the programmatic handler with the live MCP client + the clone intent.
+            await waitFor(() => {
+                expect(runProgrammaticDashboardClone as jest.Mock).toHaveBeenCalledTimes(1);
+            });
+            const [calledClient, calledContent] = (
+                runProgrammaticDashboardClone as jest.Mock
+            ).mock.calls[0];
+            expect(calledClient).toBeTruthy();
+            expect(calledContent).toContain('2103-176030');
+
+            // The reply is the programmatic clone summary — NOT a generic LLM turn,
+            // and NOT the "cannot create users" admin reply.
+            await waitFor(() => {
+                expect(screen.getByText('CLONE_DONE_NO_CONTINUE_MARKER')).toBeInTheDocument();
+            });
+            expect(runGraftChatTurn).not.toHaveBeenCalled();
+            expect(screen.queryByText(/create new users/i)).not.toBeInTheDocument();
+            expect(screen.queryByText(/cannot create/i)).not.toBeInTheDocument();
+        });
+
+        it('does not misclassify a clone prompt as an unsupported admin request', async () => {
+            (runProgrammaticDashboardClone as jest.Mock).mockResolvedValue({
+                ok: false,
+                error: 'Source dashboard not found',
+                targetTitle: '2505-200033 / Keysight',
+                toolExecutions: [],
+            });
+
+            render(
+                <MemoryRouter>
+                    <ChatInterface />
+                </MemoryRouter>
+            );
+            await waitFor(() => {
+                expect(screen.getByTestId('send-message-button')).not.toBeDisabled();
+            });
+
+            fireEvent.change(screen.getByTestId('chat-input'), { target: { value: CLONE_PROMPT } });
+            await act(async () => {
+                fireEvent.click(screen.getByLabelText('Send message'));
+            });
+
+            // Even when the clone fails, it stays on the clone path (formatter is shown)
+            // rather than degrading into the user-management refusal.
+            await waitFor(() => {
+                expect(runProgrammaticDashboardClone as jest.Mock).toHaveBeenCalledTimes(1);
+            });
+            expect(formatDashboardCloneReply as jest.Mock).toHaveBeenCalled();
+            expect(screen.queryByText(/create new users/i)).not.toBeInTheDocument();
         });
     });
 });

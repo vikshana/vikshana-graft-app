@@ -29,19 +29,24 @@ export function messageDescribesDashboardRename(message: string): boolean {
 }
 
 function extractNewLabel(text: string): string | undefined {
-    const quotedFull = text.match(/\brename\b[^.\n]{0,120}?\bto\s+"([^"]+)"/i);
+    // Quoted new name wins, with an optional "be" connector so `to be "Keysight"`
+    // yields "Keysight" (not the filler word "be"). Handles `to "X"` and `to be "X"`.
+    const quotedFull = text.match(/\brename\b[^.\n]{0,120}?\bto\s+(?:be\s+)?"([^"]+)"/i);
     if (quotedFull?.[1]?.trim()) {
         if (quotedFull[1].includes('/')) {
             return quotedFull[1].split('/').pop()?.trim();
         }
         return quotedFull[1].trim();
     }
+    // Unquoted documented form: `to be NewLabel`.
     const toBe = text.match(/\bto\s+be\s+([A-Za-z][A-Za-z0-9_-]*)/i);
     if (toBe?.[1]) {
         return toBe[1];
     }
+    // Bare `to NewLabel` — but never the filler "be"/"instead" (e.g. `to be "X"` where the
+    // quote was missed, or `to instead …`); those are connectors, not the new name.
     const toWord = text.match(/\brename\b[^.\n]{0,80}?\bto\s+([A-Za-z][A-Za-z0-9_-]*)/i);
-    if (toWord?.[1] && !/^instead$/i.test(toWord[1])) {
+    if (toWord?.[1] && !/^(?:instead|be)$/i.test(toWord[1])) {
         return toWord[1];
     }
     return undefined;
@@ -60,7 +65,7 @@ function extractReplaceLabel(text: string): string | undefined {
 }
 
 function extractExplicitNewTitle(text: string): string | undefined {
-    const m = text.match(/\brename\b[^.\n]{0,120}?\bto\s+"([^"]+)"/i);
+    const m = text.match(/\brename\b[^.\n]{0,120}?\bto\s+(?:be\s+)?"([^"]+)"/i);
     if (m?.[1]?.includes('/')) {
         return m[1].trim();
     }

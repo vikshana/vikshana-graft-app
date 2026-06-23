@@ -1,7 +1,9 @@
 import {
+    defaultDashboardTitleForMachine,
     extractSourceMachineId,
     extractTargetMachineId,
     findMachineIdsInText,
+    inferDefaultDashboardTitle,
     isMachineId,
     parseCloneIntentMessage,
 } from './dashboardCloneParse';
@@ -53,5 +55,27 @@ describe('parseCloneIntentMessage', () => {
         expect(p.sourceMachineId).toBe('2103-176030');
         expect(p.targetMachineId).toBe('2505-200033');
         expect(p.requestedTitle).toBe('2505-200033 / Keysight');
+    });
+
+    // Regression (build 174): unnamed new dashboards were titled "<machine> / GlenTest"
+    // (a developer placeholder). The default must be the neutral bare machine id.
+    describe('default dashboard title', () => {
+        it('uses the bare machine id, never the "GlenTest" placeholder', () => {
+            expect(defaultDashboardTitleForMachine('2505-200033')).toBe('2505-200033');
+            expect(defaultDashboardTitleForMachine('2505-200033')).not.toMatch(/GlenTest/i);
+        });
+
+        it('falls back to the machine id when no vendor/name is given', () => {
+            const noVendor =
+                'Create a dashboard for 2505-200033 that is a copy of 2103-176030, with data for 2505-200033';
+            expect(inferDefaultDashboardTitle(noVendor, '2505-200033')).toBe('2505-200033');
+        });
+
+        it('still prefers an explicit vendor when present', () => {
+            const withVendor = 'machine from Keysight for 2505-200033';
+            expect(inferDefaultDashboardTitle(withVendor, '2505-200033')).toBe(
+                '2505-200033 / Keysight'
+            );
+        });
     });
 });

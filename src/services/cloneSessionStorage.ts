@@ -162,10 +162,10 @@ export function clearActiveCloneIntent(): void {
 /** LLM-only message: forces save on Continue (never shown in chat bubble). */
 export function buildForcedCloneContinueLlmMessage(meta: CloneSessionMeta): string {
     const effective = getEffectiveCloneFieldsFromIntent(meta.intent);
-    const title =
-        effective.requestedTitle ?? meta.requestedTitle ?? '2505-200033 / GlenTest';
     const targetMachine =
         effective.requestedMachine ?? meta.requestedMachine ?? '2505-200033';
+    const title =
+        effective.requestedTitle ?? meta.requestedTitle ?? targetMachine;
     const sourceMachine =
         effective.sourceMachineId ?? meta.sourceMachineId ?? '2103-176030';
     const sourceUid = meta.sourceUid ?? 'idHkqdqnk';

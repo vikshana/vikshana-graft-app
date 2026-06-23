@@ -83,9 +83,14 @@ export function extractRequestedDashboardTitle(
     return undefined;
 }
 
-/** Default new dashboard title when user does not name one explicitly. */
+/**
+ * Default new dashboard title when the user does not name one explicitly. Use the bare
+ * machine id (e.g. "2505-200033") — a neutral, accurate default. A later rename like
+ * `to be "Keysight"` becomes "2505-200033 / Keysight". (Previously this injected a
+ * developer placeholder "GlenTest", which leaked into real dashboards.)
+ */
 export function defaultDashboardTitleForMachine(targetMachine: string): string {
-    return `${targetMachine} / GlenTest`;
+    return targetMachine;
 }
 
 /** e.g. "machine from Keysight for 2505-200033" → "2505-200033 / Keysight" */
