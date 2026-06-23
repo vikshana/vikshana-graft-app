@@ -64,13 +64,41 @@ export function extractMachineFromRequest(userContent: string): string | undefin
     return extractTargetMachineId(userContent);
 }
 
+/**
+ * Compose the final title from a user-supplied label. A bare label like "Keysight"
+ * for machine 2505-200033 becomes "2505-200033 / Keysight" (the PowerTech convention,
+ * matching `from Keysight` and `rename … to be "Keysight"`). A label that already
+ * carries a slash or its own machine id is treated as a full title and kept verbatim.
+ */
+function composeTitleFromLabel(label: string, targetMachine?: string): string {
+    const trimmed = label.trim();
+    if (!trimmed) {
+        return trimmed;
+    }
+    if (trimmed.includes('/') || findMachineIdsInText(trimmed).length > 0) {
+        return trimmed;
+    }
+    if (targetMachine && isMachineId(targetMachine)) {
+        return `${targetMachine} / ${trimmed}`;
+    }
+    return trimmed;
+}
+
 export function extractRequestedDashboardTitle(
     userContent: string,
     targetMachine?: string
 ): string | undefined {
-    const named = userContent.match(/named\s+"([^"]+)"/i);
-    if (named?.[1]) {
-        return named[1].trim();
+    const quoted = userContent.match(/\bnamed\s+"([^"]+)"/i);
+    if (quoted?.[1]?.trim()) {
+        return composeTitleFromLabel(quoted[1], targetMachine);
+    }
+    // Unquoted `named Keysight …` — capture the label up to the next clause keyword
+    // ("for"/"that"/"with"/…) or punctuation so we don't swallow "for 2505-200033".
+    const bare = userContent.match(
+        /\bnamed\s+([^",.\n]+?)(?=\s+(?:for|that|which|with|to|as|copy|of|from|using)\b|[,.]|$)/i
+    );
+    if (bare?.[1]?.trim()) {
+        return composeTitleFromLabel(bare[1], targetMachine);
     }
     if (targetMachine) {
         const withSlash = userContent.match(
