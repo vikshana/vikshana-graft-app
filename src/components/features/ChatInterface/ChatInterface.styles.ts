@@ -10,6 +10,15 @@ height: 100%;
 background: ${theme.colors.background.primary};
 font-family: ${theme.typography.fontFamily};
 `,
+  modalToolbar: css`
+display: flex;
+align-items: center;
+gap: ${theme.spacing(1)};
+padding: ${theme.spacing(1)} ${theme.spacing(2)};
+border-bottom: 1px solid ${theme.colors.border.weak};
+background: ${theme.colors.background.secondary};
+flex-shrink: 0;
+`,
   landingContainer: css`
 display: flex;
 flex-direction: column;

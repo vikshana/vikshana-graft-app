@@ -799,4 +799,199 @@ describe('ChatInterface', () => {
             expect(screen.queryByTestId('settings-button')).not.toBeInTheDocument();
         });
     });
+
+    describe('panel context (modal mode)', () => {
+        const mockPanelContext = {
+            pluginId: 'timeseries',
+            id: 42,
+            title: 'CPU Usage',
+            timeRange: { from: 'now-1h', to: 'now' },
+            timeZone: 'browser',
+            dashboard: { uid: 'dash-uid-1', title: 'My Dashboard', tags: [] },
+            targets: [{ refId: 'A', datasource: { uid: 'prom-uid', type: 'prometheus' } }],
+        } as any;
+
+        it('pre-fills the input with panel context on mount', async () => {
+            render(
+                <MemoryRouter>
+                    <ChatInterface panelContext={mockPanelContext} />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                const input = screen.getByTestId('chat-input') as HTMLTextAreaElement;
+                expect(input.value).toContain('CPU Usage');
+                expect(input.value).toContain('My Dashboard');
+                expect(input.value).toContain('now-1h');
+                expect(input.value).toContain('prom-uid');
+            });
+        });
+
+        it('renders the modal toolbar with "Open in Graft" button', async () => {
+            render(
+                <MemoryRouter>
+                    <ChatInterface panelContext={mockPanelContext} />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                expect(screen.getByTestId('modal-toolbar')).toBeInTheDocument();
+                expect(screen.getByTestId('open-in-graft-button')).toBeInTheDocument();
+            });
+        });
+
+        it('renders the "Close" button when onDismiss is provided', async () => {
+            const onDismiss = jest.fn();
+            render(
+                <MemoryRouter>
+                    <ChatInterface panelContext={mockPanelContext} onDismiss={onDismiss} />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                expect(screen.getByTestId('modal-close-button')).toBeInTheDocument();
+            });
+
+            fireEvent.click(screen.getByTestId('modal-close-button'));
+            expect(onDismiss).toHaveBeenCalledTimes(1);
+        });
+
+        it('does not render modal toolbar when panelContext is absent', async () => {
+            render(
+                <MemoryRouter>
+                    <ChatInterface />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                expect(screen.getByTestId('landing-title')).toBeInTheDocument();
+            });
+
+            expect(screen.queryByTestId('modal-toolbar')).not.toBeInTheDocument();
+        });
+
+        it('"Open in Graft" opens new tab with session when messages exist', async () => {
+            const windowOpenSpy = jest.spyOn(window, 'open').mockImplementation(() => null);
+            (chatHistoryService.saveSession as jest.Mock).mockReturnValue({
+                id: 'saved-session-123',
+                messages: [],
+            });
+            (llmService.chat as jest.Mock).mockImplementation(async (_msgs: any, _ctx: any, onUpdate: any) => {
+                onUpdate('Response from Graft');
+            });
+
+            render(
+                <MemoryRouter>
+                    <ChatInterface panelContext={mockPanelContext} />
+                </MemoryRouter>
+            );
+
+            // Send a message so messages.length > 0
+            await waitFor(() => {
+                expect(screen.getByTestId('chat-input')).toBeInTheDocument();
+            });
+
+            const sendBtn = screen.getByLabelText('Send message');
+            await act(async () => { fireEvent.click(sendBtn); });
+
+            await waitFor(() => {
+                expect(screen.getByText('Response from Graft')).toBeInTheDocument();
+            });
+
+            // Now click "Open in Graft"
+            await act(async () => {
+                fireEvent.click(screen.getByTestId('open-in-graft-button'));
+            });
+
+            expect(chatHistoryService.saveSession).toHaveBeenCalled();
+            expect(windowOpenSpy).toHaveBeenCalledWith(
+                expect.stringContaining('session=saved-session-123'),
+                '_blank'
+            );
+
+            windowOpenSpy.mockRestore();
+        });
+
+        it('"Open in Graft" opens new tab with panel URL params when no messages', async () => {
+            const windowOpenSpy = jest.spyOn(window, 'open').mockImplementation(() => null);
+
+            render(
+                <MemoryRouter>
+                    <ChatInterface panelContext={mockPanelContext} />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                expect(screen.getByTestId('open-in-graft-button')).toBeInTheDocument();
+            });
+
+            // No messages sent — click "Open in Graft" immediately
+            await act(async () => {
+                fireEvent.click(screen.getByTestId('open-in-graft-button'));
+            });
+
+            expect(chatHistoryService.saveSession).not.toHaveBeenCalled();
+            expect(windowOpenSpy).toHaveBeenCalledWith(
+                expect.stringContaining('panelTitle=CPU+Usage'),
+                '_blank'
+            );
+
+            windowOpenSpy.mockRestore();
+        });
+    });
+
+    describe('Explore URL param pre-fill', () => {
+        it('pre-fills input from dsUid + queries + time range params', async () => {
+            const queries = JSON.stringify([{ refId: 'A', expr: 'up{job="prometheus"}' }]);
+            render(
+                <MemoryRouter
+                    initialEntries={[`/?dsUid=prom-uid&dsType=prometheus&from=now-6h&to=now&queries=${encodeURIComponent(queries)}`]}
+                >
+                    <ChatInterface />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                const input = screen.getByTestId('chat-input') as HTMLTextAreaElement;
+                expect(input.value).toContain('prom-uid');
+                expect(input.value).toContain('up{job="prometheus"}');
+                expect(input.value).toContain('now-6h');
+            });
+        });
+
+        it('does not pre-fill when no dsUid or queries params present', async () => {
+            render(
+                <MemoryRouter initialEntries={['/']}>
+                    <ChatInterface />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                expect(screen.getByTestId('landing-title')).toBeInTheDocument();
+            });
+
+            const input = screen.getByTestId('chat-input') as HTMLTextAreaElement;
+            expect(input.value).toBe('');
+        });
+    });
+
+    describe('panel URL param pre-fill (Open in Graft zero-message path)', () => {
+        it('pre-fills input from panelTitle URL params', async () => {
+            render(
+                <MemoryRouter
+                    initialEntries={['/?panelTitle=CPU+Usage&dashboardTitle=My+Dashboard&from=now-3h&to=now&dsUid=prom-uid']}
+                >
+                    <ChatInterface />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                const input = screen.getByTestId('chat-input') as HTMLTextAreaElement;
+                expect(input.value).toContain('CPU Usage');
+                expect(input.value).toContain('My Dashboard');
+                expect(input.value).toContain('now-3h');
+                expect(input.value).toContain('prom-uid');
+            });
+        });
+    });
 });

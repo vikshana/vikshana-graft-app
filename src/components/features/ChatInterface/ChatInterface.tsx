@@ -14,8 +14,11 @@ import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 
 // Grafana packages
 import { Alert, Button, TextArea, useStyles2, useTheme2, Icon, ConfirmModal } from '@grafana/ui';
-import { GrafanaTheme2 } from '@grafana/data';
+import { GrafanaTheme2, type PluginExtensionPanelContext } from '@grafana/data';
 import { mcp } from '@grafana/llm';
+
+// Constants
+import { PLUGIN_BASE_URL } from '../../../constants';
 
 // Local services
 import { llmService } from '../../../services/llm';
@@ -93,6 +96,7 @@ const formatContext = (
   toolsConfig?: ToolsConfig,
   grafanaVersion?: string,
   dashboardSchema?: DashboardSchemaCapability,
+  panelOverride?: Readonly<PluginExtensionPanelContext>,
 ): string => {
   const lines: string[] = [];
 
@@ -196,6 +200,18 @@ const formatContext = (
     `- Dashboard links: when referencing a created or modified dashboard, always render its UID as a markdown link: [Open dashboard](/d/{uid}). Never leave a UID as bare text.`
   );
 
+  // Panel context — injected when the user launched Graft from a specific panel
+  if (panelOverride) {
+    lines.push('');
+    lines.push('Panel context (user launched Graft directly from this panel):');
+    lines.push(`- Panel: "${panelOverride.title}" (id: ${panelOverride.id}, type: ${panelOverride.pluginId})`);
+    lines.push(`- Dashboard: "${panelOverride.dashboard.title}" (uid: ${panelOverride.dashboard.uid})`);
+    lines.push(`- Time range: ${panelOverride.timeRange.from} to ${panelOverride.timeRange.to} (tz: ${panelOverride.timeZone})`);
+    if (panelOverride.targets?.length) {
+      lines.push(`- Panel queries: ${JSON.stringify(panelOverride.targets)}`);
+    }
+  }
+
   return lines.join('\n');
 };
 
@@ -251,7 +267,14 @@ MemoizedReactMarkdown.displayName = 'MemoizedReactMarkdown';
 
 
 
-export const ChatInterface = () => {
+export interface ChatInterfaceProps {
+  /** Panel context snapshot passed when launched from a Grafana panel menu. */
+  panelContext?: Readonly<PluginExtensionPanelContext>;
+  /** Called when the modal wrapper should be closed (only set in modal mode). */
+  onDismiss?: () => void;
+}
+
+export const ChatInterface = ({ panelContext, onDismiss }: ChatInterfaceProps = {}) => {
   const styles = useStyles2(getStyles);
   const theme = useTheme2();
   const [input, setInput] = useState('');
@@ -385,6 +408,7 @@ export const ChatInterface = () => {
 
   // Sync state with URL and load session if specified
   useEffect(() => {
+    if (panelContext) { return; } // modal mode — no URL session to restore
     const sessionId = searchParams.get('session');
     const isChatActive = searchParams.get('chat');
 
@@ -419,6 +443,85 @@ export const ChatInterface = () => {
       navigate(location.pathname, { replace: true, state: { ...state, prompt: undefined } });
     }
   }, [location.state, location.pathname, navigate]);
+
+  // Pre-fill input from panel context when launched from a panel menu modal (mount-only)
+  useEffect(() => {
+    if (!panelContext) { return; }
+    const dsUid = panelContext.targets?.[0]?.datasource?.uid;
+    const dsHint = dsUid ? ` (datasource uid: ${dsUid})` : '';
+    setInput(
+      `Tell me about the "${panelContext.title}" panel on the ` +
+      `"${panelContext.dashboard.title}" dashboard${dsHint}. ` +
+      `Time range: ${panelContext.timeRange.from} to ${panelContext.timeRange.to}.`
+    );
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Pre-fill input from Explore toolbar URL params (mount-only, full-page mode only)
+  useEffect(() => {
+    if (panelContext) { return; }
+    const dsUid      = searchParams.get('dsUid');
+    const dsType     = searchParams.get('dsType');
+    const from       = searchParams.get('from');
+    const to         = searchParams.get('to');
+    const rawQueries = searchParams.get('queries');
+    if (!dsUid && !rawQueries) { return; }
+
+    const parts: string[] = ['I want to analyze some data from Grafana Explore.'];
+    if (dsUid) { parts.push(`Datasource UID: ${dsUid}${dsType ? ` (${dsType})` : ''}.`); }
+    if (from && to) { parts.push(`Time range: ${from} to ${to}.`); }
+    if (rawQueries) {
+      try {
+        const qs: Array<{ expr?: string; refId: string }> = JSON.parse(rawQueries);
+        const exprs = qs.map((q) => q.expr).filter(Boolean);
+        if (exprs.length) { parts.push(`Queries: ${exprs.join('; ')}.`); }
+      } catch { /* ignore malformed JSON */ }
+    }
+    setInput(parts.join(' '));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Pre-fill input from panel context URL params — used when "Open in Graft" is clicked
+  // with no prior messages (zero-message path from GraftPanelModal)
+  useEffect(() => {
+    if (panelContext) { return; }
+    const panelTitle     = searchParams.get('panelTitle');
+    const dashboardTitle = searchParams.get('dashboardTitle');
+    const from           = searchParams.get('from');
+    const to             = searchParams.get('to');
+    const dsUid          = searchParams.get('dsUid');
+    if (!panelTitle) { return; }
+
+    const dsHint = dsUid ? ` (datasource uid: ${dsUid})` : '';
+    const timeHint = from && to ? ` Time range: ${from} to ${to}.` : '';
+    setInput(
+      `Tell me about the "${panelTitle}" panel` +
+      `${dashboardTitle ? ` on the "${dashboardTitle}" dashboard` : ''}${dsHint}.${timeHint}`
+    );
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Handler for "Open in Graft" button inside the panel modal.
+  // If messages exist: flush the session to localStorage and open with ?session=<id>.
+  // If no messages yet: re-encode panel context in URL so full-page Graft pre-fills.
+  const handleOpenInGraft = () => {
+    if (!panelContext) { return; }
+    if (messages.length > 0) {
+      const saved = chatHistoryService.saveSession(messages, currentSessionId);
+      window.open(`${PLUGIN_BASE_URL}/?chat=true&session=${saved.id}`, '_blank');
+    } else {
+      const params = new URLSearchParams({
+        panelTitle:     panelContext.title,
+        dashboardUid:   panelContext.dashboard.uid,
+        dashboardTitle: panelContext.dashboard.title,
+        panelId:        String(panelContext.id),
+        panelPlugin:    panelContext.pluginId,
+        from:           panelContext.timeRange.from,
+        to:             panelContext.timeRange.to,
+        tz:             panelContext.timeZone,
+      });
+      const dsUid = panelContext.targets?.[0]?.datasource?.uid;
+      if (dsUid) { params.set('dsUid', dsUid); }
+      window.open(`${PLUGIN_BASE_URL}/?${params.toString()}`, '_blank');
+    }
+  };
 
   // Initial scroll to bottom when chat loads
   useEffect(() => {
@@ -533,7 +636,7 @@ export const ChatInterface = () => {
       const dataSources = contextService.getDataSources();
       const { version: grafanaVersion, dashboardSchema } = contextService.getBuildInfo();
 
-      const context = formatContext(dashboard, user, dataSources, toolsConfig, grafanaVersion, dashboardSchema);
+      const context = formatContext(dashboard, user, dataSources, toolsConfig, grafanaVersion, dashboardSchema, panelContext);
 
       // Create a placeholder message for the assistant
       const assistantMessage: Message = { role: 'assistant', content: '' };
@@ -795,7 +898,7 @@ ${input} `
       const user = contextService.getUserContext();
       const dataSources = contextService.getDataSources();
       const { version: grafanaVersion, dashboardSchema } = contextService.getBuildInfo();
-      const context = formatContext(dashboard, user, dataSources, toolsConfig, grafanaVersion, dashboardSchema);
+      const context = formatContext(dashboard, user, dataSources, toolsConfig, grafanaVersion, dashboardSchema, panelContext);
       const assistantMessage: Message = { role: 'assistant', content: '' };
       setMessages((prev) => [...prev, assistantMessage]);
 
@@ -914,6 +1017,31 @@ ${input} `
 
   return (
     <div className={styles.container}>
+      {/* Modal toolbar — only rendered when launched from a panel menu */}
+      {panelContext && (
+        <div className={styles.modalToolbar} data-testid="modal-toolbar">
+          <Button
+            variant="secondary"
+            size="sm"
+            icon="external-link-alt"
+            onClick={handleOpenInGraft}
+            data-testid="open-in-graft-button"
+          >
+            Open in Graft
+          </Button>
+          {onDismiss && (
+            <Button
+              variant="secondary"
+              size="sm"
+              icon="times"
+              onClick={onDismiss}
+              data-testid="modal-close-button"
+            >
+              Close
+            </Button>
+          )}
+        </div>
+      )}
       {messages.length === 0 ? (
         <div className={styles.landingContainer}>
           <button

@@ -102,13 +102,27 @@
     }
   ],
   "dependencies": {
-    "grafanaDependency": ">=10.4.0",
+    "grafanaDependency": ">=11.1.0",
     "plugins": [
       {
         "type": "app",
         "id": "grafana-llm-app",
         "name": "Grafana LLM",
         "version": "1.0.0"
+      }
+    ]
+  },
+  "extensions": {
+    "addedLinks": [
+      {
+        "targets": ["grafana/dashboard/panel/menu"],
+        "title": "Ask Graft about this panel",
+        "description": "Open the Graft AI Assistant with this panel as context"
+      },
+      {
+        "targets": ["grafana/explore/toolbar/action"],
+        "title": "Analyze in Graft AI Assistant",
+        "description": "Send current Explore query to Graft for AI analysis"
       }
     ]
   }

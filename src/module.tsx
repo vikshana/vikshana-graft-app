@@ -1,8 +1,23 @@
 import React, { Suspense, lazy } from 'react';
-import { AppPlugin, type AppRootProps } from '@grafana/data';
+import { AppPlugin, type AppRootProps, PluginExtensionPoints, type PluginExtensionPanelContext } from '@grafana/data';
 import { LoadingPlaceholder } from '@grafana/ui';
 import type { AppConfigProps } from './components/features/AppConfig/AppConfig';
 import type { AgentConfigProps } from './components/features/AppConfig/AgentConfig';
+import { PLUGIN_BASE_URL } from './constants';
+
+/** Context passed by Grafana Explore to ExploreToolbarAction extension points.
+ *  Not exported from @grafana/data — defined locally from Grafana core source. */
+interface ExploreContext {
+  exploreId: string;
+  targets: Array<{
+    refId: string;
+    expr?: string;
+    query?: string;
+    datasource?: { uid?: string; type?: string };
+  }>;
+  timeRange: { from: string; to: string };
+  timeZone: string;
+}
 
 const LazyApp = lazy(() => import('./components/features/App/App'));
 const LazyAppConfig = lazy(() => import('./components/features/AppConfig/AppConfig'));
@@ -43,4 +58,65 @@ export const plugin = new AppPlugin<{}>()
     icon: 'bolt',
     body: AgentConfig,
     id: 'agent',
+  })
+
+  // ── Panel context menu: "Ask Graft about this panel" ─────────────────────
+  .addLink<PluginExtensionPanelContext>({
+    title: 'Ask Graft about this panel',
+    description: 'Open the Graft AI Assistant with this panel as context',
+    targets: [PluginExtensionPoints.DashboardPanelMenu],
+    icon: 'comments-alt',
+    configure: (ctx) => (ctx?.title ? { title: `Ask Graft: "${ctx.title}"` } : {}),
+    onClick: (_, helpers) => {
+      const ctx = helpers.context;
+      const LazyGraftPanelModal = lazy(
+        () => import('./components/features/GraftPanelModal/GraftPanelModal')
+      );
+      helpers.openModal({
+        title: ctx?.title ? `Graft — ${ctx.title}` : 'Graft AI Assistant',
+        width: '85%',
+        body: ({ onDismiss }) => (
+          <Suspense fallback={<LoadingPlaceholder text="" />}>
+            <LazyGraftPanelModal panelContext={ctx} onDismiss={onDismiss} />
+          </Suspense>
+        ),
+      });
+    },
+  })
+
+  // ── Explore toolbar: "Analyze in Graft AI Assistant" ─────────────────────
+  .addLink<ExploreContext>({
+    title: 'Analyze in Graft AI Assistant',
+    description: 'Send current Explore query to Graft for AI analysis',
+    targets: [PluginExtensionPoints.ExploreToolbarAction],
+    icon: 'comments-alt',
+    openInNewTab: true,
+    configure: (ctx) => {
+      const params = new URLSearchParams();
+      const firstTarget = ctx?.targets?.[0];
+      if (firstTarget?.datasource?.uid) {
+        params.set('dsUid', firstTarget.datasource.uid);
+      }
+      if (firstTarget?.datasource?.type) {
+        params.set('dsType', firstTarget.datasource.type);
+      }
+      if (ctx?.timeRange?.from) { params.set('from', ctx.timeRange.from); }
+      if (ctx?.timeRange?.to)   { params.set('to',   ctx.timeRange.to); }
+      if (ctx?.timeZone)        { params.set('tz',   ctx.timeZone); }
+      if (ctx?.targets?.length) {
+        params.set(
+          'queries',
+          JSON.stringify(
+            ctx.targets.map((t) => ({
+              refId: t.refId,
+              expr: t.expr ?? t.query ?? '',
+              dsUid: t.datasource?.uid,
+              dsType: t.datasource?.type,
+            }))
+          )
+        );
+      }
+      const qs = params.toString();
+      return { path: `${PLUGIN_BASE_URL}/${qs ? '?' + qs : ''}` };
+    },
   });
