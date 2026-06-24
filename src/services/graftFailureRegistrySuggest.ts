@@ -7,6 +7,7 @@ import { userWantsModulePanelReorder } from './modulePanelReorderParse';
 import { userWantsBulkPeerBandFix } from './bulkPeerBandFixParse';
 import { messageMentionsInfluxPanelRepair } from './influxPanelRepairParse';
 import { userWantsDashboardClone } from './dashboardCloneProgress';
+import { userWantsDashboardImproveApply } from './dashboardReviewParse';
 
 export type RegistryWireStatus = 'wired_fast_path' | 'wired_fallback' | 'missing';
 
@@ -153,6 +154,18 @@ function suggestFromText(text: string, intent: string): SuggestedRegistryRow | n
             implementIn: ['leakedToolCallRecovery.ts', 'llm.ts'],
             status: 'wired_fallback',
             matchedBecause: 'Leaked XML tool markup detected',
+        };
+    }
+
+    if (userWantsDashboardImproveApply(msg)) {
+        return {
+            kind: 'dashboard_improve',
+            triggers: 'suggest improvements AND apply (review + apply changes)',
+            handler: 'runProgrammaticDashboardImprove (pre-LLM intercept in ChatInterface)',
+            implementIn: ['dashboardReviewParse.ts', 'programmaticDashboardImprove.ts', 'ChatInterface.tsx'],
+            status: 'wired_fast_path',
+            matchedBecause:
+                'Prompt asks to apply review improvements — safe structural fixes (title row, dedupe, overlaps) saved in one pass',
         };
     }
 

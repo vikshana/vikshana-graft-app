@@ -1,6 +1,8 @@
 import {
     DASHBOARD_REVIEW_EXAMPLE_PROMPT,
+    parseDashboardImproveRequest,
     parseDashboardReviewRequest,
+    userWantsDashboardImproveApply,
     userWantsDashboardReviewApply,
     userWantsDashboardReviewOnly,
 } from './dashboardReviewParse';
@@ -27,5 +29,41 @@ describe('dashboardReviewParse', () => {
             'Review dashboard uid=cfo0wckufbdhce and suggest 5 improvements for readability'
         );
         expect(req?.suggestionCount).toBe(5);
+    });
+});
+
+// Regression: "Suggest improvements AND apply" went to the LLM (because "apply" turned off
+// review-only), which truncated the 34-panel JSON and looped without ever saving. This must
+// now route to the programmatic improve+apply fast path instead.
+describe('dashboard improve + apply intent', () => {
+    const PROMPT = 'Suggest improvements and apply the changes to the dashboard with UID = ffq3wabj0i70gd';
+
+    it('classifies the user prompt as an improve+apply request', () => {
+        expect(userWantsDashboardImproveApply(PROMPT)).toBe(true);
+        expect(parseDashboardImproveRequest(PROMPT)).toEqual({ dashboardUid: 'ffq3wabj0i70gd' });
+    });
+
+    it('does not treat improve+apply as a review-only request', () => {
+        expect(userWantsDashboardReviewOnly(PROMPT)).toBe(false);
+        expect(parseDashboardReviewRequest(PROMPT)).toBeNull();
+    });
+
+    it('also matches "review ... and update the dashboard"', () => {
+        const p = 'Review dashboard UID = abc123 and update the dashboard with the improvements';
+        expect(userWantsDashboardImproveApply(p)).toBe(true);
+        expect(parseDashboardImproveRequest(p)?.dashboardUid).toBe('abc123');
+    });
+
+    it('ignores an apply request with no review/improve verb (e.g. a rename apply)', () => {
+        expect(userWantsDashboardImproveApply('Apply the rename to dashboard UID = abc123')).toBe(false);
+        expect(parseDashboardImproveRequest('Apply the rename to dashboard UID = abc123')).toBeNull();
+    });
+
+    it('requires a dashboard uid', () => {
+        expect(parseDashboardImproveRequest('Suggest improvements and apply them')).toBeNull();
+    });
+
+    it('does not fire for suggestions-only requests', () => {
+        expect(userWantsDashboardImproveApply(DASHBOARD_REVIEW_EXAMPLE_PROMPT)).toBe(false);
     });
 });

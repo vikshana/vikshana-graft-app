@@ -92,5 +92,42 @@ export function parseDashboardReviewRequest(message: string): DashboardReviewReq
     };
 }
 
+export interface DashboardImproveRequest {
+    dashboardUid: string;
+}
+
+/**
+ * User asked Graft to review/improve a dashboard AND apply the changes (e.g. "suggest
+ * improvements and apply …"). Distinct from review-only, and from clone/rename/panel ops
+ * (which are matched earlier and don't carry a review/improve verb).
+ */
+export function userWantsDashboardImproveApply(message: string): boolean {
+    const text = normalizeMessageQuotes(message.trim());
+    if (!userWantsDashboardReviewApply(text)) {
+        return false;
+    }
+    const improveVerb =
+        /\b(improve|improvement|readability|review|audit|optimi[sz]e|clean\s*up|tidy|reorganiz|reorganis)\b/i.test(
+            text
+        ) ||
+        (/\b(suggest|recommend|propose)\b/i.test(text) && /\b(change|improvement|fix)/i.test(text));
+    if (!improveVerb) {
+        return false;
+    }
+    return Boolean(extractDashboardUidFromMessage(text));
+}
+
+export function parseDashboardImproveRequest(message: string): DashboardImproveRequest | null {
+    const text = normalizeMessageQuotes(message.trim());
+    if (!userWantsDashboardImproveApply(text)) {
+        return null;
+    }
+    const dashboardUid = extractDashboardUidFromMessage(text);
+    if (!dashboardUid) {
+        return null;
+    }
+    return { dashboardUid };
+}
+
 export const DASHBOARD_REVIEW_EXAMPLE_PROMPT =
     'Review dashboard with UID = cfo0wckufbdhce and suggest three improvements to improve readability.';

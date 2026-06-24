@@ -203,11 +203,17 @@ import {
 import {
   parseDashboardReviewRequest,
   userWantsDashboardReviewOnly,
+  parseDashboardImproveRequest,
+  userWantsDashboardImproveApply,
 } from '../../../services/dashboardReviewParse';
 import {
   runProgrammaticDashboardReview,
   formatDashboardReviewReply,
 } from '../../../services/programmaticDashboardReview';
+import {
+  runProgrammaticDashboardImprove,
+  formatDashboardImproveReply,
+} from '../../../services/programmaticDashboardImprove';
 import { formatChatErrorForUser, extractErrorMessage } from '../../../services/chatError';
 import { contentHasLeakedToolCalls } from '../../../services/leakedToolCallRecovery';
 import { tryProgrammaticFallbackAfterLlm } from '../../../services/programmaticLlmFallback';
@@ -1595,6 +1601,59 @@ export const ChatInterface = () => {
           setCurrentSessionId(savedSession.id);
           currentSessionIdRef.current = savedSession.id;
           replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      // Review + APPLY — run programmatically so the full dashboard JSON is read and the
+      // safe structural fixes (title row, exact-duplicate removal, overlap repair) are saved
+      // in one pass. The LLM path truncates large dashboards and loops on get_dashboard_by_uid
+      // without ever saving; this fast path mirrors the clone handler instead.
+      const dashboardImproveRequest = parseDashboardImproveRequest(content);
+      if (userWantsDashboardImproveApply(content) && dashboardImproveRequest) {
+        errorPathTag = 'dashboard-improve';
+        if (!mcpClient) {
+          finalContent = '### Could not apply improvements\n\nGrafana MCP tools are not connected.';
+        } else {
+          const improveResult = await runProgrammaticDashboardImprove(mcpClient, dashboardImproveRequest);
+          finalContent = formatDashboardImproveReply(improveResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = improveResult.toolExecutions;
+          clearPendingOnProgrammaticSuccess(improveResult.ok);
+          if (!improveResult.ok) {
+            recordGraftFailure({
+              buildNumber: GRAFT_BUILD_NUMBER,
+              intent: 'dashboard-improve',
+              userMessagePreview: content,
+              error: improveResult.error ?? 'Unknown error',
+              dashboardTitle: improveResult.dashboardTitle,
+            });
+          }
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const improveAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const improveSession = chatHistoryService.saveSession(
+          [...newMessages, improveAssistantMessage],
+          currentSessionId
+        );
+        if (improveSession) {
+          setCurrentSessionId(improveSession.id);
+          currentSessionIdRef.current = improveSession.id;
+          replaceChatSessionInUrl(improveSession.id);
         }
         return;
       }
