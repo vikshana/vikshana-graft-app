@@ -827,7 +827,7 @@ describe('ChatInterface', () => {
             });
         });
 
-        it('renders the modal header with panel title and "Open in Graft" button', async () => {
+        it('pre-fills the input with panel context on mount', async () => {
             render(
                 <MemoryRouter>
                     <ChatInterface panelContext={mockPanelContext} />
@@ -835,48 +835,30 @@ describe('ChatInterface', () => {
             );
 
             await waitFor(() => {
-                expect(screen.getByTestId('modal-header')).toBeInTheDocument();
-                expect(screen.getByTestId('modal-header-title')).toHaveTextContent('CPU Usage');
-                expect(screen.getByTestId('open-in-graft-button')).toBeInTheDocument();
+                const input = screen.getByTestId('chat-input') as HTMLTextAreaElement;
+                expect(input.value).toContain('CPU Usage');
+                expect(input.value).toContain('My Dashboard');
+                expect(input.value).toContain('now-1h');
+                expect(input.value).toContain('prom-uid');
             });
         });
 
-        it('does not render a separate Close button (Grafana modal × handles dismiss)', async () => {
-            const onDismiss = jest.fn();
+        it('does not render modal header inside ChatInterface (button is in Grafana title bar)', async () => {
             render(
                 <MemoryRouter>
-                    <ChatInterface panelContext={mockPanelContext} onDismiss={onDismiss} />
+                    <ChatInterface panelContext={mockPanelContext} />
                 </MemoryRouter>
             );
 
             await waitFor(() => {
-                expect(screen.getByTestId('modal-header')).toBeInTheDocument();
-            });
-
-            // No separate Close button — Grafana's × button handles dismiss
-            expect(screen.queryByTestId('modal-close-button')).not.toBeInTheDocument();
-        });
-
-        it('does not render modal header when panelContext is absent', async () => {
-            render(
-                <MemoryRouter>
-                    <ChatInterface />
-                </MemoryRouter>
-            );
-
-            await waitFor(() => {
-                expect(screen.getByTestId('landing-title')).toBeInTheDocument();
+                expect(screen.getByTestId('chat-input')).toBeInTheDocument();
             });
 
             expect(screen.queryByTestId('modal-header')).not.toBeInTheDocument();
+            expect(screen.queryByTestId('open-in-graft-button')).not.toBeInTheDocument();
         });
 
-        it('"Open in Graft" opens new tab with session when messages exist', async () => {
-            const windowOpenSpy = jest.spyOn(window, 'open').mockImplementation(() => null);
-            (chatHistoryService.saveSession as jest.Mock).mockReturnValue({
-                id: 'saved-session-123',
-                messages: [],
-            });
+        it('suppresses the chat header (Back/Previous Conversations) in modal mode', async () => {
             (llmService.chat as jest.Mock).mockImplementation(async (_msgs: any, _ctx: any, onUpdate: any) => {
                 onUpdate('Response from Graft');
             });
@@ -887,9 +869,9 @@ describe('ChatInterface', () => {
                 </MemoryRouter>
             );
 
-            // Send a message so messages.length > 0
+            // Wait for LLM health check and pre-fill
             await waitFor(() => {
-                expect(screen.getByTestId('chat-input')).toBeInTheDocument();
+                expect(screen.getByTestId('send-message-button')).not.toBeDisabled();
             });
 
             const sendBtn = screen.getByLabelText('Send message');
@@ -899,45 +881,9 @@ describe('ChatInterface', () => {
                 expect(screen.getByText('Response from Graft')).toBeInTheDocument();
             });
 
-            // Now click "Open in Graft"
-            await act(async () => {
-                fireEvent.click(screen.getByTestId('open-in-graft-button'));
-            });
-
-            expect(chatHistoryService.saveSession).toHaveBeenCalled();
-            expect(windowOpenSpy).toHaveBeenCalledWith(
-                expect.stringContaining('session=saved-session-123'),
-                '_blank'
-            );
-
-            windowOpenSpy.mockRestore();
-        });
-
-        it('"Open in Graft" opens new tab with panel URL params when no messages', async () => {
-            const windowOpenSpy = jest.spyOn(window, 'open').mockImplementation(() => null);
-
-            render(
-                <MemoryRouter>
-                    <ChatInterface panelContext={mockPanelContext} />
-                </MemoryRouter>
-            );
-
-            await waitFor(() => {
-                expect(screen.getByTestId('open-in-graft-button')).toBeInTheDocument();
-            });
-
-            // No messages sent — click "Open in Graft" immediately
-            await act(async () => {
-                fireEvent.click(screen.getByTestId('open-in-graft-button'));
-            });
-
-            expect(chatHistoryService.saveSession).not.toHaveBeenCalled();
-            expect(windowOpenSpy).toHaveBeenCalledWith(
-                expect.stringContaining('panelTitle=CPU+Usage'),
-                '_blank'
-            );
-
-            windowOpenSpy.mockRestore();
+            // Chat header with Back/Previous Conversations must not appear in modal mode
+            expect(screen.queryByTestId('chat-header')).not.toBeInTheDocument();
+            expect(screen.queryByTestId('back-button')).not.toBeInTheDocument();
         });
     });
 

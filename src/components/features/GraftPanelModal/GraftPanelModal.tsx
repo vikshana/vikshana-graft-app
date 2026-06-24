@@ -12,17 +12,12 @@ export interface GraftPanelModalProps {
 /**
  * Self-contained modal wrapper for the Graft chat interface.
  *
- * This component is mounted by Grafana's extension system OUTSIDE the main
- * App React tree, but INSIDE Grafana's BrowserRouter. We must NOT add a
- * MemoryRouter here — React Router v6 forbids nested Router contexts.
- * ChatInterface's URL hooks will use the existing Grafana BrowserRouter.
+ * Renders inside Grafana's existing BrowserRouter (no MemoryRouter needed).
+ * The panelContext prop prevents ChatInterface from restoring URL session
+ * state and pre-fills the input with panel context instead.
  *
- * The panelContext prop prevents ChatInterface from reading session state
- * from URL params (the modal has no relevant URL params of its own).
- *
- * Suspense is required above MCPClientProvider because MCPClientProvider
- * uses the Suspense data-fetching pattern (resource.read() can throw a
- * Promise).
+ * The "Open in Graft" button is injected into Grafana's own modal title bar
+ * via a JSX title element in module.tsx — so it never scrolls away.
  */
 export function GraftPanelModal({ panelContext, onDismiss }: GraftPanelModalProps) {
   return (

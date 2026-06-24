@@ -72,12 +72,54 @@ export const plugin = new AppPlugin<{}>()
     configure: () => ({ title: 'Ask Graft' }),
     onClick: (_, helpers) => {
       const ctx = helpers.context;
+
+      // Build URL params for "Open in Graft" — encodes panel context so
+      // the full-page Graft pre-fills the input with the same prompt.
+      const openParams = new URLSearchParams({
+        panelTitle:     ctx?.title ?? '',
+        dashboardUid:   ctx?.dashboard.uid ?? '',
+        dashboardTitle: ctx?.dashboard.title ?? '',
+        panelId:        String(ctx?.id ?? ''),
+        panelPlugin:    ctx?.pluginId ?? '',
+        from:           ctx?.timeRange.from ?? 'now-1h',
+        to:             ctx?.timeRange.to ?? 'now',
+        tz:             ctx?.timeZone ?? 'browser',
+      });
+      const dsUid = ctx?.targets?.[0]?.datasource?.uid;
+      if (dsUid) { openParams.set('dsUid', dsUid); }
+      const openInGraftUrl = `${PLUGIN_BASE_URL}/?${openParams.toString()}`;
+
       helpers.openModal({
-        title: 'Graft AI Assistant',
+        // JSX title: "Graft AI Assistant" on left, "Open in Graft ↗" button on right.
+        // This renders inside Grafana's fixed modal title bar so the button
+        // is always visible regardless of how far the user scrolls.
+        title: (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingRight: '8px' }}>
+            <span>Graft AI Assistant</span>
+            <a
+              href={openInGraftUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '13px',
+                color: 'inherit',
+                opacity: 0.8,
+                textDecoration: 'none',
+                padding: '2px 8px',
+                borderRadius: '4px',
+                border: '1px solid currentColor',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Open in Graft ↗
+            </a>
+          </div>
+        ) as unknown as string,
+        ariaLabel: 'Graft AI Assistant',
         width: '85%',
-        // height caps the modal so our flex layout handles internal scroll
-        // and the modalHeader stays pinned at the top of the content area
-        height: '85vh',
         body: ({ onDismiss }) => (
           <GraftPanelModal panelContext={ctx} onDismiss={onDismiss} />
         ),

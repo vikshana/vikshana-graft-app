@@ -7,35 +7,8 @@ const getStyles = (theme: GrafanaTheme2) => ({
 display: flex;
 flex-direction: column;
 height: 100%;
-overflow: hidden;
 background: ${theme.colors.background.primary};
 font-family: ${theme.typography.fontFamily};
-`,
-  modalHeader: css`
-display: flex;
-align-items: center;
-justify-content: space-between;
-padding: ${theme.spacing(1)} ${theme.spacing(2)};
-background: ${theme.colors.background.canvas};
-border-bottom: 1px solid ${theme.colors.border.medium};
-flex-shrink: 0;
-min-height: 40px;
-`,
-  modalHeaderTitle: css`
-font-size: ${theme.typography.h5.fontSize};
-font-weight: ${theme.typography.fontWeightMedium};
-color: ${theme.colors.text.primary};
-overflow: hidden;
-text-overflow: ellipsis;
-white-space: nowrap;
-flex: 1;
-margin-right: ${theme.spacing(2)};
-`,
-  modalHeaderActions: css`
-display: flex;
-align-items: center;
-gap: ${theme.spacing(1)};
-flex-shrink: 0;
 `,
   landingContainer: css`
 display: flex;
@@ -229,6 +202,7 @@ color: ${theme.colors.text.secondary};
 `,
   messageList: css`
 flex-grow: 1;
+min-height: 0;
 overflow-y: auto;
 padding: ${theme.spacing(2)};
 display: flex;

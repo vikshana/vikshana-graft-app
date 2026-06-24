@@ -18,7 +18,6 @@ import { GrafanaTheme2, type PluginExtensionPanelContext } from '@grafana/data';
 import { mcp } from '@grafana/llm';
 
 // Constants
-import { PLUGIN_BASE_URL } from '../../../constants';
 
 // Local services
 import { llmService } from '../../../services/llm';
@@ -479,8 +478,8 @@ export const ChatInterface = ({ panelContext, onDismiss }: ChatInterfaceProps = 
     setInput(parts.join(' '));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Pre-fill input from panel context URL params — used when "Open in Graft" is clicked
-  // with no prior messages (zero-message path from GraftPanelModal)
+  // Pre-fill input from panel context URL params — used when "Open in Graft"
+  // is clicked from the modal title bar (full-page navigation path)
   useEffect(() => {
     if (panelContext) { return; }
     const panelTitle     = searchParams.get('panelTitle');
@@ -497,31 +496,6 @@ export const ChatInterface = ({ panelContext, onDismiss }: ChatInterfaceProps = 
       `${dashboardTitle ? ` on the "${dashboardTitle}" dashboard` : ''}${dsHint}.${timeHint}`
     );
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Handler for "Open in Graft" button inside the panel modal.
-  // If messages exist: flush the session to localStorage and open with ?session=<id>.
-  // If no messages yet: re-encode panel context in URL so full-page Graft pre-fills.
-  const handleOpenInGraft = () => {
-    if (!panelContext) { return; }
-    if (messages.length > 0) {
-      const saved = chatHistoryService.saveSession(messages, currentSessionId);
-      window.open(`${PLUGIN_BASE_URL}/?chat=true&session=${saved.id}`, '_blank');
-    } else {
-      const params = new URLSearchParams({
-        panelTitle:     panelContext.title,
-        dashboardUid:   panelContext.dashboard.uid,
-        dashboardTitle: panelContext.dashboard.title,
-        panelId:        String(panelContext.id),
-        panelPlugin:    panelContext.pluginId,
-        from:           panelContext.timeRange.from,
-        to:             panelContext.timeRange.to,
-        tz:             panelContext.timeZone,
-      });
-      const dsUid = panelContext.targets?.[0]?.datasource?.uid;
-      if (dsUid) { params.set('dsUid', dsUid); }
-      window.open(`${PLUGIN_BASE_URL}/?${params.toString()}`, '_blank');
-    }
-  };
 
   // Initial scroll to bottom when chat loads
   useEffect(() => {
@@ -1017,25 +991,6 @@ ${input} `
 
   return (
     <div className={styles.container}>
-      {/* Sticky modal header — panel name left, Open in Graft right. Only in modal mode. */}
-      {panelContext && (
-        <div className={styles.modalHeader} data-testid="modal-header">
-          <span className={styles.modalHeaderTitle} data-testid="modal-header-title">
-            {panelContext.title}
-          </span>
-          <div className={styles.modalHeaderActions}>
-            <Button
-              variant="secondary"
-              size="sm"
-              icon="external-link-alt"
-              onClick={handleOpenInGraft}
-              data-testid="open-in-graft-button"
-            >
-              Open in Graft
-            </Button>
-          </div>
-        </div>
-      )}
       {messages.length === 0 ? (
         <div className={styles.landingContainer}>
           <button
