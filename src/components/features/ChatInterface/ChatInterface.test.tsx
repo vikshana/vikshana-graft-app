@@ -827,7 +827,7 @@ describe('ChatInterface', () => {
             });
         });
 
-        it('renders the modal toolbar with "Open in Graft" button', async () => {
+        it('renders the modal header with panel title and "Open in Graft" button', async () => {
             render(
                 <MemoryRouter>
                     <ChatInterface panelContext={mockPanelContext} />
@@ -835,12 +835,13 @@ describe('ChatInterface', () => {
             );
 
             await waitFor(() => {
-                expect(screen.getByTestId('modal-toolbar')).toBeInTheDocument();
+                expect(screen.getByTestId('modal-header')).toBeInTheDocument();
+                expect(screen.getByTestId('modal-header-title')).toHaveTextContent('CPU Usage');
                 expect(screen.getByTestId('open-in-graft-button')).toBeInTheDocument();
             });
         });
 
-        it('renders the "Close" button when onDismiss is provided', async () => {
+        it('does not render a separate Close button (Grafana modal × handles dismiss)', async () => {
             const onDismiss = jest.fn();
             render(
                 <MemoryRouter>
@@ -849,14 +850,14 @@ describe('ChatInterface', () => {
             );
 
             await waitFor(() => {
-                expect(screen.getByTestId('modal-close-button')).toBeInTheDocument();
+                expect(screen.getByTestId('modal-header')).toBeInTheDocument();
             });
 
-            fireEvent.click(screen.getByTestId('modal-close-button'));
-            expect(onDismiss).toHaveBeenCalledTimes(1);
+            // No separate Close button — Grafana's × button handles dismiss
+            expect(screen.queryByTestId('modal-close-button')).not.toBeInTheDocument();
         });
 
-        it('does not render modal toolbar when panelContext is absent', async () => {
+        it('does not render modal header when panelContext is absent', async () => {
             render(
                 <MemoryRouter>
                     <ChatInterface />
@@ -867,7 +868,7 @@ describe('ChatInterface', () => {
                 expect(screen.getByTestId('landing-title')).toBeInTheDocument();
             });
 
-            expect(screen.queryByTestId('modal-toolbar')).not.toBeInTheDocument();
+            expect(screen.queryByTestId('modal-header')).not.toBeInTheDocument();
         });
 
         it('"Open in Graft" opens new tab with session when messages exist', async () => {

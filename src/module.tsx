@@ -71,7 +71,7 @@ export const plugin = new AppPlugin<{}>()
     onClick: (_, helpers) => {
       const ctx = helpers.context;
       helpers.openModal({
-        title: ctx?.title ? `Graft — ${ctx.title}` : 'Graft AI Assistant',
+        title: 'Graft AI Assistant',
         width: '85%',
         body: ({ onDismiss }) => (
           <GraftPanelModal panelContext={ctx} onDismiss={onDismiss} />

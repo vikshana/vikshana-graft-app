@@ -1017,29 +1017,23 @@ ${input} `
 
   return (
     <div className={styles.container}>
-      {/* Modal toolbar — only rendered when launched from a panel menu */}
+      {/* Sticky modal header — panel name left, Open in Graft right. Only in modal mode. */}
       {panelContext && (
-        <div className={styles.modalToolbar} data-testid="modal-toolbar">
-          <Button
-            variant="secondary"
-            size="sm"
-            icon="external-link-alt"
-            onClick={handleOpenInGraft}
-            data-testid="open-in-graft-button"
-          >
-            Open in Graft
-          </Button>
-          {onDismiss && (
+        <div className={styles.modalHeader} data-testid="modal-header">
+          <span className={styles.modalHeaderTitle} data-testid="modal-header-title">
+            {panelContext.title}
+          </span>
+          <div className={styles.modalHeaderActions}>
             <Button
               variant="secondary"
               size="sm"
-              icon="times"
-              onClick={onDismiss}
-              data-testid="modal-close-button"
+              icon="external-link-alt"
+              onClick={handleOpenInGraft}
+              data-testid="open-in-graft-button"
             >
-              Close
+              Open in Graft
             </Button>
-          )}
+          </div>
         </div>
       )}
       {messages.length === 0 ? (
@@ -1212,6 +1206,8 @@ ${input} `
         </div>
       ) : (
         <>
+          {/* Chat header hidden in modal mode — Grafana's title bar + our modalHeader serve the same purpose */}
+          {!panelContext && (
           <div className={styles.chatHeader} data-testid="chat-header">
             <div className={styles.headerLeft}>
               <Button variant="secondary" fill="outline" icon="arrow-left" onClick={handleReset} data-testid="back-button">
@@ -1228,6 +1224,7 @@ ${input} `
               </Button>
             </div>
           </div>
+          )}
           <div
             className={styles.messageList}
             ref={messageListRef}
