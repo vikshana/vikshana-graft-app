@@ -12,9 +12,6 @@ background: ${theme.colors.background.primary};
 font-family: ${theme.typography.fontFamily};
 `,
   modalHeader: css`
-position: sticky;
-top: 0;
-z-index: 10;
 display: flex;
 align-items: center;
 justify-content: space-between;

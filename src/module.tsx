@@ -61,18 +61,23 @@ export const plugin = new AppPlugin<{}>()
     id: 'agent',
   })
 
-  // ── Panel context menu: "Ask Graft about this panel" ─────────────────────
+  // ── Panel context menu: "Ask Graft" ─────────────────────────────────────
   .addLink<PluginExtensionPanelContext>({
-    title: 'Ask Graft about this panel',
+    title: 'Ask Graft...',
     description: 'Open the Graft AI Assistant with this panel as context',
     targets: [PluginExtensionPoints.DashboardPanelMenu],
     icon: 'comments-alt',
-    configure: (ctx) => (ctx?.title ? { title: `Ask Graft: "${ctx.title}"` } : {}),
+    // Always show "Ask Graft" in the menu (static title is ≥10 chars for
+    // plugin.json validation; configure() overrides to the clean short label)
+    configure: () => ({ title: 'Ask Graft' }),
     onClick: (_, helpers) => {
       const ctx = helpers.context;
       helpers.openModal({
         title: 'Graft AI Assistant',
         width: '85%',
+        // height caps the modal so our flex layout handles internal scroll
+        // and the modalHeader stays pinned at the top of the content area
+        height: '85vh',
         body: ({ onDismiss }) => (
           <GraftPanelModal panelContext={ctx} onDismiss={onDismiss} />
         ),

@@ -117,7 +117,7 @@
     "addedLinks": [
       {
         "targets": ["grafana/dashboard/panel/menu"],
-        "title": "Ask Graft about this panel",
+        "title": "Ask Graft...",
         "description": "Open the Graft AI Assistant with this panel as context"
       },
       {
