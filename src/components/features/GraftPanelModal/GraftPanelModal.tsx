@@ -2,10 +2,12 @@ import React, { Suspense, type MutableRefObject } from 'react';
 import { mcp } from '@grafana/llm';
 import { LoadingPlaceholder } from '@grafana/ui';
 import type { PluginExtensionPanelContext } from '@grafana/data';
-import { ChatInterface } from '../ChatInterface/ChatInterface';
+import { ChatInterface, type ExploreContext } from '../ChatInterface/ChatInterface';
 
 export interface GraftPanelModalProps {
   panelContext: Readonly<PluginExtensionPanelContext> | undefined;
+  /** Explore context passed when launched from the Grafana Explore toolbar modal. */
+  exploreContext?: Readonly<ExploreContext>;
   onDismiss?: () => void;
   /** Shared ref — ChatInterface writes the current sessionId here on every render. */
   sessionRef?: MutableRefObject<{ sessionId?: string } | null>;
@@ -17,17 +19,19 @@ export interface GraftPanelModalProps {
  * Renders inside Grafana's existing BrowserRouter (no MemoryRouter needed).
  * The panelContext prop prevents ChatInterface from restoring URL session
  * state and pre-fills the input with panel context instead.
+ * The exploreContext prop pre-fills the input with Explore query context
+ * when launched from the Explore toolbar modal.
  *
  * The "Open in Graft" button is injected into Grafana's own modal title bar
  * via a JSX title element in module.tsx — so it never scrolls away.
  * sessionRef is the bridge: ChatInterface keeps it up to date so the button
  * can read the live sessionId without crossing React subtree boundaries.
  */
-export function GraftPanelModal({ panelContext, onDismiss, sessionRef }: GraftPanelModalProps) {
+export function GraftPanelModal({ panelContext, exploreContext, onDismiss, sessionRef }: GraftPanelModalProps) {
   return (
     <Suspense fallback={<LoadingPlaceholder text="Loading Graft..." />}>
       <mcp.MCPClientProvider appName="vikshana-graft-app" appVersion="0.1.0">
-        <ChatInterface panelContext={panelContext} onDismiss={onDismiss} sessionRef={sessionRef} />
+        <ChatInterface panelContext={panelContext} exploreContext={exploreContext} onDismiss={onDismiss} sessionRef={sessionRef} />
       </mcp.MCPClientProvider>
     </Suspense>
   );

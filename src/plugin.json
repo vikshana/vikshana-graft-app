@@ -117,13 +117,13 @@
     "addedLinks": [
       {
         "targets": ["grafana/dashboard/panel/menu"],
-        "title": "Ask Graft...",
+        "title": "Ask Graft AI Assistant",
         "description": "Open the Graft AI Assistant with this panel as context"
       },
       {
         "targets": ["grafana/explore/toolbar/action"],
-        "title": "Analyze in Graft AI Assistant",
-        "description": "Send current Explore query to Graft for AI analysis"
+        "title": "Ask Graft AI Assistant (Explore)",
+        "description": "Open the Graft AI Assistant with the current Explore query as context"
       }
     ]
   }

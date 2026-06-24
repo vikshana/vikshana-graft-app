@@ -922,6 +922,73 @@ describe('ChatInterface', () => {
         });
     });
 
+    describe('Explore modal prop pre-fill (exploreContext)', () => {
+        it('pre-fills input from exploreContext prop (modal mode)', async () => {
+            const exploreContext = {
+                dsUid: 'prom-uid',
+                dsType: 'prometheus',
+                from: 'now-6h',
+                to: 'now',
+                queries: [{ refId: 'A', expr: 'up{job="prometheus"}', dsUid: 'prom-uid', dsType: 'prometheus' }],
+            };
+
+            render(
+                <MemoryRouter initialEntries={['/']}>
+                    <ChatInterface exploreContext={exploreContext} />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                const input = screen.getByTestId('chat-input') as HTMLTextAreaElement;
+                expect(input.value).toContain('prom-uid');
+                expect(input.value).toContain('prometheus');
+                expect(input.value).toContain('up{job="prometheus"}');
+                expect(input.value).toContain('now-6h');
+            });
+        });
+
+        it('does not pre-fill when exploreContext has no dsUid or queries', async () => {
+            const exploreContext = { timeZone: 'browser' };
+
+            render(
+                <MemoryRouter initialEntries={['/']}>
+                    <ChatInterface exploreContext={exploreContext} />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                expect(screen.getByTestId('landing-title')).toBeInTheDocument();
+            });
+
+            const input = screen.getByTestId('chat-input') as HTMLTextAreaElement;
+            expect(input.value).toBe('');
+        });
+
+        it('exploreContext prop takes priority over URL params in modal mode', async () => {
+            const exploreContext = {
+                dsUid: 'modal-ds',
+                queries: [{ refId: 'A', expr: 'from_prop{}' }],
+            };
+            const queries = JSON.stringify([{ refId: 'A', expr: 'from_url{}' }]);
+
+            render(
+                <MemoryRouter
+                    initialEntries={[`/?dsUid=url-ds&queries=${encodeURIComponent(queries)}`]}
+                >
+                    <ChatInterface exploreContext={exploreContext} />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                const input = screen.getByTestId('chat-input') as HTMLTextAreaElement;
+                expect(input.value).toContain('modal-ds');
+                expect(input.value).toContain('from_prop{}');
+                expect(input.value).not.toContain('url-ds');
+                expect(input.value).not.toContain('from_url{}');
+            });
+        });
+    });
+
     describe('panel URL param pre-fill (Open in Graft zero-message path)', () => {
         it('pre-fills input from panelTitle URL params', async () => {
             render(

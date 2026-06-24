@@ -63,12 +63,10 @@ export const plugin = new AppPlugin<{}>()
 
   // ── Panel context menu: "Ask Graft" ─────────────────────────────────────
   .addLink<PluginExtensionPanelContext>({
-    title: 'Ask Graft...',
+    title: 'Ask Graft AI Assistant',
     description: 'Open the Graft AI Assistant with this panel as context',
     targets: [PluginExtensionPoints.DashboardPanelMenu],
     icon: 'comments-alt',
-    // Always show "Ask Graft" in the menu (static title is ≥10 chars for
-    // plugin.json validation; configure() overrides to the clean short label)
     configure: () => ({ title: 'Ask Graft' }),
     onClick: (_, helpers) => {
       const ctx = helpers.context;
@@ -140,42 +138,95 @@ export const plugin = new AppPlugin<{}>()
     },
   })
 
-  // ── Explore toolbar: "Analyze in Graft AI Assistant" ─────────────────────
+  // ── Explore toolbar: "Ask Graft" ────────────────────────────────────────
   .addLink<ExploreContext>({
-    title: 'Analyze in Graft AI Assistant',
-    description: 'Send current Explore query to Graft for AI analysis',
+    title: 'Ask Graft AI Assistant (Explore)',
+    description: 'Open the Graft AI Assistant with the current Explore query as context',
     targets: [PluginExtensionPoints.ExploreToolbarAction],
     icon: 'comments-alt',
-    openInNewTab: true,
-    // Static fallback path required for registration validation;
-    // configure() overrides with context-enriched params when available.
-    path: PLUGIN_BASE_URL + '/',
-    configure: (ctx) => {
-      const params = new URLSearchParams();
+    // Always show in the toolbar (static title ≥10 chars for plugin.json
+    // validation; configure() overrides to the clean short label at runtime)
+    configure: () => ({ title: 'Ask Graft' }),
+    onClick: (_, helpers) => {
+      const ctx = helpers.context as ExploreContext | undefined;
+
+      // Build the Explore context object to pass into the modal as a prop
       const firstTarget = ctx?.targets?.[0];
-      if (firstTarget?.datasource?.uid) {
-        params.set('dsUid', firstTarget.datasource.uid);
-      }
-      if (firstTarget?.datasource?.type) {
-        params.set('dsType', firstTarget.datasource.type);
-      }
-      if (ctx?.timeRange?.from) { params.set('from', ctx.timeRange.from); }
-      if (ctx?.timeRange?.to)   { params.set('to',   ctx.timeRange.to); }
-      if (ctx?.timeZone)        { params.set('tz',   ctx.timeZone); }
+      const exploreCtx = {
+        dsUid:    firstTarget?.datasource?.uid,
+        dsType:   firstTarget?.datasource?.type,
+        from:     ctx?.timeRange?.from,
+        to:       ctx?.timeRange?.to,
+        timeZone: ctx?.timeZone,
+        queries:  ctx?.targets?.map((t) => ({
+          refId:  t.refId,
+          expr:   t.expr ?? t.query ?? '',
+          dsUid:  t.datasource?.uid,
+          dsType: t.datasource?.type,
+        })),
+      };
+
+      // Build fallback URL for "Open in Graft ↗" when no session exists yet —
+      // same params the old link extension used to encode.
+      const params = new URLSearchParams();
+      if (exploreCtx.dsUid)  { params.set('dsUid',  exploreCtx.dsUid); }
+      if (exploreCtx.dsType) { params.set('dsType', exploreCtx.dsType); }
+      if (exploreCtx.from)   { params.set('from',   exploreCtx.from); }
+      if (exploreCtx.to)     { params.set('to',     exploreCtx.to); }
+      if (exploreCtx.timeZone) { params.set('tz',   exploreCtx.timeZone); }
       if (ctx?.targets?.length) {
-        params.set(
-          'queries',
-          JSON.stringify(
-            ctx.targets.map((t) => ({
-              refId: t.refId,
-              expr: t.expr ?? t.query ?? '',
-              dsUid: t.datasource?.uid,
-              dsType: t.datasource?.type,
-            }))
-          )
-        );
+        params.set('queries', JSON.stringify(exploreCtx.queries));
       }
       const qs = params.toString();
-      return { path: `${PLUGIN_BASE_URL}/${qs ? '?' + qs : ''}` };
+      const fallbackUrl = `${PLUGIN_BASE_URL}/${qs ? '?' + qs : ''}`;
+
+      // Shared mutable ref — same sessionRef bridge pattern as the panel modal.
+      const sessionRef: React.MutableRefObject<{ sessionId?: string } | null> =
+        { current: null };
+
+      helpers.openModal({
+        // JSX title: "Graft AI Assistant" on left, "Open in Graft ↗" on right.
+        title: (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingRight: '8px' }}>
+            <span>Graft AI Assistant</span>
+            <button
+              onClick={() => {
+                const sid = sessionRef.current?.sessionId;
+                if (sid) {
+                  window.open(`${PLUGIN_BASE_URL}/?chat=true&session=${sid}`, '_blank');
+                } else {
+                  window.open(fallbackUrl, '_blank');
+                }
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '13px',
+                color: 'inherit',
+                opacity: 0.8,
+                cursor: 'pointer',
+                background: 'transparent',
+                padding: '2px 8px',
+                borderRadius: '4px',
+                border: '1px solid currentColor',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Open in Graft ↗
+            </button>
+          </div>
+        ) as unknown as string,
+        ariaLabel: 'Graft AI Assistant',
+        width: '85%',
+        body: ({ onDismiss }) => (
+          <GraftPanelModal
+            panelContext={undefined}
+            exploreContext={exploreCtx}
+            onDismiss={onDismiss}
+            sessionRef={sessionRef}
+          />
+        ),
+      });
     },
   });

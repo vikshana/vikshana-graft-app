@@ -266,9 +266,21 @@ MemoizedReactMarkdown.displayName = 'MemoizedReactMarkdown';
 
 
 
+/** Explore context passed when launched from the Grafana Explore toolbar modal. */
+export interface ExploreContext {
+  dsUid?: string;
+  dsType?: string;
+  from?: string;
+  to?: string;
+  timeZone?: string;
+  queries?: Array<{ refId: string; expr?: string; dsUid?: string; dsType?: string }>;
+}
+
 export interface ChatInterfaceProps {
   /** Panel context snapshot passed when launched from a Grafana panel menu. */
   panelContext?: Readonly<PluginExtensionPanelContext>;
+  /** Explore context passed when launched from the Grafana Explore toolbar modal. */
+  exploreContext?: Readonly<ExploreContext>;
   /** Called when the modal wrapper should be closed (only set in modal mode). */
   onDismiss?: () => void;
   /**
@@ -279,7 +291,7 @@ export interface ChatInterfaceProps {
   sessionRef?: React.MutableRefObject<{ sessionId?: string } | null>;
 }
 
-export const ChatInterface = ({ panelContext, onDismiss, sessionRef }: ChatInterfaceProps = {}) => {
+export const ChatInterface = ({ panelContext, exploreContext, onDismiss, sessionRef }: ChatInterfaceProps = {}) => {
   const styles = useStyles2(getStyles);
   const theme = useTheme2();
   const [input, setInput] = useState('');
@@ -473,6 +485,21 @@ export const ChatInterface = ({ panelContext, onDismiss, sessionRef }: ChatInter
   // Pre-fill input from Explore toolbar URL params (mount-only, full-page mode only)
   useEffect(() => {
     if (panelContext) { return; }
+    // Modal mode: exploreContext prop takes priority over URL params
+    if (exploreContext) {
+      const { dsUid, dsType, from, to, queries } = exploreContext;
+      if (!dsUid && !queries?.length) { return; }
+      const parts: string[] = ['I want to analyze some data from Grafana Explore.'];
+      if (dsUid) { parts.push(`Datasource UID: ${dsUid}${dsType ? ` (${dsType})` : ''}.`); }
+      if (from && to) { parts.push(`Time range: ${from} to ${to}.`); }
+      if (queries?.length) {
+        const exprs = queries.map((q) => q.expr).filter(Boolean);
+        if (exprs.length) { parts.push(`Queries: ${exprs.join('; ')}.`); }
+      }
+      setInput(parts.join(' '));
+      return;
+    }
+    // Full-page mode: read from URL search params
     const dsUid      = searchParams.get('dsUid');
     const dsType     = searchParams.get('dsType');
     const from       = searchParams.get('from');
