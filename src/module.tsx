@@ -73,14 +73,16 @@ export const plugin = new AppPlugin<{}>()
 
       // Build fallback URL — used when no session exists yet (user hasn't sent
       // a message). Encodes panel context so full-page Graft pre-fills the prompt.
+      // Cast timeRange values to string — the type is DateTime|string at runtime
+      // but URLSearchParams requires string.
       const openParams = new URLSearchParams({
         panelTitle:     ctx?.title ?? '',
         dashboardUid:   ctx?.dashboard.uid ?? '',
         dashboardTitle: ctx?.dashboard.title ?? '',
         panelId:        String(ctx?.id ?? ''),
         panelPlugin:    ctx?.pluginId ?? '',
-        from:           ctx?.timeRange.from ?? 'now-1h',
-        to:             ctx?.timeRange.to ?? 'now',
+        from:           String(ctx?.timeRange.from ?? 'now-1h'),
+        to:             String(ctx?.timeRange.to ?? 'now'),
         tz:             ctx?.timeZone ?? 'browser',
       });
       const dsUid = ctx?.targets?.[0]?.datasource?.uid;
@@ -100,14 +102,15 @@ export const plugin = new AppPlugin<{}>()
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingRight: '8px' }}>
             <span>Graft AI Assistant</span>
             <button
+              type="button"
               onClick={() => {
                 const sid = sessionRef.current?.sessionId;
                 if (sid) {
                   // Session exists — open full page and restore the conversation
-                  window.open(`${PLUGIN_BASE_URL}/?chat=true&session=${sid}`, '_blank');
+                  window.open(`${PLUGIN_BASE_URL}/?chat=true&session=${sid}`, '_blank', 'noopener,noreferrer');
                 } else {
                   // No session yet — open with panel context params for pre-fill
-                  window.open(fallbackUrl, '_blank');
+                  window.open(fallbackUrl, '_blank', 'noopener,noreferrer');
                 }
               }}
               style={{
@@ -129,7 +132,6 @@ export const plugin = new AppPlugin<{}>()
             </button>
           </div>
         ) as unknown as string,
-        ariaLabel: 'Graft AI Assistant',
         width: '85%',
         body: ({ onDismiss }) => (
           <GraftPanelModal panelContext={ctx} onDismiss={onDismiss} sessionRef={sessionRef} />
@@ -190,12 +192,13 @@ export const plugin = new AppPlugin<{}>()
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingRight: '8px' }}>
             <span>Graft AI Assistant</span>
             <button
+              type="button"
               onClick={() => {
                 const sid = sessionRef.current?.sessionId;
                 if (sid) {
-                  window.open(`${PLUGIN_BASE_URL}/?chat=true&session=${sid}`, '_blank');
+                  window.open(`${PLUGIN_BASE_URL}/?chat=true&session=${sid}`, '_blank', 'noopener,noreferrer');
                 } else {
-                  window.open(fallbackUrl, '_blank');
+                  window.open(fallbackUrl, '_blank', 'noopener,noreferrer');
                 }
               }}
               style={{
@@ -217,7 +220,6 @@ export const plugin = new AppPlugin<{}>()
             </button>
           </div>
         ) as unknown as string,
-        ariaLabel: 'Graft AI Assistant',
         width: '85%',
         body: ({ onDismiss }) => (
           <GraftPanelModal

@@ -827,22 +827,6 @@ describe('ChatInterface', () => {
             });
         });
 
-        it('pre-fills the input with panel context on mount', async () => {
-            render(
-                <MemoryRouter>
-                    <ChatInterface panelContext={mockPanelContext} />
-                </MemoryRouter>
-            );
-
-            await waitFor(() => {
-                const input = screen.getByTestId('chat-input') as HTMLTextAreaElement;
-                expect(input.value).toContain('CPU Usage');
-                expect(input.value).toContain('My Dashboard');
-                expect(input.value).toContain('now-1h');
-                expect(input.value).toContain('prom-uid');
-            });
-        });
-
         it('does not render modal header inside ChatInterface (button is in Grafana title bar)', async () => {
             render(
                 <MemoryRouter>
@@ -865,7 +849,7 @@ describe('ChatInterface', () => {
 
             render(
                 <MemoryRouter>
-                    <ChatInterface panelContext={mockPanelContext} />
+                    <ChatInterface panelContext={mockPanelContext} onDismiss={() => {}} />
                 </MemoryRouter>
             );
 

@@ -360,14 +360,13 @@ export const ChatInterface = ({ panelContext, exploreContext, onDismiss, session
     latestMessagesRef.current = messages;
   });
 
-  // Keep sessionRef in sync on every render so the title-bar "Open in Graft"
-  // button can always read the latest sessionId at click time, even though it
-  // lives outside this React subtree (in Grafana's modal title bar JSX).
+  // Keep sessionRef in sync when currentSessionId changes so the title-bar
+  // "Open in Graft" button can always read the latest sessionId at click time.
   useEffect(() => {
     if (sessionRef) {
       sessionRef.current = { sessionId: currentSessionId };
     }
-  });
+  }, [currentSessionId, sessionRef]);
 
   useEffect(() => {
     if (!settingsLoading && llmReady) {
@@ -434,7 +433,7 @@ export const ChatInterface = ({ panelContext, exploreContext, onDismiss, session
 
   // Sync state with URL and load session if specified
   useEffect(() => {
-    if (panelContext) { return; } // modal mode — no URL session to restore
+    if (onDismiss) { return; } // modal mode — no URL session to restore or reset
     const sessionId = searchParams.get('session');
     const isChatActive = searchParams.get('chat');
 
@@ -523,7 +522,7 @@ export const ChatInterface = ({ panelContext, exploreContext, onDismiss, session
   // Pre-fill input from panel context URL params — used when "Open in Graft"
   // is clicked from the modal title bar (full-page navigation path)
   useEffect(() => {
-    if (panelContext) { return; }
+    if (onDismiss) { return; } // modal mode — URL params belong to the host page
     const panelTitle     = searchParams.get('panelTitle');
     const dashboardTitle = searchParams.get('dashboardTitle');
     const from           = searchParams.get('from');
@@ -1204,7 +1203,7 @@ ${input} `
       ) : (
         <>
           {/* Chat header hidden in modal mode — Grafana's title bar + our modalHeader serve the same purpose */}
-          {!panelContext && (
+          {!onDismiss && (
           <div className={styles.chatHeader} data-testid="chat-header">
             <div className={styles.headerLeft}>
               <Button variant="secondary" fill="outline" icon="arrow-left" onClick={handleReset} data-testid="back-button">
