@@ -3,6 +3,7 @@
   "type": "app",
   "name": "Graft AI Assistant",
   "id": "vikshana-graft-app",
+  "preload": true,
   "backend": true,
   "executable": "gpx_graft",
   "info": {

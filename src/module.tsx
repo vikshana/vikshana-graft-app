@@ -4,6 +4,7 @@ import { LoadingPlaceholder } from '@grafana/ui';
 import type { AppConfigProps } from './components/features/AppConfig/AppConfig';
 import type { AgentConfigProps } from './components/features/AppConfig/AgentConfig';
 import { PLUGIN_BASE_URL } from './constants';
+import { GraftPanelModal } from './components/features/GraftPanelModal/GraftPanelModal';
 
 /** Context passed by Grafana Explore to ExploreToolbarAction extension points.
  *  Not exported from @grafana/data — defined locally from Grafana core source. */
@@ -69,16 +70,11 @@ export const plugin = new AppPlugin<{}>()
     configure: (ctx) => (ctx?.title ? { title: `Ask Graft: "${ctx.title}"` } : {}),
     onClick: (_, helpers) => {
       const ctx = helpers.context;
-      const LazyGraftPanelModal = lazy(
-        () => import('./components/features/GraftPanelModal/GraftPanelModal')
-      );
       helpers.openModal({
         title: ctx?.title ? `Graft — ${ctx.title}` : 'Graft AI Assistant',
         width: '85%',
         body: ({ onDismiss }) => (
-          <Suspense fallback={<LoadingPlaceholder text="" />}>
-            <LazyGraftPanelModal panelContext={ctx} onDismiss={onDismiss} />
-          </Suspense>
+          <GraftPanelModal panelContext={ctx} onDismiss={onDismiss} />
         ),
       });
     },
@@ -91,6 +87,9 @@ export const plugin = new AppPlugin<{}>()
     targets: [PluginExtensionPoints.ExploreToolbarAction],
     icon: 'comments-alt',
     openInNewTab: true,
+    // Static fallback path required for registration validation;
+    // configure() overrides with context-enriched params when available.
+    path: PLUGIN_BASE_URL + '/',
     configure: (ctx) => {
       const params = new URLSearchParams();
       const firstTarget = ctx?.targets?.[0];
