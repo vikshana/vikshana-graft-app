@@ -271,9 +271,15 @@ export interface ChatInterfaceProps {
   panelContext?: Readonly<PluginExtensionPanelContext>;
   /** Called when the modal wrapper should be closed (only set in modal mode). */
   onDismiss?: () => void;
+  /**
+   * Shared mutable ref written on every render so the title-bar "Open in Graft"
+   * button (which lives outside this React subtree) can read the latest session
+   * ID at click time without any React context crossing.
+   */
+  sessionRef?: React.MutableRefObject<{ sessionId?: string } | null>;
 }
 
-export const ChatInterface = ({ panelContext, onDismiss }: ChatInterfaceProps = {}) => {
+export const ChatInterface = ({ panelContext, onDismiss, sessionRef }: ChatInterfaceProps = {}) => {
   const styles = useStyles2(getStyles);
   const theme = useTheme2();
   const [input, setInput] = useState('');
@@ -340,6 +346,15 @@ export const ChatInterface = ({ panelContext, onDismiss }: ChatInterfaceProps = 
   // callback can read the final messages state without a setMessages updater.
   useEffect(() => {
     latestMessagesRef.current = messages;
+  });
+
+  // Keep sessionRef in sync on every render so the title-bar "Open in Graft"
+  // button can always read the latest sessionId at click time, even though it
+  // lives outside this React subtree (in Grafana's modal title bar JSX).
+  useEffect(() => {
+    if (sessionRef) {
+      sessionRef.current = { sessionId: currentSessionId };
+    }
   });
 
   useEffect(() => {

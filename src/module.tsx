@@ -73,8 +73,8 @@ export const plugin = new AppPlugin<{}>()
     onClick: (_, helpers) => {
       const ctx = helpers.context;
 
-      // Build URL params for "Open in Graft" — encodes panel context so
-      // the full-page Graft pre-fills the input with the same prompt.
+      // Build fallback URL — used when no session exists yet (user hasn't sent
+      // a message). Encodes panel context so full-page Graft pre-fills the prompt.
       const openParams = new URLSearchParams({
         panelTitle:     ctx?.title ?? '',
         dashboardUid:   ctx?.dashboard.uid ?? '',
@@ -87,19 +87,31 @@ export const plugin = new AppPlugin<{}>()
       });
       const dsUid = ctx?.targets?.[0]?.datasource?.uid;
       if (dsUid) { openParams.set('dsUid', dsUid); }
-      const openInGraftUrl = `${PLUGIN_BASE_URL}/?${openParams.toString()}`;
+      const fallbackUrl = `${PLUGIN_BASE_URL}/?${openParams.toString()}`;
+
+      // Shared mutable ref — ChatInterface writes the current sessionId here on
+      // every render. The title-bar button reads it at click time so it always
+      // gets the latest session even though it lives outside ChatInterface's tree.
+      const sessionRef: React.MutableRefObject<{ sessionId?: string } | null> =
+        { current: null };
 
       helpers.openModal({
-        // JSX title: "Graft AI Assistant" on left, "Open in Graft ↗" button on right.
-        // This renders inside Grafana's fixed modal title bar so the button
-        // is always visible regardless of how far the user scrolls.
+        // JSX title: "Graft AI Assistant" on left, "Open in Graft ↗" on right.
+        // Rendered in Grafana's fixed title bar row — never scrolls away.
         title: (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingRight: '8px' }}>
             <span>Graft AI Assistant</span>
-            <a
-              href={openInGraftUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={() => {
+                const sid = sessionRef.current?.sessionId;
+                if (sid) {
+                  // Session exists — open full page and restore the conversation
+                  window.open(`${PLUGIN_BASE_URL}/?chat=true&session=${sid}`, '_blank');
+                } else {
+                  // No session yet — open with panel context params for pre-fill
+                  window.open(fallbackUrl, '_blank');
+                }
+              }}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -107,7 +119,8 @@ export const plugin = new AppPlugin<{}>()
                 fontSize: '13px',
                 color: 'inherit',
                 opacity: 0.8,
-                textDecoration: 'none',
+                cursor: 'pointer',
+                background: 'transparent',
                 padding: '2px 8px',
                 borderRadius: '4px',
                 border: '1px solid currentColor',
@@ -115,13 +128,13 @@ export const plugin = new AppPlugin<{}>()
               }}
             >
               Open in Graft ↗
-            </a>
+            </button>
           </div>
         ) as unknown as string,
         ariaLabel: 'Graft AI Assistant',
         width: '85%',
         body: ({ onDismiss }) => (
-          <GraftPanelModal panelContext={ctx} onDismiss={onDismiss} />
+          <GraftPanelModal panelContext={ctx} onDismiss={onDismiss} sessionRef={sessionRef} />
         ),
       });
     },
