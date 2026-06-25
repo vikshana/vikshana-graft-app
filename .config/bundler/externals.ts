@@ -17,6 +17,11 @@ export const externals: ExternalsType = [
   '@grafana/slate-react',
   'react',
   'react-dom',
+  // Sub-path exports used by the React JSX transform. Without these, the JSX
+  // runtime from the local node_modules is bundled inline (React 18 behaviour),
+  // which crashes when Grafana is running React 19 (e.g. grafana-enterprise@13.1+).
+  'react/jsx-runtime',
+  'react/jsx-dev-runtime',
   'react-redux',
   'redux',
   'rxjs',
