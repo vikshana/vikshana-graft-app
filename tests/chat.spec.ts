@@ -75,7 +75,7 @@ test('ChatInterface header should be sticky', async ({ page, mockLLMHealth, wait
 
     const header = page.getByTestId('chat-header');
     await expect(header).toHaveCSS('position', 'sticky');
-    await expect(header).toHaveCSS('top', '40px');
+    await expect(header).toHaveCSS('top', '0px');
 });
 
 test('ChatInterface settings button navigates to plugin configuration', async ({ page, waitForPortal }) => {
