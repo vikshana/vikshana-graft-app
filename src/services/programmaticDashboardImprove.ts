@@ -2,14 +2,15 @@ import type { ToolExecution } from '../types/llm.types';
 import { extractDashboardFromGetByUid } from './programmaticDashboardClone';
 import { callMcpTool } from './mcpToolClient';
 import { saveDashboardInPanelChunks, type McpClient } from './dashboardChunkedUpdate';
-import { findFluxBrokenPanels, listDashboardPanels } from './panelDiscovery';
+import { findFluxBrokenPanels, listDashboardPanels, panelHasBrokenFluxSyntax } from './panelDiscovery';
 import { applyDashboardTitleRow } from './dashboardTitleRowLayout';
+import { applyFluxFixesToPanel } from './fluxQueryFix';
 import type { DashboardImproveRequest } from './dashboardReviewParse';
 
 type PanelRecord = Record<string, unknown>;
 
 export interface AppliedChange {
-    kind: 'remove_duplicates' | 'title_row' | 'overlaps';
+    kind: 'remove_duplicates' | 'title_row' | 'overlaps' | 'barchart_timeseries' | 'set_units' | 'fix_queries';
     detail: string;
 }
 
@@ -29,6 +30,9 @@ export interface DashboardImproveResult {
     titleRowCreated: boolean;
     panelsShifted: number;
     overlapsFixed: number;
+    barchartsConverted: Array<{ id?: number; title: string }>;
+    unitsSet: Array<{ id?: number; title: string; unit: string }>;
+    queriesFixed: Array<{ id?: number; title: string }>;
     chunksSaved?: number;
     totalChunks?: number;
     appliedChanges: AppliedChange[];
@@ -198,9 +202,95 @@ export function applySafeStructuralImprovements(
     };
 }
 
+/** Grafana unit id for a panel based on its title (current → amp, voltage → volt). */
+export function unitForTitle(title: string): string | undefined {
+    if (/\b(current|amperage|amps?)\b/i.test(title)) {
+        return 'amp';
+    }
+    if (/\b(voltage|volts?)\b/i.test(title)) {
+        return 'volt';
+    }
+    return undefined;
+}
+
+function setPanelUnit(panel: PanelRecord, unit: string): void {
+    const fc =
+        panel.fieldConfig && typeof panel.fieldConfig === 'object' && !Array.isArray(panel.fieldConfig)
+            ? { ...(panel.fieldConfig as Record<string, unknown>) }
+            : {};
+    const defaults =
+        fc.defaults && typeof fc.defaults === 'object' && !Array.isArray(fc.defaults)
+            ? { ...(fc.defaults as Record<string, unknown>) }
+            : {};
+    defaults.unit = unit;
+    fc.defaults = defaults;
+    panel.fieldConfig = fc;
+}
+
+/** Replace a panel's contents in place so the reference inside the dashboard tree stays valid. */
+function overwritePanelInPlace(target: PanelRecord, source: PanelRecord): void {
+    for (const key of Object.keys(target)) {
+        delete target[key];
+    }
+    Object.assign(target, source);
+}
+
+export interface DataVisualFixCounts {
+    barchartsConverted: Array<{ id?: number; title: string }>;
+    unitsSet: Array<{ id?: number; title: string; unit: string }>;
+    queriesFixed: Array<{ id?: number; title: string }>;
+}
+
 /**
- * Detect the non-structural fixes Graft will NOT auto-apply (data/visual changes that need
- * human confirmation): broken queries, bar-chart-vs-timeseries, and missing units.
+ * Apply the deterministic data/visual fixes in place on the dashboard's panels:
+ *   - bar chart → time series (and `instant: true` → `false` so series render over time)
+ *   - set a unit on current/voltage panels that have none
+ *   - repair broken Flux queries (reuses the shared Flux fixer)
+ * Mutates `dashboard.panels` (including panels nested inside rows) and returns what changed.
+ */
+export function applyDataVisualFixes(dashboard: Record<string, unknown>): DataVisualFixCounts {
+    const panels = Array.isArray(dashboard.panels) ? (dashboard.panels as PanelRecord[]) : [];
+    const entries = listDashboardPanels(panels);
+    const counts: DataVisualFixCounts = { barchartsConverted: [], unitsSet: [], queriesFixed: [] };
+
+    for (const entry of entries) {
+        const panel = entry.panel;
+
+        if (String(panel.type) === 'barchart') {
+            panel.type = 'timeseries';
+            if (Array.isArray(panel.targets)) {
+                for (const t of panel.targets) {
+                    if (t && typeof t === 'object' && (t as PanelRecord).instant === true) {
+                        (t as PanelRecord).instant = false;
+                    }
+                }
+            }
+            counts.barchartsConverted.push({ id: entry.panelId, title: entry.title });
+        }
+
+        const defaults = (panel.fieldConfig as { defaults?: { unit?: unknown } } | undefined)?.defaults;
+        const currentUnit = defaults?.unit;
+        const wantUnit = unitForTitle(entry.title);
+        if (wantUnit && (!currentUnit || currentUnit === 'none')) {
+            setPanelUnit(panel, wantUnit);
+            counts.unitsSet.push({ id: entry.panelId, title: entry.title, unit: wantUnit });
+        }
+
+        if (panelHasBrokenFluxSyntax(panel)) {
+            const fixed = applyFluxFixesToPanel(panel, { dashboardPanels: panels });
+            if (fixed.changed) {
+                overwritePanelInPlace(panel, fixed.panel);
+                counts.queriesFixed.push({ id: entry.panelId, title: entry.title });
+            }
+        }
+    }
+
+    return counts;
+}
+
+/**
+ * Detect non-structural fixes that remain AFTER auto-apply (e.g. a broken Flux query the
+ * shared fixer could not safely repair) so they can still be surfaced for manual follow-up.
  */
 export function detectPendingSuggestions(panels: PanelRecord[]): PendingSuggestion[] {
     const entries = listDashboardPanels(panels);
@@ -249,6 +339,9 @@ export async function runProgrammaticDashboardImprove(
         titleRowCreated: false,
         panelsShifted: 0,
         overlapsFixed: 0,
+        barchartsConverted: [],
+        unitsSet: [],
+        queriesFixed: [],
         appliedChanges: [],
         pendingSuggestions: [],
         changedAnything: false,
@@ -272,9 +365,16 @@ export async function runProgrammaticDashboardImprove(
     const dashboardTitle = typeof baseline.title === 'string' ? baseline.title : undefined;
     const originalPanels = Array.isArray(baseline.panels) ? (baseline.panels as PanelRecord[]) : [];
     const panelCount = listDashboardPanels(originalPanels).length;
-    const pendingSuggestions = detectPendingSuggestions(originalPanels);
 
+    // Structural fixes first (clone), then data/visual fixes in place on the same clone.
     const improved = applySafeStructuralImprovements(baseline, { titleLabel: dashboardTitle });
+    const dataVisual = applyDataVisualFixes(improved.dashboard);
+
+    // Anything still flagged AFTER auto-apply (e.g. a query the fixer could not repair).
+    const finalPanels = Array.isArray(improved.dashboard.panels)
+        ? (improved.dashboard.panels as PanelRecord[])
+        : [];
+    const pendingSuggestions = detectPendingSuggestions(finalPanels);
 
     const appliedChanges: AppliedChange[] = [];
     if (improved.removedPanels.length > 0) {
@@ -299,6 +399,30 @@ export async function runProgrammaticDashboardImprove(
             detail: `Resolved ${improved.overlapsFixed} overlapping panel position(s)`,
         });
     }
+    if (dataVisual.barchartsConverted.length > 0) {
+        appliedChanges.push({
+            kind: 'barchart_timeseries',
+            detail: `Converted ${dataVisual.barchartsConverted.length} bar chart(s) to time series: ${dataVisual.barchartsConverted
+                .map((p) => `"${p.title}"`)
+                .join(', ')}`,
+        });
+    }
+    if (dataVisual.unitsSet.length > 0) {
+        appliedChanges.push({
+            kind: 'set_units',
+            detail: `Set units on ${dataVisual.unitsSet.length} panel(s): ${dataVisual.unitsSet
+                .map((p) => `"${p.title}" → ${p.unit}`)
+                .join(', ')}`,
+        });
+    }
+    if (dataVisual.queriesFixed.length > 0) {
+        appliedChanges.push({
+            kind: 'fix_queries',
+            detail: `Repaired ${dataVisual.queriesFixed.length} broken Flux query/queries: ${dataVisual.queriesFixed
+                .map((p) => `"${p.title}"`)
+                .join(', ')}`,
+        });
+    }
 
     const changedAnything = appliedChanges.length > 0;
     if (!changedAnything) {
@@ -312,6 +436,9 @@ export async function runProgrammaticDashboardImprove(
             titleRowCreated: false,
             panelsShifted: 0,
             overlapsFixed: 0,
+            barchartsConverted: [],
+            unitsSet: [],
+            queriesFixed: [],
             appliedChanges,
             pendingSuggestions,
             changedAnything: false,
@@ -341,6 +468,9 @@ export async function runProgrammaticDashboardImprove(
             titleRowCreated: improved.titleRowCreated,
             panelsShifted: improved.panelsShifted,
             overlapsFixed: improved.overlapsFixed,
+            barchartsConverted: dataVisual.barchartsConverted,
+            unitsSet: dataVisual.unitsSet,
+            queriesFixed: dataVisual.queriesFixed,
             chunksSaved: save.chunksSaved,
             totalChunks: save.totalChunks,
             appliedChanges,
@@ -359,6 +489,9 @@ export async function runProgrammaticDashboardImprove(
         titleRowCreated: improved.titleRowCreated,
         panelsShifted: improved.panelsShifted,
         overlapsFixed: improved.overlapsFixed,
+        barchartsConverted: dataVisual.barchartsConverted,
+        unitsSet: dataVisual.unitsSet,
+        queriesFixed: dataVisual.queriesFixed,
         chunksSaved: save.chunksSaved,
         totalChunks: save.totalChunks,
         appliedChanges,
@@ -385,15 +518,15 @@ export function formatDashboardImproveReply(
 
     const pendingBlock =
         result.pendingSuggestions.length > 0
-            ? `\n\n**Needs your confirmation (data/visual changes Graft won't auto-apply):**\n` +
+            ? `\n\n**Could not auto-apply (needs manual follow-up):**\n` +
               result.pendingSuggestions.map((s) => `- ${s.title} — ${s.detail}`).join('\n')
             : '';
 
     if (!result.changedAnything) {
         return (
-            `### Reviewed — no safe structural changes needed (Graft build ${buildNumber})\n\n` +
+            `### Reviewed — nothing to change (Graft build ${buildNumber})\n\n` +
             `Reviewed ${titleLine} — **${result.panelCount ?? 0}** panel(s). ` +
-            `Layout already has a title row, no duplicate panels, and no overlaps.` +
+            `Title row, panel layout, chart types, units, and queries already look good.` +
             pendingBlock
         );
     }

@@ -1,4 +1,5 @@
 import {
+    applyDataVisualFixes,
     applySafeStructuralImprovements,
     detectPendingSuggestions,
     findExactDuplicateTopLevelPanels,
@@ -6,6 +7,7 @@ import {
     panelDataSignature,
     resolveTopLevelOverlaps,
     runProgrammaticDashboardImprove,
+    unitForTitle,
 } from './programmaticDashboardImprove';
 
 type PanelRecord = Record<string, unknown>;
@@ -102,6 +104,80 @@ describe('applySafeStructuralImprovements', () => {
 
         // Original is untouched (works on a clone).
         expect((dashboard.panels as PanelRecord[]).length).toBe(3);
+    });
+});
+
+describe('unitForTitle', () => {
+    it('maps current → amp and voltage → volt', () => {
+        expect(unitForTitle('Current')).toBe('amp');
+        expect(unitForTitle('Module 1 Current')).toBe('amp');
+        expect(unitForTitle('Module Voltage per Cartridge')).toBe('volt');
+        expect(unitForTitle('Pressure')).toBeUndefined();
+    });
+});
+
+describe('applyDataVisualFixes', () => {
+    it('converts bar charts to time series and clears instant on their targets', () => {
+        const dashboard = {
+            panels: [
+                {
+                    id: 201,
+                    type: 'barchart',
+                    title: 'Module Voltage per Cartridge',
+                    gridPos: { x: 0, y: 0, w: 12, h: 6 },
+                    targets: [{ refId: 'A', expr: 'v', instant: true }],
+                },
+            ],
+        };
+        const counts = applyDataVisualFixes(dashboard);
+        expect(counts.barchartsConverted.map((p) => p.id)).toContain(201);
+        const panel = (dashboard.panels as PanelRecord[])[0];
+        expect(panel.type).toBe('timeseries');
+        expect((panel.targets as PanelRecord[])[0].instant).toBe(false);
+    });
+
+    it('sets a unit only on unitless current/voltage panels', () => {
+        const dashboard = {
+            panels: [
+                { id: 24, type: 'stat', title: 'Current', gridPos: { x: 0, y: 0, w: 6, h: 6 }, fieldConfig: { defaults: { unit: 'none' } } },
+                { id: 30, type: 'stat', title: 'Voltage', gridPos: { x: 6, y: 0, w: 6, h: 6 } },
+                { id: 40, type: 'stat', title: 'Pressure', gridPos: { x: 12, y: 0, w: 6, h: 6 } },
+                { id: 50, type: 'stat', title: 'Current (calibrated)', gridPos: { x: 18, y: 0, w: 6, h: 6 }, fieldConfig: { defaults: { unit: 'amp' } } },
+            ],
+        };
+        const counts = applyDataVisualFixes(dashboard);
+        expect(counts.unitsSet.map((p) => p.id).sort()).toEqual([24, 30]);
+        const panels = dashboard.panels as PanelRecord[];
+        expect((panels[0].fieldConfig as { defaults: { unit: string } }).defaults.unit).toBe('amp');
+        expect((panels[1].fieldConfig as { defaults: { unit: string } }).defaults.unit).toBe('volt');
+        // Pressure untouched; already-set unit not overwritten.
+        expect((panels[2] as PanelRecord).fieldConfig).toBeUndefined();
+        expect((panels[3].fieldConfig as { defaults: { unit: string } }).defaults.unit).toBe('amp');
+    });
+
+    it('repairs broken Flux syntax in place (keeps the panel reference in the tree)', () => {
+        const brokenQuery =
+            'from(bucket: "b") |> range(start: -1h) |> group(by: ["x"]) |> stdDev()';
+        const dashboard = {
+            panels: [
+                {
+                    id: 103,
+                    type: 'timeseries',
+                    title: 'Failed Panel',
+                    gridPos: { x: 0, y: 0, w: 12, h: 6 },
+                    datasource: { type: 'influxdb', uid: 'inf1' },
+                    targets: [{ refId: 'A', query: brokenQuery, rawQuery: true }],
+                },
+            ],
+        };
+        const originalRef = (dashboard.panels as PanelRecord[])[0];
+        const counts = applyDataVisualFixes(dashboard);
+        expect(counts.queriesFixed.map((p) => p.id)).toContain(103);
+        // Same object reference, repaired contents (stdDev → stddev, group(by → group(columns).
+        expect((dashboard.panels as PanelRecord[])[0]).toBe(originalRef);
+        const q = ((dashboard.panels as PanelRecord[])[0].targets as PanelRecord[])[0].query as string;
+        expect(q).not.toMatch(/stdDev\b/);
+        expect(q).not.toMatch(/group\s*\(\s*by\s*:/);
     });
 });
 
@@ -208,14 +284,18 @@ describe('formatDashboardImproveReply', () => {
                 overlapsFixed: 2,
                 chunksSaved: 6,
                 totalChunks: 6,
+                barchartsConverted: [{ id: 201, title: 'Module Voltage per Cartridge' }],
+                unitsSet: [{ id: 24, title: 'Current', unit: 'amp' }],
+                queriesFixed: [{ id: 103, title: 'Failed Panel' }],
                 appliedChanges: [
                     { kind: 'remove_duplicates', detail: 'Removed 1 exact-duplicate panel(s): "Pressure Gauge"' },
                     { kind: 'title_row', detail: 'Added a full-width title row at the top and shifted 30 panel(s) down' },
                     { kind: 'overlaps', detail: 'Resolved 2 overlapping panel position(s)' },
+                    { kind: 'barchart_timeseries', detail: 'Converted 1 bar chart(s) to time series: "Module Voltage per Cartridge"' },
+                    { kind: 'set_units', detail: 'Set units on 1 panel(s): "Current" → amp' },
+                    { kind: 'fix_queries', detail: 'Repaired 1 broken Flux query/queries: "Failed Panel"' },
                 ],
-                pendingSuggestions: [
-                    { title: 'Fix broken query — Failed Panel', detail: 'has broken Flux.' },
-                ],
+                pendingSuggestions: [],
                 changedAnything: true,
             },
             178
@@ -223,11 +303,12 @@ describe('formatDashboardImproveReply', () => {
         expect(text).toContain('applied safe improvements');
         expect(text).toContain('Pressure Gauge');
         expect(text).toContain('title row');
-        expect(text).toContain('Needs your confirmation');
-        expect(text).toContain('Fix broken query');
+        expect(text).toContain('time series');
+        expect(text).toContain('Set units');
+        expect(text).toContain('Repaired 1 broken Flux');
     });
 
-    it('reports a clean dashboard when nothing structural needs changing', () => {
+    it('reports a clean dashboard when nothing needs changing', () => {
         const text = formatDashboardImproveReply(
             {
                 ok: true,
@@ -238,12 +319,77 @@ describe('formatDashboardImproveReply', () => {
                 titleRowCreated: false,
                 panelsShifted: 0,
                 overlapsFixed: 0,
+                barchartsConverted: [],
+                unitsSet: [],
+                queriesFixed: [],
                 appliedChanges: [],
                 pendingSuggestions: [],
                 changedAnything: false,
             },
             178
         );
-        expect(text).toMatch(/no safe structural changes/i);
+        expect(text).toMatch(/nothing to change/i);
+    });
+});
+
+describe('runProgrammaticDashboardImprove — auto-applies data/visual fixes', () => {
+    it('converts bar charts, sets units, and repairs queries in one save', async () => {
+        const calls: string[] = [];
+        let saved: PanelRecord | undefined;
+        const mcpClient = {
+            callTool: async ({ name, arguments: args }: { name: string; arguments: Record<string, unknown> }) => {
+                calls.push(name);
+                if (name === 'get_dashboard_by_uid') {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: JSON.stringify({
+                                    dashboard: {
+                                        title: '2505-200033 / KeysightNew',
+                                        uid: 'ffq3wabj0i70gd',
+                                        version: 9,
+                                        panels: [
+                                            {
+                                                id: 201,
+                                                type: 'barchart',
+                                                title: 'Module Voltage per Cartridge',
+                                                gridPos: { x: 0, y: 0, w: 12, h: 6 },
+                                                targets: [{ refId: 'A', expr: 'v', instant: true }],
+                                            },
+                                            {
+                                                id: 24,
+                                                type: 'stat',
+                                                title: 'Current',
+                                                gridPos: { x: 12, y: 0, w: 6, h: 6 },
+                                                fieldConfig: { defaults: { unit: 'none' } },
+                                            },
+                                        ],
+                                    },
+                                }),
+                            },
+                        ],
+                    };
+                }
+                if (name === 'update_dashboard') {
+                    saved = args.dashboard as PanelRecord;
+                    return { content: [{ type: 'text', text: JSON.stringify({ uid: 'ffq3wabj0i70gd', version: 10 }) }] };
+                }
+                throw new Error(`unexpected tool ${name}`);
+            },
+        };
+
+        const result = await runProgrammaticDashboardImprove(mcpClient, { dashboardUid: 'ffq3wabj0i70gd' });
+
+        expect(result.ok).toBe(true);
+        expect(result.barchartsConverted.map((p) => p.id)).toContain(201);
+        expect(result.unitsSet.map((p) => p.id)).toContain(24);
+        expect(calls.filter((c) => c === 'get_dashboard_by_uid')).toHaveLength(1);
+
+        const savedPanels = saved?.panels as PanelRecord[];
+        const barchart = savedPanels.find((p) => p.id === 201);
+        const current = savedPanels.find((p) => p.id === 24);
+        expect(barchart?.type).toBe('timeseries');
+        expect((current?.fieldConfig as { defaults: { unit: string } }).defaults.unit).toBe('amp');
     });
 });

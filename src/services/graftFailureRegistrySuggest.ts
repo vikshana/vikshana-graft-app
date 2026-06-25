@@ -165,7 +165,7 @@ function suggestFromText(text: string, intent: string): SuggestedRegistryRow | n
             implementIn: ['dashboardReviewParse.ts', 'programmaticDashboardImprove.ts', 'ChatInterface.tsx'],
             status: 'wired_fast_path',
             matchedBecause:
-                'Prompt asks to apply review improvements — safe structural fixes (title row, dedupe, overlaps) saved in one pass',
+                'Prompt asks to apply review improvements — title row, dedupe, overlap repair, bar chart→time series, units, and broken-Flux repair saved in one pass',
         };
     }
 
