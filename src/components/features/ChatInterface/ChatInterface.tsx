@@ -456,7 +456,7 @@ export const ChatInterface = ({ panelContext, exploreContext, onDismiss, session
         setCurrentSessionId(undefined);
       }
     }
-  }, [searchParams, currentSessionId, messages.length, isLoading]);
+  }, [searchParams, currentSessionId, messages.length, isLoading, onDismiss]);
 
   // Handle pre-filled prompt from navigation state (separate effect to avoid loop)
   useEffect(() => {
