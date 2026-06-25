@@ -231,6 +231,15 @@ const config = async (env: Env): Promise<Configuration> => {
       // handle resolving "rootDir" paths
       modules: [path.resolve(process.cwd(), 'src'), 'node_modules'],
       unsafeCache: true,
+      alias: {
+        // Redirect react/jsx-runtime to a bundled shim that re-exports from
+        // the React global. This prevents the automatic JSX transform from
+        // bundling the React 18 jsx-runtime inline (which crashes on Grafana
+        // 13.1+ / React 19) while also avoiding marking it as an AMD external
+        // (which crashes on Grafana 11.x / SystemJS with a 404).
+        'react/jsx-runtime': path.resolve(process.cwd(), 'src/shims/jsx-runtime.ts'),
+        'react/jsx-dev-runtime': path.resolve(process.cwd(), 'src/shims/jsx-dev-runtime.ts'),
+      },
     },
   };
 

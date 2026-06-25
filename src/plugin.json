@@ -3,6 +3,7 @@
   "type": "app",
   "name": "Graft AI Assistant",
   "id": "vikshana-graft-app",
+  "preload": true,
   "backend": true,
   "executable": "gpx_graft",
   "info": {
@@ -102,13 +103,27 @@
     }
   ],
   "dependencies": {
-    "grafanaDependency": ">=10.4.0",
+    "grafanaDependency": ">=11.1.0",
     "plugins": [
       {
         "type": "app",
         "id": "grafana-llm-app",
         "name": "Grafana LLM",
         "version": "1.0.0"
+      }
+    ]
+  },
+  "extensions": {
+    "addedLinks": [
+      {
+        "targets": ["grafana/dashboard/panel/menu"],
+        "title": "Ask Graft AI Assistant",
+        "description": "Open the Graft AI Assistant with this panel as context"
+      },
+      {
+        "targets": ["grafana/explore/toolbar/action"],
+        "title": "Ask Graft AI Assistant (Explore)",
+        "description": "Open the Graft AI Assistant with the current Explore query as context"
       }
     ]
   }

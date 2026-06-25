@@ -202,6 +202,7 @@ color: ${theme.colors.text.secondary};
 `,
   messageList: css`
 flex-grow: 1;
+min-height: 0;
 overflow-y: auto;
 padding: ${theme.spacing(2)};
 display: flex;
@@ -579,7 +580,7 @@ padding: ${theme.spacing(2)};
 border-bottom: 1px solid ${theme.colors.border.weak};
 background: ${theme.colors.background.primary};
 position: sticky;
-top: 40px;
+top: 0;
 z-index: 10;
 `,
   headerLeft: css`

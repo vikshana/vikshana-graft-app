@@ -14,8 +14,10 @@ import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 
 // Grafana packages
 import { Alert, Button, TextArea, useStyles2, useTheme2, Icon, ConfirmModal } from '@grafana/ui';
-import { GrafanaTheme2 } from '@grafana/data';
+import { GrafanaTheme2, type PluginExtensionPanelContext } from '@grafana/data';
 import { mcp } from '@grafana/llm';
+
+// Constants
 
 // Local services
 import { llmService } from '../../../services/llm';
@@ -93,6 +95,7 @@ const formatContext = (
   toolsConfig?: ToolsConfig,
   grafanaVersion?: string,
   dashboardSchema?: DashboardSchemaCapability,
+  panelOverride?: Readonly<PluginExtensionPanelContext>,
 ): string => {
   const lines: string[] = [];
 
@@ -196,6 +199,18 @@ const formatContext = (
     `- Dashboard links: when referencing a created or modified dashboard, always render its UID as a markdown link: [Open dashboard](/d/{uid}). Never leave a UID as bare text.`
   );
 
+  // Panel context — injected when the user launched Graft from a specific panel
+  if (panelOverride) {
+    lines.push('');
+    lines.push('Panel context (user launched Graft directly from this panel):');
+    lines.push(`- Panel: "${panelOverride.title}" (id: ${panelOverride.id}, type: ${panelOverride.pluginId})`);
+    lines.push(`- Dashboard: "${panelOverride.dashboard.title}" (uid: ${panelOverride.dashboard.uid})`);
+    lines.push(`- Time range: ${panelOverride.timeRange.from} to ${panelOverride.timeRange.to} (tz: ${panelOverride.timeZone})`);
+    if (panelOverride.targets?.length) {
+      lines.push(`- Panel queries: ${JSON.stringify(panelOverride.targets)}`);
+    }
+  }
+
   return lines.join('\n');
 };
 
@@ -251,7 +266,32 @@ MemoizedReactMarkdown.displayName = 'MemoizedReactMarkdown';
 
 
 
-export const ChatInterface = () => {
+/** Explore context passed when launched from the Grafana Explore toolbar modal. */
+export interface ExploreContext {
+  dsUid?: string;
+  dsType?: string;
+  from?: string;
+  to?: string;
+  timeZone?: string;
+  queries?: Array<{ refId: string; expr?: string; dsUid?: string; dsType?: string }>;
+}
+
+export interface ChatInterfaceProps {
+  /** Panel context snapshot passed when launched from a Grafana panel menu. */
+  panelContext?: Readonly<PluginExtensionPanelContext>;
+  /** Explore context passed when launched from the Grafana Explore toolbar modal. */
+  exploreContext?: Readonly<ExploreContext>;
+  /** Called when the modal wrapper should be closed (only set in modal mode). */
+  onDismiss?: () => void;
+  /**
+   * Shared mutable ref written on every render so the title-bar "Open in Graft"
+   * button (which lives outside this React subtree) can read the latest session
+   * ID at click time without any React context crossing.
+   */
+  sessionRef?: React.MutableRefObject<{ sessionId?: string } | null>;
+}
+
+export const ChatInterface = ({ panelContext, exploreContext, onDismiss, sessionRef }: ChatInterfaceProps = {}) => {
   const styles = useStyles2(getStyles);
   const theme = useTheme2();
   const [input, setInput] = useState('');
@@ -320,6 +360,14 @@ export const ChatInterface = () => {
     latestMessagesRef.current = messages;
   });
 
+  // Keep sessionRef in sync when currentSessionId changes so the title-bar
+  // "Open in Graft" button can always read the latest sessionId at click time.
+  useEffect(() => {
+    if (sessionRef) {
+      sessionRef.current = { sessionId: currentSessionId };
+    }
+  }, [currentSessionId, sessionRef]);
+
   useEffect(() => {
     if (!settingsLoading && llmReady) {
       // If only one model is available, auto-select it
@@ -385,6 +433,7 @@ export const ChatInterface = () => {
 
   // Sync state with URL and load session if specified
   useEffect(() => {
+    if (onDismiss) { return; } // modal mode — no URL session to restore or reset
     const sessionId = searchParams.get('session');
     const isChatActive = searchParams.get('chat');
 
@@ -407,7 +456,7 @@ export const ChatInterface = () => {
         setCurrentSessionId(undefined);
       }
     }
-  }, [searchParams, currentSessionId, messages.length, isLoading]);
+  }, [searchParams, currentSessionId, messages.length, isLoading, onDismiss]);
 
   // Handle pre-filled prompt from navigation state (separate effect to avoid loop)
   useEffect(() => {
@@ -419,6 +468,75 @@ export const ChatInterface = () => {
       navigate(location.pathname, { replace: true, state: { ...state, prompt: undefined } });
     }
   }, [location.state, location.pathname, navigate]);
+
+  // Pre-fill input from panel context when launched from a panel menu modal (mount-only)
+  useEffect(() => {
+    if (!panelContext) { return; }
+    const dsUid = panelContext.targets?.[0]?.datasource?.uid;
+    const dsHint = dsUid ? ` (datasource uid: ${dsUid})` : '';
+    setInput(
+      `Tell me about the "${panelContext.title}" panel on the ` +
+      `"${panelContext.dashboard.title}" dashboard${dsHint}. ` +
+      `Time range: ${panelContext.timeRange.from} to ${panelContext.timeRange.to}.`
+    );
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Pre-fill input from Explore toolbar URL params (mount-only, full-page mode only)
+  useEffect(() => {
+    if (panelContext) { return; }
+    // Modal mode: exploreContext prop takes priority over URL params
+    if (exploreContext) {
+      const { dsUid, dsType, from, to, queries } = exploreContext;
+      if (!dsUid && !queries?.length) { return; }
+      const parts: string[] = ['I want to analyze some data from Grafana Explore.'];
+      if (dsUid) { parts.push(`Datasource UID: ${dsUid}${dsType ? ` (${dsType})` : ''}.`); }
+      if (from && to) { parts.push(`Time range: ${from} to ${to}.`); }
+      if (queries?.length) {
+        const exprs = queries.map((q) => q.expr).filter(Boolean);
+        if (exprs.length) { parts.push(`Queries: ${exprs.join('; ')}.`); }
+      }
+      setInput(parts.join(' '));
+      return;
+    }
+    // Full-page mode: read from URL search params
+    const dsUid      = searchParams.get('dsUid');
+    const dsType     = searchParams.get('dsType');
+    const from       = searchParams.get('from');
+    const to         = searchParams.get('to');
+    const rawQueries = searchParams.get('queries');
+    if (!dsUid && !rawQueries) { return; }
+
+    const parts: string[] = ['I want to analyze some data from Grafana Explore.'];
+    if (dsUid) { parts.push(`Datasource UID: ${dsUid}${dsType ? ` (${dsType})` : ''}.`); }
+    if (from && to) { parts.push(`Time range: ${from} to ${to}.`); }
+    if (rawQueries) {
+      try {
+        const qs: Array<{ expr?: string; refId: string }> = JSON.parse(rawQueries);
+        const exprs = qs.map((q) => q.expr).filter(Boolean);
+        if (exprs.length) { parts.push(`Queries: ${exprs.join('; ')}.`); }
+      } catch { /* ignore malformed JSON */ }
+    }
+    setInput(parts.join(' '));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Pre-fill input from panel context URL params — used when "Open in Graft"
+  // is clicked from the modal title bar (full-page navigation path)
+  useEffect(() => {
+    if (onDismiss) { return; } // modal mode — URL params belong to the host page
+    const panelTitle     = searchParams.get('panelTitle');
+    const dashboardTitle = searchParams.get('dashboardTitle');
+    const from           = searchParams.get('from');
+    const to             = searchParams.get('to');
+    const dsUid          = searchParams.get('dsUid');
+    if (!panelTitle) { return; }
+
+    const dsHint = dsUid ? ` (datasource uid: ${dsUid})` : '';
+    const timeHint = from && to ? ` Time range: ${from} to ${to}.` : '';
+    setInput(
+      `Tell me about the "${panelTitle}" panel` +
+      `${dashboardTitle ? ` on the "${dashboardTitle}" dashboard` : ''}${dsHint}.${timeHint}`
+    );
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Initial scroll to bottom when chat loads
   useEffect(() => {
@@ -533,7 +651,7 @@ export const ChatInterface = () => {
       const dataSources = contextService.getDataSources();
       const { version: grafanaVersion, dashboardSchema } = contextService.getBuildInfo();
 
-      const context = formatContext(dashboard, user, dataSources, toolsConfig, grafanaVersion, dashboardSchema);
+      const context = formatContext(dashboard, user, dataSources, toolsConfig, grafanaVersion, dashboardSchema, panelContext);
 
       // Create a placeholder message for the assistant
       const assistantMessage: Message = { role: 'assistant', content: '' };
@@ -795,7 +913,7 @@ ${input} `
       const user = contextService.getUserContext();
       const dataSources = contextService.getDataSources();
       const { version: grafanaVersion, dashboardSchema } = contextService.getBuildInfo();
-      const context = formatContext(dashboard, user, dataSources, toolsConfig, grafanaVersion, dashboardSchema);
+      const context = formatContext(dashboard, user, dataSources, toolsConfig, grafanaVersion, dashboardSchema, panelContext);
       const assistantMessage: Message = { role: 'assistant', content: '' };
       setMessages((prev) => [...prev, assistantMessage]);
 
@@ -1084,6 +1202,8 @@ ${input} `
         </div>
       ) : (
         <>
+          {/* Chat header hidden in modal mode — Grafana's title bar + our modalHeader serve the same purpose */}
+          {!onDismiss && (
           <div className={styles.chatHeader} data-testid="chat-header">
             <div className={styles.headerLeft}>
               <Button variant="secondary" fill="outline" icon="arrow-left" onClick={handleReset} data-testid="back-button">
@@ -1100,6 +1220,7 @@ ${input} `
               </Button>
             </div>
           </div>
+          )}
           <div
             className={styles.messageList}
             ref={messageListRef}

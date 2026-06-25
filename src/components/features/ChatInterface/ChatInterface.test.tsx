@@ -799,4 +799,197 @@ describe('ChatInterface', () => {
             expect(screen.queryByTestId('settings-button')).not.toBeInTheDocument();
         });
     });
+
+    describe('panel context (modal mode)', () => {
+        const mockPanelContext = {
+            pluginId: 'timeseries',
+            id: 42,
+            title: 'CPU Usage',
+            timeRange: { from: 'now-1h', to: 'now' },
+            timeZone: 'browser',
+            dashboard: { uid: 'dash-uid-1', title: 'My Dashboard', tags: [] },
+            targets: [{ refId: 'A', datasource: { uid: 'prom-uid', type: 'prometheus' } }],
+        } as any;
+
+        it('pre-fills the input with panel context on mount', async () => {
+            render(
+                <MemoryRouter>
+                    <ChatInterface panelContext={mockPanelContext} />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                const input = screen.getByTestId('chat-input') as HTMLTextAreaElement;
+                expect(input.value).toContain('CPU Usage');
+                expect(input.value).toContain('My Dashboard');
+                expect(input.value).toContain('now-1h');
+                expect(input.value).toContain('prom-uid');
+            });
+        });
+
+        it('does not render modal header inside ChatInterface (button is in Grafana title bar)', async () => {
+            render(
+                <MemoryRouter>
+                    <ChatInterface panelContext={mockPanelContext} />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                expect(screen.getByTestId('chat-input')).toBeInTheDocument();
+            });
+
+            expect(screen.queryByTestId('modal-header')).not.toBeInTheDocument();
+            expect(screen.queryByTestId('open-in-graft-button')).not.toBeInTheDocument();
+        });
+
+        it('suppresses the chat header (Back/Previous Conversations) in modal mode', async () => {
+            (llmService.chat as jest.Mock).mockImplementation(async (_msgs: any, _ctx: any, onUpdate: any) => {
+                onUpdate('Response from Graft');
+            });
+
+            render(
+                <MemoryRouter>
+                    <ChatInterface panelContext={mockPanelContext} onDismiss={() => {}} />
+                </MemoryRouter>
+            );
+
+            // Wait for LLM health check and pre-fill
+            await waitFor(() => {
+                expect(screen.getByTestId('send-message-button')).not.toBeDisabled();
+            });
+
+            const sendBtn = screen.getByLabelText('Send message');
+            await act(async () => { fireEvent.click(sendBtn); });
+
+            await waitFor(() => {
+                expect(screen.getByText('Response from Graft')).toBeInTheDocument();
+            });
+
+            // Chat header with Back/Previous Conversations must not appear in modal mode
+            expect(screen.queryByTestId('chat-header')).not.toBeInTheDocument();
+            expect(screen.queryByTestId('back-button')).not.toBeInTheDocument();
+        });
+    });
+
+    describe('Explore URL param pre-fill', () => {
+        it('pre-fills input from dsUid + queries + time range params', async () => {
+            const queries = JSON.stringify([{ refId: 'A', expr: 'up{job="prometheus"}' }]);
+            render(
+                <MemoryRouter
+                    initialEntries={[`/?dsUid=prom-uid&dsType=prometheus&from=now-6h&to=now&queries=${encodeURIComponent(queries)}`]}
+                >
+                    <ChatInterface />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                const input = screen.getByTestId('chat-input') as HTMLTextAreaElement;
+                expect(input.value).toContain('prom-uid');
+                expect(input.value).toContain('up{job="prometheus"}');
+                expect(input.value).toContain('now-6h');
+            });
+        });
+
+        it('does not pre-fill when no dsUid or queries params present', async () => {
+            render(
+                <MemoryRouter initialEntries={['/']}>
+                    <ChatInterface />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                expect(screen.getByTestId('landing-title')).toBeInTheDocument();
+            });
+
+            const input = screen.getByTestId('chat-input') as HTMLTextAreaElement;
+            expect(input.value).toBe('');
+        });
+    });
+
+    describe('Explore modal prop pre-fill (exploreContext)', () => {
+        it('pre-fills input from exploreContext prop (modal mode)', async () => {
+            const exploreContext = {
+                dsUid: 'prom-uid',
+                dsType: 'prometheus',
+                from: 'now-6h',
+                to: 'now',
+                queries: [{ refId: 'A', expr: 'up{job="prometheus"}', dsUid: 'prom-uid', dsType: 'prometheus' }],
+            };
+
+            render(
+                <MemoryRouter initialEntries={['/']}>
+                    <ChatInterface exploreContext={exploreContext} />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                const input = screen.getByTestId('chat-input') as HTMLTextAreaElement;
+                expect(input.value).toContain('prom-uid');
+                expect(input.value).toContain('prometheus');
+                expect(input.value).toContain('up{job="prometheus"}');
+                expect(input.value).toContain('now-6h');
+            });
+        });
+
+        it('does not pre-fill when exploreContext has no dsUid or queries', async () => {
+            const exploreContext = { timeZone: 'browser' };
+
+            render(
+                <MemoryRouter initialEntries={['/']}>
+                    <ChatInterface exploreContext={exploreContext} />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                expect(screen.getByTestId('landing-title')).toBeInTheDocument();
+            });
+
+            const input = screen.getByTestId('chat-input') as HTMLTextAreaElement;
+            expect(input.value).toBe('');
+        });
+
+        it('exploreContext prop takes priority over URL params in modal mode', async () => {
+            const exploreContext = {
+                dsUid: 'modal-ds',
+                queries: [{ refId: 'A', expr: 'from_prop{}' }],
+            };
+            const queries = JSON.stringify([{ refId: 'A', expr: 'from_url{}' }]);
+
+            render(
+                <MemoryRouter
+                    initialEntries={[`/?dsUid=url-ds&queries=${encodeURIComponent(queries)}`]}
+                >
+                    <ChatInterface exploreContext={exploreContext} />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                const input = screen.getByTestId('chat-input') as HTMLTextAreaElement;
+                expect(input.value).toContain('modal-ds');
+                expect(input.value).toContain('from_prop{}');
+                expect(input.value).not.toContain('url-ds');
+                expect(input.value).not.toContain('from_url{}');
+            });
+        });
+    });
+
+    describe('panel URL param pre-fill (Open in Graft zero-message path)', () => {
+        it('pre-fills input from panelTitle URL params', async () => {
+            render(
+                <MemoryRouter
+                    initialEntries={['/?panelTitle=CPU+Usage&dashboardTitle=My+Dashboard&from=now-3h&to=now&dsUid=prom-uid']}
+                >
+                    <ChatInterface />
+                </MemoryRouter>
+            );
+
+            await waitFor(() => {
+                const input = screen.getByTestId('chat-input') as HTMLTextAreaElement;
+                expect(input.value).toContain('CPU Usage');
+                expect(input.value).toContain('My Dashboard');
+                expect(input.value).toContain('now-3h');
+                expect(input.value).toContain('prom-uid');
+            });
+        });
+    });
 });
