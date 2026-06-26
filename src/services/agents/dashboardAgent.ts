@@ -1286,8 +1286,12 @@ function parsePlanResponse(content: string): { panels: any[]; variables: any[]; 
             variables: Array.isArray(parsed.variables) ? parsed.variables : [],
             timeRange: parsed.timeRange ?? { from: 'now-1h', to: 'now' },
             layoutHint: parsed.layoutHint,
-            title: typeof parsed.title === 'string' && parsed.title.trim() ? parsed.title.trim() : undefined,
-            description: typeof parsed.description === 'string' && parsed.description.trim() ? parsed.description.trim() : undefined,
+            title: typeof parsed.title === 'string' && parsed.title.trim()
+                ? parsed.title.trim().replace(/\s+/g, ' ').slice(0, 80)
+                : undefined,
+            description: typeof parsed.description === 'string' && parsed.description.trim()
+                ? parsed.description.trim().replace(/\s+/g, ' ').slice(0, 300)
+                : undefined,
         };
     } catch {
         return null;
@@ -1347,7 +1351,7 @@ export async function runDashboardAgent(
         // Gate: at least 1 panel in the todo list.
         // ═══════════════════════════════════════════════════════════════════
 
-        let planResult: { panels: any[]; variables: any[]; timeRange: any; layoutHint?: string; title?: string; description?: string } | null = null;
+        let planResult: ReturnType<typeof parsePlanResponse> = null;
         let planAttempt = 0;
 
         while (!planResult && planAttempt <= MAX_PLAN_RETRIES) {
