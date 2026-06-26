@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.5.0...graft-v0.6.0) (2026-06-25)
+
+
+### Features and enhancements
+
+* **chat:** Ask Graft AI Assistant modal for panel menu and Explore toolbar ([#18](https://github.com/vikshana/vikshana-graft-app/issues/18)) ([49dc6e5](https://github.com/vikshana/vikshana-graft-app/commit/49dc6e54c7ad49bb44de31793aa84e0b4cd0fa8e))
+
 ## [0.5.0](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.4.0...graft-v0.5.0) (2026-06-20)
 
 
