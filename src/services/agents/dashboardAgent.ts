@@ -1347,7 +1347,7 @@ export async function runDashboardAgent(
         // Gate: at least 1 panel in the todo list.
         // ═══════════════════════════════════════════════════════════════════
 
-        let planResult: { panels: any[]; variables: any[]; timeRange: any; layoutHint?: string } | null = null;
+        let planResult: { panels: any[]; variables: any[]; timeRange: any; layoutHint?: string; title?: string; description?: string } | null = null;
         let planAttempt = 0;
 
         while (!planResult && planAttempt <= MAX_PLAN_RETRIES) {
