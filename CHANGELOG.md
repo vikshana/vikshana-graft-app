@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.6.0...graft-v0.6.1) (2026-06-26)
+
+
+### Bug fixes
+
+* **llm:** generate dashboard title from PLAN phase findings ([#21](https://github.com/vikshana/vikshana-graft-app/issues/21)) ([4850068](https://github.com/vikshana/vikshana-graft-app/commit/4850068182abc0ad32801505b3716e51b96135ed))
+
 ## [0.6.0](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.5.0...graft-v0.6.0) (2026-06-25)
 
 
