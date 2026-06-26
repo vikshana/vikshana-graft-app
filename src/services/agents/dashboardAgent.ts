@@ -417,6 +417,8 @@ ${context ? `## Current Grafana context\n${context}` : ''}
 
 ## Output format (REQUIRED — output ONLY this JSON, no prose, no fences)
 {
+  "title": "<3-6 word dashboard name derived from the datasource and metric domain — e.g. 'OTel Receiver Metrics', 'API Error Rate', 'Kubernetes Node Health'>",
+  "description": "<1-2 sentence description of what this dashboard monitors and why>",
   "panels": [
     {
       "title": "<panel title>",
@@ -440,6 +442,8 @@ ${context ? `## Current Grafana context\n${context}` : ''}
 }
 
 Rules:
+- title: derive from the datasource name and metric domain. Do NOT copy the user's question. Max 6 words, title case. Examples: "OTel Receiver Metrics", "Frontend Request Rate", "Node Exporter Health".
+- description: 1-2 sentences describing what the dashboard monitors. Write as a statement, not a question.
 - If pre-validated queries were provided: use the EXACT expression strings from the findings. Do NOT rephrase or reconstruct.
 - If an available metrics list is shown above: write PromQL expressions using ONLY those exact metric names. Do NOT use metric names outside that list. Do NOT guess names that "should" exist.
 - If NO pre-validated queries AND NO available metrics list: set query to "DISCOVER" for every panel.
@@ -1267,7 +1271,7 @@ async function runAgentLoop(
 // ─── Phase helpers ────────────────────────────────────────────────────────────
 
 /** Parse the panel todo list from the PLAN phase response. Returns null on failure. */
-function parsePlanResponse(content: string): { panels: any[]; variables: any[]; timeRange: any; layoutHint?: string } | null {
+function parsePlanResponse(content: string): { panels: any[]; variables: any[]; timeRange: any; layoutHint?: string; title?: string; description?: string } | null {
     try {
         let json = content.trim();
         const fence = json.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -1282,6 +1286,8 @@ function parsePlanResponse(content: string): { panels: any[]; variables: any[]; 
             variables: Array.isArray(parsed.variables) ? parsed.variables : [],
             timeRange: parsed.timeRange ?? { from: 'now-1h', to: 'now' },
             layoutHint: parsed.layoutHint,
+            title: typeof parsed.title === 'string' && parsed.title.trim() ? parsed.title.trim() : undefined,
+            description: typeof parsed.description === 'string' && parsed.description.trim() ? parsed.description.trim() : undefined,
         };
     } catch {
         return null;
@@ -1404,12 +1410,10 @@ export async function runDashboardAgent(
         // ═══════════════════════════════════════════════════════════════════
 
         if (plannedPanels.length > 0 && mcpClient) {
-            // Generate a descriptive title from the user message
-            const dashTitle = userMessage.length < 60
-                ? userMessage.replace(/^(create|build|make|add)\s+a?\s*/i, '').trim()
-                    .replace(/\b\w/g, c => c.toUpperCase())
-                : step.description;
-            const dashDesc = `Auto-generated dashboard for: ${userMessage}`;
+            // Use the LLM-generated title/description from the PLAN phase — it knows the
+            // datasource and metric domain. Fall back to the planner's step description.
+            const dashTitle = planResult?.title || step.description;
+            const dashDesc = planResult?.description || `Dashboard for: ${step.description}`;
 
             const dashboardJson = buildDashboardJson(
                 layout, plannedPanels, plannedVariables, plannedTimeRange,
