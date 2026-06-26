@@ -47,12 +47,14 @@ const prometheusFindings: DataFindings = {
 };
 
 /** Build a valid PLAN phase JSON response */
-const makePlanResponse = (panels?: any[]) => {
+const makePlanResponse = (panels?: any[], overrides?: { title?: string; description?: string }) => {
     const defaultPanels = [
         { title: 'Error Log Volume', description: 'Log error rate', query: '{job=~".+"} |= "error"', datasourceType: 'loki', viz: 'timeseries', unit: 'reqps', rowGroup: 'Errors' },
         { title: 'All Logs', description: 'All log streams', query: '{job=~".+"}', datasourceType: 'loki', viz: 'logs', unit: '', rowGroup: 'Logs' },
     ];
     return JSON.stringify({
+        title: overrides?.title ?? 'Service Log Monitoring',
+        description: overrides?.description ?? 'Monitors log volume and error rates for observed services.',
         panels: panels ?? defaultPanels,
         variables: [],
         timeRange: { from: 'now-1h', to: 'now' },
@@ -498,6 +500,62 @@ describe('runDashboardAgent', () => {
         expect(dash).toBeDefined();
         expect(Array.isArray(dash.panels)).toBe(true);
         expect(result.dashboardUid).toBe('uid-direct');
+    });
+
+    it('dashboard title comes from PLAN phase, not from the raw user message', async () => {
+        // The user asked a conversational question — it should never become the title.
+        const conversationalUserMessage = 'Can you build a dashboard to monitor this?';
+
+        mockChatCompletions.mockResolvedValueOnce(
+            makeResponse(makePlanResponse(undefined, { title: 'OTel Receiver Metrics' }))
+        );
+        mockMcpClient.callTool
+            .mockResolvedValueOnce(makeUpdateDashboardResult('uid-title'))
+            .mockResolvedValueOnce(makeSummaryEnvelope(2, [
+                { id: 1, title: 'Error Log Volume', type: 'timeseries', description: 'd', queryCount: 1 },
+                { id: 2, title: 'All Logs', type: 'logs', description: 'd', queryCount: 1 },
+            ]))
+            .mockResolvedValueOnce(makePanelQueriesEnvelope());
+
+        await runDashboardAgent(
+            makeStep(), conversationalUserMessage, '', lokiFindings,
+            [], mockMcpClient, 10, new AbortController().signal, onUpdate,
+        );
+
+        const dash = mockMcpClient.callTool.mock.calls[0][0].arguments.dashboard;
+        expect(dash.title).toBe('OTel Receiver Metrics');
+        expect(dash.title).not.toContain('Can You');
+        expect(dash.title).not.toContain('build a dashboard');
+    });
+
+    it('falls back to step.description as dashboard title when PLAN omits title', async () => {
+        // PLAN response that intentionally has no "title" field
+        const planWithNoTitle = JSON.stringify({
+            panels: [
+                { title: 'Error Log Volume', description: 'Log error rate', query: '{job=~".+"} |= "error"',
+                  datasourceType: 'loki', viz: 'timeseries', unit: 'reqps', rowGroup: 'Errors' },
+            ],
+            variables: [],
+            timeRange: { from: 'now-1h', to: 'now' },
+            layoutHint: 'none',
+        });
+
+        mockChatCompletions.mockResolvedValueOnce(makeResponse(planWithNoTitle));
+        mockMcpClient.callTool
+            .mockResolvedValueOnce(makeUpdateDashboardResult('uid-fallback'))
+            .mockResolvedValueOnce(makeSummaryEnvelope(1, [
+                { id: 1, title: 'Error Log Volume', type: 'timeseries', description: 'd', queryCount: 1 },
+            ]))
+            .mockResolvedValueOnce(makePanelQueriesEnvelope());
+
+        const step = makeStep({ description: 'Build a service log monitoring dashboard' });
+        await runDashboardAgent(
+            step, 'Can you build a dashboard to monitor this?', '', lokiFindings,
+            [], mockMcpClient, 10, new AbortController().signal, onUpdate,
+        );
+
+        const dash = mockMcpClient.callTool.mock.calls[0][0].arguments.dashboard;
+        expect(dash.title).toBe('Build a service log monitoring dashboard');
     });
 
     it('code-built CREATE: query from PLAN is written verbatim into the panel target', async () => {
