@@ -11,10 +11,8 @@ export interface DashboardResolveRequest {
     machineId?: string;
 }
 
-/** Well-known instrumentation dashboards (label → uid). */
-export const KNOWN_INSTRUMENTATION_DASHBOARD_UIDS: Record<string, string> = {
-    keysight: 'cfo0wckufbdhce',
-};
+/** Well-known instrumentation dashboards (label → uid). Prefer dashboard search for Keysight clones. */
+export const KNOWN_INSTRUMENTATION_DASHBOARD_UIDS: Record<string, string> = {};
 
 export function inferMachineIdFromDashboardTitle(title: string | undefined): string | undefined {
     if (!title) {

@@ -5,9 +5,9 @@ import type { McpClient } from './dashboardChunkedUpdate';
 import { stampDashboardForOverwrite } from './fluxQueryFix';
 import { normalizeUpdateDashboardArgs } from './updateDashboardArgs';
 import { listDashboardPanels, type DashboardPanelEntry } from './panelDiscovery';
-import { parseSearchHitsFromMcpText } from './dashboardSearchParse';
 import { isMachineId } from './dashboardCloneParse';
 import type { AddHistoryComparisonPanelRequest } from './historyComparisonPanelAddParse';
+import { resolveDashboardUid } from './programmaticDashboardResolve';
 import { findPrometheusTemplatePanel } from './instrumentationMetricDiscovery';
 import { getPanelTargetList } from './fluxPeerBandFix';
 import {
@@ -175,29 +175,16 @@ async function resolveDashboard(
     request: AddHistoryComparisonPanelRequest,
     toolExecutions: ToolExecution[]
 ): Promise<{ uid?: string; title?: string; error?: string }> {
-    if (request.dashboardUid) {
-        return { uid: request.dashboardUid };
-    }
-    const searchTitle = request.dashboardTitle ?? request.machineId;
-    if (!searchTitle) {
-        return { error: 'Need dashboard uid, title, or machine id.' };
-    }
-    const searchStep = pendingTool('search_dashboards');
-    toolExecutions.push(searchStep);
-    const searchResult = await callMcpTool(mcpClient, 'search_dashboards', { query: searchTitle });
-    toolExecutions[toolExecutions.length - 1] = finishTool(searchStep, searchResult);
-    if (!searchResult.ok) {
-        return { error: searchResult.error ?? 'Dashboard search failed' };
-    }
-    const hits = parseSearchHitsFromMcpText(searchResult.text);
-    const match =
-        hits.find((h) => h.title?.includes(searchTitle)) ??
-        hits.find((h) => (request.machineId && h.title?.includes(request.machineId)) || false) ??
-        hits[0];
-    if (!match?.uid) {
-        return { error: `No dashboard found for "${searchTitle}".` };
-    }
-    return { uid: match.uid, title: match.title };
+    return resolveDashboardUid(
+        mcpClient,
+        {
+            dashboardUid: request.dashboardUid,
+            dashboardTitle: request.dashboardTitle,
+            titleLabel: request.titleLabel,
+            machineId: request.machineId,
+        },
+        toolExecutions
+    );
 }
 
 function machineIdFromDashboardTitle(title: string | undefined, fallback: string): string {

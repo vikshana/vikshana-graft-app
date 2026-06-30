@@ -2,18 +2,31 @@ import { extractAllDashboardUids, extractDashboardUidFromMessage } from './dashb
 import { extractRequestedDashboardTitle, findMachineIdsInText } from './dashboardCloneParse';
 import { extractOnDashboardMachineTitle } from './modulePanelReorderParse';
 import { extractOwnHistoryMetricLabel } from './ownHistoryPanelParse';
+import { extractInstrumentationLabel } from './dashboardMetricPanelsParse';
+import {
+    formatModuleMlPanelGuidanceReply,
+    parseModuleMlGuidanceContext,
+} from './moduleMlPanelGuidance';
 
 export const DEFAULT_HISTORY_COMPARISON_MODULE = 5;
 
 export interface AddHistoryComparisonPanelRequest {
     dashboardUid?: string;
     dashboardTitle?: string;
+    titleLabel?: string;
     machineId?: string;
     moduleNumber: number;
 }
 
 function normalizeMessageQuotes(text: string): string {
     return text.replace(/[\u201C\u201D]/g, '"').replace(/[\u2018\u2019]/g, "'");
+}
+
+function userWantsPanelAction(text: string): boolean {
+    return (
+        /\b(add|create|new|make|build|set\s+up)\b/i.test(text) ||
+        /\bwould\s+like\s+to\s+(?:add|create|make|build|set\s+up)\b/i.test(text)
+    );
 }
 
 /** Predictive analytics / live History Comparison (PromQL RandomForest bands). */
@@ -37,7 +50,8 @@ export function messageMentionsPredictiveAnalyticsPanel(message: string): boolea
         (/\brandom\s*forest\b/i.test(text) && !/\bvs\s+peers\b/i.test(text) && !/\binflux\b/i.test(text)) ||
         (/\bmachine\s+learning\b/i.test(text) &&
             /\bmodule\s*\d+\b/i.test(text) &&
-            !/\bown\s+history\b/i.test(text))
+            !/\bown\s+history\b/i.test(text) &&
+            /\bpanel\b/i.test(text))
     );
 }
 
@@ -46,13 +60,17 @@ export function parseAddHistoryComparisonPanelRequest(message: string): AddHisto
     if (!messageMentionsPredictiveAnalyticsPanel(text)) {
         return null;
     }
-    if (!/\b(add|create|new)\b/i.test(text)) {
+    if (!userWantsPanelAction(text)) {
         return null;
     }
     const uids = extractAllDashboardUids(text);
     const machines = findMachineIdsInText(text);
     const machineId = machines[0];
-    const dashboardTitle = extractRequestedDashboardTitle(text, machineId) ?? extractOnDashboardMachineTitle(text);
+    const titleLabel = extractInstrumentationLabel(text);
+    const dashboardTitle =
+        extractRequestedDashboardTitle(text, machineId) ??
+        extractOnDashboardMachineTitle(text) ??
+        titleLabel;
     const dashboardUid = uids[0] ?? extractDashboardUidFromMessage(text);
 
     let moduleNumber: number | undefined;
@@ -78,15 +96,17 @@ export function parseAddHistoryComparisonPanelRequest(message: string): AddHisto
     if (moduleNumber == null) {
         moduleNumber = DEFAULT_HISTORY_COMPARISON_MODULE;
     }
-    if (!dashboardUid && !dashboardTitle && !machineId) {
+    if (!dashboardUid && !dashboardTitle && !machineId && !titleLabel) {
         return null;
     }
-    return { dashboardUid, dashboardTitle, machineId, moduleNumber };
+    return { dashboardUid, dashboardTitle, titleLabel, machineId, moduleNumber };
 }
 
+/** @deprecated Use formatModuleMlPanelGuidanceReply — kept for tests referencing example prompts. */
 export function formatAddHistoryComparisonPanelExamplePrompt(moduleNumber = 5, dashboardUid = '6gawrgawrgragg'): string {
-    return (
-        `Create a predictive analytics panel for Module ${moduleNumber} Current on the dashboard with UID = ${dashboardUid}. ` +
-        `Use live PromQL History Comparison (machine_metrics + machine_metric_* bounds). Save.`
+    return formatModuleMlPanelGuidanceReply(
+        parseModuleMlGuidanceContext(
+            `Create a predictive analytics panel for Module ${moduleNumber} Current on the dashboard with UID = ${dashboardUid}.`
+        )
     );
 }

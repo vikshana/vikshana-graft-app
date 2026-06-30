@@ -17,8 +17,20 @@ describe('historyComparisonPanelAddParse', () => {
         expect(parseAddHistoryComparisonPanelRequest(userPrompt)).toEqual({
             dashboardUid: 'afq7tc6hl1m9sb',
             dashboardTitle: undefined,
+            titleLabel: undefined,
             machineId: undefined,
             moduleNumber: 2,
+        });
+    });
+
+    it('parses Keysight label when no uid is given', () => {
+        expect(
+            parseAddHistoryComparisonPanelRequest(
+                'Create a predictive analytics panel for Module 1 Current on the Keysight dashboard.'
+            )
+        ).toMatchObject({
+            titleLabel: 'Keysight',
+            moduleNumber: 1,
         });
     });
 
@@ -39,7 +51,9 @@ describe('historyComparisonPanelAddParse', () => {
         expect(canonicalLiveHistoryComparisonTitle(2)).toBe('Module 2 Current — History Comparison');
     });
 
-    it('formats an example prompt', () => {
-        expect(formatAddHistoryComparisonPanelExamplePrompt(2, 'afq7tc6hl1m9sb')).toContain('Module 2 Current');
+    it('formats educational guidance instead of a bare technical prompt', () => {
+        const msg = formatAddHistoryComparisonPanelExamplePrompt(2, 'afq7tc6hl1m9sb');
+        expect(msg).toContain('Machine learning panels');
+        expect(msg).toContain('Module 2 Current');
     });
 });

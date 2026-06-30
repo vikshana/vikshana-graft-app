@@ -104,7 +104,6 @@ import {
   messageMentionsAddPeerRfPanel,
 } from '../../../services/peerRfPanelAddParse';
 import {
-  formatAddHistoryComparisonPanelExamplePrompt,
   messageMentionsPredictiveAnalyticsPanel,
   parseAddHistoryComparisonPanelRequest,
 } from '../../../services/historyComparisonPanelAddParse';
@@ -112,6 +111,11 @@ import {
   formatAddHistoryComparisonPanelReply,
   runProgrammaticAddHistoryComparisonPanel,
 } from '../../../services/programmaticAddHistoryComparisonPanel';
+import {
+  formatModuleMlPanelGuidanceReply,
+  messageRequestsMlPanelGuidance,
+  parseModuleMlGuidanceContext,
+} from '../../../services/moduleMlPanelGuidance';
 import {
   formatAddPeerRfPanelReply,
   runProgrammaticAddPeerRfPanel,
@@ -1906,10 +1910,30 @@ export const ChatInterface = () => {
       }
 
       const addHistoryComparisonRequest = parseAddHistoryComparisonPanelRequest(content);
+      if (messageRequestsMlPanelGuidance(content)) {
+        finalContent = formatModuleMlPanelGuidanceReply(parseModuleMlGuidanceContext(content));
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = { role: 'assistant', content: finalContent };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
       if (messageMentionsPredictiveAnalyticsPanel(content) && !addHistoryComparisonRequest) {
-        finalContent =
-          `### Need clarification\n\n` +
-          formatAddHistoryComparisonPanelExamplePrompt(2, extractDashboardUidFromMessage(content) ?? 'afq7tc6hl1m9sb');
+        finalContent = formatModuleMlPanelGuidanceReply(parseModuleMlGuidanceContext(content));
         setMessages((prev) => {
           const updated = [...prev];
           const last = updated[updated.length - 1];

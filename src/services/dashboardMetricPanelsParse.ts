@@ -23,7 +23,7 @@ function extractPanelCount(text: string): number | undefined {
     return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
-function extractInstrumentationLabel(text: string): string | undefined {
+export function extractInstrumentationLabel(text: string): string | undefined {
     if (/\bkeysight\b/i.test(text)) {
         return 'Keysight';
     }

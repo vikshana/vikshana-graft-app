@@ -80,7 +80,7 @@ describe('instrumentationMetricDiscovery', () => {
 });
 
 describe('programmaticDashboardResolve', () => {
-    it('maps Keysight label to known uid', () => {
-        expect(KNOWN_INSTRUMENTATION_DASHBOARD_UIDS.keysight).toBe('cfo0wckufbdhce');
+    it('does not hardcode Keysight uid (resolved via search at runtime)', () => {
+        expect(KNOWN_INSTRUMENTATION_DASHBOARD_UIDS.keysight).toBeUndefined();
     });
 });
