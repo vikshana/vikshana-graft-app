@@ -45,6 +45,7 @@ function buildPeerRfPanelTemplate(
             {
                 refId: 'A',
                 datasource: ds,
+                legendFormat: actualLabel,
                 query: `from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => ${actualFilter})\n  |> group()\n  |> keep(columns: ["_time", "_value"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: "${actualLabel}" }))`,
                 rawQuery: true,
                 editorMode: 'code',
@@ -52,6 +53,7 @@ function buildPeerRfPanelTemplate(
             {
                 refId: 'B',
                 datasource: ds,
+                legendFormat: 'Upper Bound (Peer RF)',
                 query: `from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == "ml_predictions")\n  |> filter(fn: (r) => ${bandFilter})\n  |> filter(fn: (r) => r._field == "upper")\n  |> group()\n  |> keep(columns: ["_time", "_value"])\n  |> aggregateWindow(every: 5m, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n  |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: "Upper Bound (Peer RF)" }))`,
                 rawQuery: true,
                 editorMode: 'code',
@@ -59,6 +61,7 @@ function buildPeerRfPanelTemplate(
             {
                 refId: 'C',
                 datasource: ds,
+                legendFormat: 'Lower Bound (Peer RF)',
                 query: `from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == "ml_predictions")\n  |> filter(fn: (r) => ${bandFilter})\n  |> filter(fn: (r) => r._field == "lower")\n  |> group()\n  |> keep(columns: ["_time", "_value"])\n  |> aggregateWindow(every: 5m, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n  |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: "Lower Bound (Peer RF)" }))`,
                 rawQuery: true,
                 editorMode: 'code',
@@ -66,6 +69,7 @@ function buildPeerRfPanelTemplate(
             {
                 refId: 'D',
                 datasource: ds,
+                legendFormat: 'Expected (Peer RF)',
                 query: `from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == "ml_predictions")\n  |> filter(fn: (r) => ${bandFilter})\n  |> filter(fn: (r) => r._field == "expected")\n  |> group()\n  |> keep(columns: ["_time", "_value"])\n  |> aggregateWindow(every: 5m, fn: last, createEmpty: false)\n  |> fill(usePrevious: true)\n  |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: "Expected (Peer RF)" }))`,
                 rawQuery: true,
                 editorMode: 'code',
