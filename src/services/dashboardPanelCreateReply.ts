@@ -7,6 +7,7 @@ import {
 import { messageDescribesPanelCreate } from './panelCreateParse';
 import { messageDescribesDashboardRowWithPanels } from './dashboardRowWithPanelsParse';
 import { messageDescribesBulkGaugePanelRename } from './bulkGaugePanelRenameParse';
+import { messageMentionsPredictiveAnalyticsPanel } from './historyComparisonPanelAddParse';
 import {
     isExplicitSinglePanelCopyRequest,
     messageMentionsSinglePanelCopyIntent,
@@ -43,6 +44,9 @@ export function userWantsPanelCreate(message: string): boolean {
         return false;
     }
     if (messageDescribesBulkGaugePanelRename(text)) {
+        return false;
+    }
+    if (messageMentionsPredictiveAnalyticsPanel(text)) {
         return false;
     }
     return (

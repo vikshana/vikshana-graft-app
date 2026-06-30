@@ -12,6 +12,8 @@ import { messageDescribesAmbiguousGraphCreate } from './ambiguousGraphCreatePars
 import { findPanelByStrictTitle } from './panelDiscovery';
 import { savedUidFromTools, savedVersionFromTools } from './dashboardSaveReplyUtils';
 import { hasSuccessfulDashboardSave } from './continueAction';
+import { userWantsPanelCreate } from './dashboardPanelCreateReply';
+import { messageMentionsPredictiveAnalyticsPanel } from './historyComparisonPanelAddParse';
 
 export interface LlmSaveVerification {
     verified: boolean;
@@ -195,6 +197,27 @@ export async function verifyLlmDashboardSave(
             detail:
                 'No new panels were added after a vague graph/chart create request. ' +
                 'Use a specific programmatic prompt (typed panels, bulk metrics, or row + panels).',
+        };
+    }
+
+    if (
+        userWantsPanelCreate(userMessage) &&
+        !createReq &&
+        baseline &&
+        currentCount <= baseline.panelCount
+    ) {
+        return {
+            verified: false,
+            skipped: false,
+            uid,
+            version,
+            baselinePanelCount: baseline.panelCount,
+            currentPanelCount: currentCount,
+            detail:
+                'Dashboard version advanced but no new panel was added. ' +
+                (messageMentionsPredictiveAnalyticsPanel(userMessage)
+                    ? 'Use the predictive analytics / History Comparison fast path (include module number and dashboard uid).'
+                    : 'Retry with a named panel title or a supported programmatic create prompt.'),
         };
     }
 

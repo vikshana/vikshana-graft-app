@@ -33,6 +33,11 @@ export function canonicalOwnHistoryTitle(moduleNumber: number): string {
     return canonicalOwnHistoryTitleForLabel(`Module ${moduleNumber} Current`);
 }
 
+/** Live PromQL RandomForest / predictive analytics panel (recent ~35d window). */
+export function canonicalLiveHistoryComparisonTitle(moduleNumber: number): string {
+    return `Module ${moduleNumber} Current — History Comparison`;
+}
+
 /** Rename legacy "RandomForest ML (Influx)" to operator-facing History Comparison label. */
 export function canonicalHistoricalHistoryComparisonTitle(moduleNumber: number): string {
     return `Module ${moduleNumber} Current — History Comparison (historical / Influx)`;

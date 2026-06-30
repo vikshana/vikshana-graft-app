@@ -104,6 +104,15 @@ import {
   messageMentionsAddPeerRfPanel,
 } from '../../../services/peerRfPanelAddParse';
 import {
+  formatAddHistoryComparisonPanelExamplePrompt,
+  messageMentionsPredictiveAnalyticsPanel,
+  parseAddHistoryComparisonPanelRequest,
+} from '../../../services/historyComparisonPanelAddParse';
+import {
+  formatAddHistoryComparisonPanelReply,
+  runProgrammaticAddHistoryComparisonPanel,
+} from '../../../services/programmaticAddHistoryComparisonPanel';
+import {
   formatAddPeerRfPanelReply,
   runProgrammaticAddPeerRfPanel,
 } from '../../../services/programmaticAddPeerRfPanel';
@@ -1864,6 +1873,71 @@ export const ChatInterface = () => {
         } else {
           const addResult = await runProgrammaticAddOwnHistoryPanel(mcpClient, addOwnHistoryRequestEarly);
           finalContent = formatAddOwnHistoryPanelReply(addResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = addResult.toolExecutions;
+          clearPendingOnProgrammaticSuccess(addResult.ok);
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      const addHistoryComparisonRequest = parseAddHistoryComparisonPanelRequest(content);
+      if (messageMentionsPredictiveAnalyticsPanel(content) && !addHistoryComparisonRequest) {
+        finalContent =
+          `### Need clarification\n\n` +
+          formatAddHistoryComparisonPanelExamplePrompt(2, extractDashboardUidFromMessage(content) ?? 'afq7tc6hl1m9sb');
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const finalAssistantMessage: Message = { role: 'assistant', content: finalContent };
+        const savedSession = chatHistoryService.saveSession(
+          [...newMessages, finalAssistantMessage],
+          currentSessionId
+        );
+        if (savedSession) {
+          setCurrentSessionId(savedSession.id);
+          currentSessionIdRef.current = savedSession.id;
+          replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+      if (addHistoryComparisonRequest) {
+        errorPathTag = 'add-history-comparison-panel';
+        if (!mcpClient) {
+          finalContent =
+            '### Could not add predictive analytics panel\n\nGrafana MCP tools are not connected.';
+        } else {
+          const addResult = await runProgrammaticAddHistoryComparisonPanel(mcpClient, addHistoryComparisonRequest);
+          finalContent = formatAddHistoryComparisonPanelReply(addResult, GRAFT_BUILD_NUMBER);
           finalToolExecutions = addResult.toolExecutions;
           clearPendingOnProgrammaticSuccess(addResult.ok);
         }
