@@ -7,24 +7,30 @@ import { normalizeUpdateDashboardArgs } from './updateDashboardArgs';
 import { listDashboardPanels, type DashboardPanelEntry } from './panelDiscovery';
 import { repairInfluxFluxPanel, sanitizeInfluxFluxPanel } from './sanitizeInfluxFluxPanel';
 import type { AddPeerRfPanelRequest } from './peerRfPanelAddParse';
-import { PEER_RF_PANEL_TITLE } from './peerRfPanelAddParse';
+import { DEFAULT_PEER_RF_MODULE, peerRfPanelTitle } from './peerRfPanelAddParse';
 import { parseSearchHitsFromMcpText } from './dashboardSearchParse';
 import { isMachineId } from './dashboardCloneParse';
 
 type PanelRecord = Record<string, unknown>;
 
-/** Fixture-aligned panel template (queries use model=peer_rf). */
-function buildPeerRfPanelTemplate(machineId: string, influxDatasourceUid = 'ffmk2neut49vkf'): PanelRecord {
+/** Fixture-aligned panel template (queries use model=peer_rf), scoped to the requested module. */
+function buildPeerRfPanelTemplate(
+    machineId: string,
+    moduleNumber: number,
+    influxDatasourceUid = 'ffmk2neut49vkf'
+): PanelRecord {
     const m = machineId.replace(/"/g, '\\"');
-    const bandFilter = `r.machine == "${m}" and r.field == "Module5_Current_A" and r.model == "peer_rf"`;
-    const actualFilter = `r.machine == "${m}" and r._field == "Module5_Current_A"`;
+    const field = `Module${moduleNumber}_Current_A`;
+    const actualLabel = `Module ${moduleNumber} (Actual)`;
+    const bandFilter = `r.machine == "${m}" and r.field == "${field}" and r.model == "peer_rf"`;
+    const actualFilter = `r.machine == "${m}" and r._field == "${field}"`;
     const ds = { type: 'influxdb', uid: influxDatasourceUid };
     return {
         id: null,
         type: 'timeseries',
-        title: PEER_RF_PANEL_TITLE,
+        title: peerRfPanelTitle(moduleNumber),
         description:
-            'RandomForest predicts Module 5 from peer modules 1–4,6–8. Bands: ml_predictions with model=peer_rf.',
+            `RandomForest predicts Module ${moduleNumber} from its peer modules. Bands: ml_predictions with model=peer_rf.`,
         timezone: 'browser',
         datasource: ds,
         gridPos: { h: 10, w: 12, x: 0, y: 0 },
@@ -39,7 +45,7 @@ function buildPeerRfPanelTemplate(machineId: string, influxDatasourceUid = 'ffmk
             {
                 refId: 'A',
                 datasource: ds,
-                query: `from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => ${actualFilter})\n  |> group()\n  |> keep(columns: ["_time", "_value"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: "Module 5 (Actual)" }))`,
+                query: `from(bucket: v.bucket)\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => ${actualFilter})\n  |> group()\n  |> keep(columns: ["_time", "_value"])\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: "${actualLabel}" }))`,
                 rawQuery: true,
                 editorMode: 'code',
             },
@@ -187,6 +193,8 @@ export async function runProgrammaticAddPeerRfPanel(
 
     const machineId =
         request.machineId && isMachineId(request.machineId) ? request.machineId : '2406-176021';
+    const moduleNumber = request.moduleNumber ?? DEFAULT_PEER_RF_MODULE;
+    const panelTitle = peerRfPanelTitle(moduleNumber);
 
     const getStep = pendingTool('get_dashboard_by_uid');
     toolExecutions.push(getStep);
@@ -206,11 +214,11 @@ export async function runProgrammaticAddPeerRfPanel(
     const proposed = JSON.parse(JSON.stringify(baseline)) as Record<string, unknown>;
     const entries = listDashboardPanels(proposed.panels);
 
-    const existing = findPanelByTitleContains(entries, PEER_RF_PANEL_TITLE);
+    const existing = findPanelByTitleContains(entries, panelTitle);
     if (existing) {
         return {
             ok: false,
-            error: `Panel "${PEER_RF_PANEL_TITLE}" already exists (id ${existing.panelId ?? '?'}).`,
+            error: `Panel "${panelTitle}" already exists (id ${existing.panelId ?? '?'}).`,
             toolExecutions,
             dashboardUid: resolved.uid,
             dashboardTitle,
@@ -219,7 +227,7 @@ export async function runProgrammaticAddPeerRfPanel(
 
     const peerRef = findModule5PeerBandPanel(entries);
 
-    const template = buildPeerRfPanelTemplate(machineId);
+    const template = buildPeerRfPanelTemplate(machineId, moduleNumber);
     const sanitized = sanitizeInfluxFluxPanel(template) as PanelRecord;
     const repaired = repairInfluxFluxPanel(sanitized, baseline.panels as unknown[] | undefined);
     const newPanel = repaired.panel as PanelRecord;
@@ -238,7 +246,7 @@ export async function runProgrammaticAddPeerRfPanel(
     const savePayload = normalizeUpdateDashboardArgs({
         dashboard: stampDashboardForOverwrite(baseline, proposed),
         overwrite: true,
-        message: `Graft: add ${PEER_RF_PANEL_TITLE}`,
+        message: `Graft: add ${panelTitle}`,
     });
     const saveResult = await callMcpTool(mcpClient, 'update_dashboard', savePayload);
     toolExecutions[toolExecutions.length - 1] = finishTool(saveStep, saveResult);
@@ -261,7 +269,7 @@ export async function runProgrammaticAddPeerRfPanel(
         toolExecutions,
         dashboardUid: resolved.uid,
         dashboardTitle,
-        panelTitle: PEER_RF_PANEL_TITLE,
+        panelTitle,
         version,
     };
 }

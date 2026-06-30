@@ -1,12 +1,22 @@
 import { extractAllDashboardUids, extractDashboardUidFromMessage } from './dashboardMentionParse';
 import { extractRequestedDashboardTitle, findMachineIdsInText } from './dashboardCloneParse';
 
-export const PEER_RF_PANEL_TITLE = 'Module 5 Current — RandomForest vs Peers (Influx)';
+/** Peer-RF predicts ONE module's current from its peer modules, so the panel is module-scoped. */
+export function peerRfPanelTitle(moduleNumber: number): string {
+    return `Module ${moduleNumber} Current — RandomForest vs Peers (Influx)`;
+}
+
+/** Default (Module 5) title — kept for back-compat where no module is specified. */
+export const PEER_RF_PANEL_TITLE = peerRfPanelTitle(5);
+
+export const DEFAULT_PEER_RF_MODULE = 5;
 
 export interface AddPeerRfPanelRequest {
     dashboardUid?: string;
     dashboardTitle?: string;
     machineId?: string;
+    /** Module whose current is modeled from its peers (defaults to 5 when unspecified). */
+    moduleNumber?: number;
 }
 
 function normalizeMessageQuotes(text: string): string {
@@ -35,10 +45,18 @@ export function parseAddPeerRfPanelRequest(message: string): AddPeerRfPanelReque
     const machineId = machines[0];
     const dashboardTitle = extractRequestedDashboardTitle(text, machineId);
     const dashboardUid = uids[0] ?? extractDashboardUidFromMessage(text);
+    let moduleNumber: number | undefined;
+    const modMatch = text.match(/\bmodule\s*(\d+)\b/i);
+    if (modMatch?.[1]) {
+        const n = parseInt(modMatch[1], 10);
+        if (Number.isFinite(n) && n >= 1 && n <= 8) {
+            moduleNumber = n;
+        }
+    }
     if (!dashboardUid && !dashboardTitle && !machineId) {
         return null;
     }
-    return { dashboardUid, dashboardTitle, machineId };
+    return { dashboardUid, dashboardTitle, machineId, moduleNumber };
 }
 
 export function formatAddPeerRfPanelExamplePrompt(dashboardUid = '6gawrgawrgragg'): string {

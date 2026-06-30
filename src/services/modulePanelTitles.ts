@@ -24,8 +24,13 @@ export function isOwnHistoryPanel(title: string): boolean {
     return /vs\.\s*Own\s+History/i.test(title) || /\bOwn\s+History\s*\(\s*±\s*2σ\s*\)/i.test(title);
 }
 
+/** Own-history title for an arbitrary signal label (e.g. "Pressure", "Module 3 Current"). */
+export function canonicalOwnHistoryTitleForLabel(label: string): string {
+    return `${label} — vs. Own History (± 2σ)`;
+}
+
 export function canonicalOwnHistoryTitle(moduleNumber: number): string {
-    return `Module ${moduleNumber} Current — vs. Own History (± 2σ)`;
+    return canonicalOwnHistoryTitleForLabel(`Module ${moduleNumber} Current`);
 }
 
 /** Rename legacy "RandomForest ML (Influx)" to operator-facing History Comparison label. */

@@ -7,7 +7,10 @@ export interface AddOwnHistoryPanelRequest {
     dashboardUid?: string;
     dashboardTitle?: string;
     machineId?: string;
-    moduleNumber: number;
+    /** Set when the target is a module current ("Module 3 Current"). */
+    moduleNumber?: number;
+    /** Set when the target is a non-module signal (e.g. "Pressure"); resolved against the dashboard. */
+    metricLabel?: string;
 }
 
 export interface BulkOwnHistoryPanelCopyRequest {
@@ -33,6 +36,26 @@ export function messageMentionsOwnHistoryPanel(message: string): boolean {
     );
 }
 
+/**
+ * Pull the target signal phrase out of "...panel for <X> on/for the dashboard ...".
+ * Returns the trimmed phrase ("Pressure", "Module 3 Current") or undefined.
+ */
+export function extractOwnHistoryMetricLabel(message: string): string | undefined {
+    const text = normalizeMessageQuotes(message.trim());
+    const stop = '(?=\\s+(?:on|for|in)\\s+(?:the\\s+)?dashboard\\b|\\s+with\\s+uid\\b|\\s+uid\\b|[,.;]|$)';
+    const m =
+        text.match(new RegExp(`\\bpanel\\s+for\\s+(.+?)${stop}`, 'i')) ??
+        text.match(new RegExp(`\\bfor\\s+(.+?)${stop}`, 'i'));
+    if (!m?.[1]) {
+        return undefined;
+    }
+    const label = m[1].replace(/^["']|["']$/g, '').replace(/\s+/g, ' ').trim();
+    if (!label || label.length > 48 || /[=]|uid|dashboard/i.test(label)) {
+        return undefined;
+    }
+    return label;
+}
+
 export function parseAddOwnHistoryPanelRequest(message: string): AddOwnHistoryPanelRequest | null {
     const text = normalizeMessageQuotes(message.trim());
     if (!messageMentionsOwnHistoryPanel(text)) {
@@ -49,18 +72,38 @@ export function parseAddOwnHistoryPanelRequest(message: string): AddOwnHistoryPa
     const machineId = machines[0];
     const dashboardTitle = extractRequestedDashboardTitle(text, machineId) ?? extractOnDashboardMachineTitle(text);
     const dashboardUid = uids[0] ?? extractDashboardUidFromMessage(text);
-    let moduleNumber = 5;
-    const modMatch = text.match(/\bmodule\s*(\d+)\b/i);
-    if (modMatch?.[1]) {
-        const n = parseInt(modMatch[1], 10);
-        if (Number.isFinite(n) && n >= 1 && n <= 8) {
-            moduleNumber = n;
+
+    let moduleNumber: number | undefined;
+    let metricLabel: string | undefined;
+    const phrase = extractOwnHistoryMetricLabel(text);
+    if (phrase) {
+        const mm = phrase.match(/\bmodule\s*(\d+)\b/i);
+        if (mm?.[1]) {
+            const n = parseInt(mm[1], 10);
+            if (Number.isFinite(n) && n >= 1 && n <= 8) {
+                moduleNumber = n;
+            }
+        } else {
+            metricLabel = phrase;
+        }
+    }
+    if (moduleNumber == null && metricLabel == null) {
+        // No explicit target phrase — fall back to a bare "module N", else legacy default (5).
+        const modMatch = text.match(/\bmodule\s*(\d+)\b/i);
+        if (modMatch?.[1]) {
+            const n = parseInt(modMatch[1], 10);
+            if (Number.isFinite(n) && n >= 1 && n <= 8) {
+                moduleNumber = n;
+            }
+        }
+        if (moduleNumber == null) {
+            moduleNumber = 5;
         }
     }
     if (!dashboardUid && !dashboardTitle && !machineId) {
         return null;
     }
-    return { dashboardUid, dashboardTitle, machineId, moduleNumber };
+    return { dashboardUid, dashboardTitle, machineId, moduleNumber, metricLabel };
 }
 
 export function userWantsBulkOwnHistoryPanelCopy(message: string): boolean {

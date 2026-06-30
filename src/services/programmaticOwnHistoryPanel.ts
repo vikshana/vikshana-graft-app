@@ -13,6 +13,7 @@ import type {
 } from './ownHistoryPanelParse';
 import {
     canonicalOwnHistoryTitle,
+    canonicalOwnHistoryTitleForLabel,
     isOwnHistoryPanel,
     normalizeLegacyModulePanelTitle,
 } from './modulePanelTitles';
@@ -21,7 +22,7 @@ import {
     computeModulePanelGridPositions,
     MODULE_PANEL_GRID,
 } from './programmaticModulePanelReorder';
-import { findAnyFluxReferencePanel } from './fluxPeerBandFix';
+import { findAnyFluxReferencePanel, getPanelTargetList, targetQueryText } from './fluxPeerBandFix';
 
 type PanelRecord = Record<string, unknown>;
 
@@ -32,16 +33,21 @@ const LEGEND_SUFFIX = (
     `  |> map(fn: (r) => ({ r with _field: "${label}" }))\n` +
     `  |> keep(columns: ["_time", "_value", "_field"])`;
 
-function buildOwnHistoryPanel(
-    machineId: string,
-    moduleNumber: number,
-    influxDatasourceUid: string
-): PanelRecord {
-    const field = `Module${moduleNumber}_Current_A`;
+interface OwnHistorySignal {
+    machineId: string;
+    field: string;
+    title: string;
+    signalName: string;
+    unit: string;
+    influxDatasourceUid: string;
+}
+
+function buildOwnHistoryPanelForSignal(signal: OwnHistorySignal): PanelRecord {
+    const { machineId, field, title, signalName, unit, influxDatasourceUid } = signal;
     const m = machineId.replace(/"/g, '\\"');
     const filter = `r.machine == "${m}" and r._field == "${field}"`;
     const ds = { uid: influxDatasourceUid };
-    const actualLabel = `Module ${moduleNumber} (Actual)`;
+    const actualLabel = `${signalName} (Actual)`;
     const meanLabel = 'Historical Mean';
     const upperLabel = 'Upper Bound (±2σ)';
     const lowerLabel = 'Lower Bound (±2σ)';
@@ -73,9 +79,9 @@ function buildOwnHistoryPanel(
     return {
         id: null,
         type: 'timeseries',
-        title: canonicalOwnHistoryTitle(moduleNumber),
+        title,
         description:
-            `Module ${moduleNumber} actual vs **its own** rolling 1h mean ± **2σ** (Influx Flux). ` +
+            `${signalName} actual vs **its own** rolling 1h mean ± **2σ** (Influx Flux). ` +
             'Not RandomForest / not ml_predictions / not peer modules.',
         timezone: 'browser',
         datasource: ds,
@@ -83,7 +89,7 @@ function buildOwnHistoryPanel(
         fieldConfig: {
             defaults: {
                 custom: { drawStyle: 'line', spanNulls: true, showPoints: 'never' },
-                unit: 'amp',
+                unit,
             },
         },
         options: { legend: { displayMode: 'list', placement: 'bottom', showLegend: true } },
@@ -123,6 +129,75 @@ function buildOwnHistoryPanel(
             },
         ],
     };
+}
+
+function buildOwnHistoryPanel(
+    machineId: string,
+    moduleNumber: number,
+    influxDatasourceUid: string
+): PanelRecord {
+    return buildOwnHistoryPanelForSignal({
+        machineId,
+        field: `Module${moduleNumber}_Current_A`,
+        title: canonicalOwnHistoryTitle(moduleNumber),
+        signalName: `Module ${moduleNumber}`,
+        unit: 'amp',
+        influxDatasourceUid,
+    });
+}
+
+interface ResolvedSignalSource {
+    field: string;
+    machine?: string;
+    unit?: string;
+    datasourceUid?: string;
+}
+
+function datasourceUidOf(value: unknown): string | undefined {
+    if (value && typeof value === 'object' && 'uid' in (value as Record<string, unknown>)) {
+        const uid = (value as { uid?: unknown }).uid;
+        return typeof uid === 'string' ? uid : undefined;
+    }
+    return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * For a non-module signal (e.g. "Pressure") resolve its real Influx field, machine, unit and
+ * datasource from an existing panel on the dashboard so the ±2σ bands track the requested metric
+ * instead of a hard-coded module current.
+ */
+function resolveSignalFromDashboard(
+    panels: unknown,
+    label: string
+): ResolvedSignalSource | null {
+    const entries = listDashboardPanels(panels);
+    const lc = label.toLowerCase();
+    const candidates = entries.filter(
+        (e) => e.title.toLowerCase().includes(lc) && !isOwnHistoryPanel(e.title)
+    );
+    for (const entry of candidates) {
+        const panel = entry.panel as PanelRecord;
+        for (const target of getPanelTargetList(panel)) {
+            const q = targetQueryText(target as PanelRecord);
+            const fieldMatch = q.match(/_field\s*==\s*"([^"]+)"/);
+            if (!fieldMatch?.[1]) {
+                continue;
+            }
+            const machineMatch = q.match(/machine\s*==\s*"([^"]+)"/);
+            const unit = (
+                (panel.fieldConfig as { defaults?: { unit?: unknown } } | undefined)?.defaults?.unit
+            );
+            return {
+                field: fieldMatch[1],
+                machine: machineMatch?.[1],
+                unit: typeof unit === 'string' ? unit : undefined,
+                datasourceUid:
+                    datasourceUidOf((target as PanelRecord).datasource) ??
+                    datasourceUidOf(panel.datasource),
+            };
+        }
+    }
+    return null;
 }
 
 function pendingTool(name: string): ToolExecution {
@@ -259,22 +334,46 @@ export async function runProgrammaticAddOwnHistoryPanel(
     }
 
     const machineId = request.machineId && isMachineId(request.machineId) ? request.machineId : '2406-176021';
-    const mod = request.moduleNumber;
-    const title = canonicalOwnHistoryTitle(mod);
     const proposed = JSON.parse(JSON.stringify(loaded.dashboard)) as Record<string, unknown>;
     const entries = listDashboardPanels(proposed.panels);
-    if (entries.some((e) => parseModuleNumberFromTitle(e.title) === mod && isOwnHistoryPanel(e.title))) {
-        return {
-            ok: false,
-            error: `Panel "${title}" already exists.`,
-            toolExecutions,
-            dashboardUid: resolved.uid,
-            dashboardTitle: typeof proposed.title === 'string' ? proposed.title : resolved.title,
-        };
-    }
+    const dashboardTitle = typeof proposed.title === 'string' ? proposed.title : resolved.title;
 
-    const influxUid = influxUidFromDashboard(proposed.panels);
-    const raw = buildOwnHistoryPanel(machineId, mod, influxUid);
+    let title: string;
+    let raw: PanelRecord;
+    if (request.metricLabel) {
+        title = canonicalOwnHistoryTitleForLabel(request.metricLabel);
+        const lc = request.metricLabel.toLowerCase();
+        if (entries.some((e) => isOwnHistoryPanel(e.title) && e.title.toLowerCase().includes(lc))) {
+            return { ok: false, error: `Panel "${title}" already exists.`, toolExecutions, dashboardUid: resolved.uid, dashboardTitle };
+        }
+        const source = resolveSignalFromDashboard(proposed.panels, request.metricLabel);
+        if (!source) {
+            return {
+                ok: false,
+                error:
+                    `Couldn't find an existing "${request.metricLabel}" Influx panel on this dashboard to base the ±2σ ` +
+                    `bands on. Add or name a "${request.metricLabel}" panel first, then retry.`,
+                toolExecutions,
+                dashboardUid: resolved.uid,
+                dashboardTitle,
+            };
+        }
+        raw = buildOwnHistoryPanelForSignal({
+            machineId: source.machine ?? machineId,
+            field: source.field,
+            title,
+            signalName: request.metricLabel,
+            unit: source.unit ?? 'none',
+            influxDatasourceUid: source.datasourceUid ?? influxUidFromDashboard(proposed.panels),
+        });
+    } else {
+        const mod = request.moduleNumber ?? 5;
+        title = canonicalOwnHistoryTitle(mod);
+        if (entries.some((e) => parseModuleNumberFromTitle(e.title) === mod && isOwnHistoryPanel(e.title))) {
+            return { ok: false, error: `Panel "${title}" already exists.`, toolExecutions, dashboardUid: resolved.uid, dashboardTitle };
+        }
+        raw = buildOwnHistoryPanel(machineId, mod, influxUidFromDashboard(proposed.panels));
+    }
     const sanitized = sanitizeInfluxFluxPanel(raw) as PanelRecord;
     const repaired = repairInfluxFluxPanel(sanitized, proposed.panels as unknown[] | undefined);
     const newPanel = repaired.panel as PanelRecord;
