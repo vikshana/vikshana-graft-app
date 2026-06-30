@@ -340,16 +340,21 @@ export const llmService = {
             return msg;
         });
 
-        // Add context as system message if provided
+        // Add per-request context as its OWN system message right after the main system
+        // prompt — never concatenated into it. The big system prompt + tool definitions must
+        // stay byte-identical across turns so they form a stable cacheable prefix (Anthropic
+        // prompt caching / OpenAI + Gemini automatic prefix caching). Mutating the system
+        // prompt with volatile context (dashboard ids, timestamps) would bust every cache hit.
         if (context) {
             const systemMsgIndex = llmMessages.findIndex((m) => m.role === 'system');
+            const contextMessage: llm.Message = {
+                role: 'system',
+                content: `Context:\n${context}`,
+            } as llm.Message;
             if (systemMsgIndex >= 0) {
-                llmMessages[systemMsgIndex].content += `\n\nContext:\n${context}`;
+                llmMessages.splice(systemMsgIndex + 1, 0, contextMessage);
             } else {
-                llmMessages.unshift({
-                    role: 'system',
-                    content: `Context:\n${context}`,
-                });
+                llmMessages.unshift(contextMessage);
             }
         }
 
