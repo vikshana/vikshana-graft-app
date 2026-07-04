@@ -22,6 +22,16 @@ class Settings(BaseSettings):
         ORCA_MAX_INVESTIGATION_TOKENS: Maximum tokens in investigation phase.
         ORCA_AGENT_TIMEOUT_SECONDS: Wall-clock timeout for the full agent run.
         ORCA_MAX_ROUNDS: Maximum interactive refinement rounds before auto-finalize.
+        AUTH_ENTRA_OBO_ENABLED: Enable Entra OBO token exchange (Phase 0 feature flag).
+        OIDC_ISSUER: OIDC issuer URL for OBO (Entra or mock-oauth2-server).
+        ENTRA_TENANT_ID: Azure AD / Entra tenant ID.
+        ENTRA_CLIENT_ID: Application (client) ID for OBO exchange.
+        ENTRA_CLIENT_SECRET: Client secret for OBO exchange.
+        OBO_ENCRYPTION_KEY: Fernet key (32-byte or URL-safe base64) for encrypting
+            refresh tokens at rest.
+        LANGFUSE_PUBLIC_KEY: Langfuse project public key for eval tracking.
+        LANGFUSE_SECRET_KEY: Langfuse project secret key.
+        LANGFUSE_HOST: Langfuse server URL (default: cloud; override for self-hosted).
     """
 
     model_config = SettingsConfigDict(
@@ -67,6 +77,34 @@ class Settings(BaseSettings):
     # Deduplication — window (in minutes) within which identical alerts are
     # considered duplicates of the first, even if no investigation is active.
     ORCA_DEDUP_WINDOW_MINUTES: int = 30
+
+    # -------------------------------------------------------------------------
+    # Auth chain (Phase 0, Task 0.2)
+    # -------------------------------------------------------------------------
+    # Feature flag: set to true to activate Entra OBO as the preferred auth path.
+    # When false (default), the service falls back to per-team service accounts.
+    AUTH_ENTRA_OBO_ENABLED: bool = False
+
+    # OIDC issuer for OBO exchange.
+    # Dev: http://mock-oauth2-server:8080/default
+    # Production: https://login.microsoftonline.com/{tenant_id}/v2.0
+    OIDC_ISSUER: str = "http://localhost:9090/default"
+
+    # Entra / Azure AD application registration
+    ENTRA_TENANT_ID: str = ""
+    ENTRA_CLIENT_ID: str = ""
+    ENTRA_CLIENT_SECRET: str = ""
+
+    # Fernet key for encrypting refresh tokens at rest.
+    # Dev default: 32 zero bytes (base64-padded).  Override in production.
+    OBO_ENCRYPTION_KEY: str = "devkey00000000000000000000000000"
+
+    # -------------------------------------------------------------------------
+    # Langfuse — LLM eval tracking (Phase 1, Task 1.6)
+    # -------------------------------------------------------------------------
+    LANGFUSE_PUBLIC_KEY: str = "lf-pk-dev-0000000000000000"
+    LANGFUSE_SECRET_KEY: str = "lf-sk-dev-0000000000000000"
+    LANGFUSE_HOST: str = "http://localhost:4100"
 
 
 settings = Settings()

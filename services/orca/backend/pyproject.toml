@@ -30,6 +30,10 @@ dependencies = [
     "opentelemetry-exporter-otlp>=1.30",
     "opentelemetry-instrumentation-fastapi>=0.50b0",
     "opentelemetry-instrumentation-logging>=0.50b0",
+    # Auth chain (Phase 0, Task 0.2)
+    "cryptography>=42.0.0",
+    # Migrations
+    "alembic>=1.13.0",
 ]
 
 [project.optional-dependencies]
@@ -44,14 +48,14 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["app*"]
+include = ["app*", "harness*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "slow: marks tests as slow (deselect with '-m not slow')",
-    "integration: marks tests as integration tests",
+    "integration: marks tests as integration tests requiring a running stack",
 ]
 
 [tool.mypy]
@@ -61,6 +65,6 @@ ignore_missing_imports = true
 exclude = ["tests/"]
 
 [tool.coverage.run]
-source = ["app"]
-omit = ["tests/*"]
+source = ["app", "harness"]
+omit = ["tests/*", "harness/migrations/*"]
 

@@ -1,0 +1,25 @@
+{
+  "_description": "Golden fixture for scenario_03: MCP unavailable, data_gathering returns error, investigation continues with empty evidence.",
+  "scenario": "mcp_unavailable",
+  "expected_node_sequence": [
+    "data_gathering",
+    "historical_context",
+    "hypothesis_generation",
+    "await_input",
+    "finalize"
+  ],
+  "expected_data_gathering_result": {
+    "gathered_data_empty": true,
+    "error_message_set": true
+  },
+  "expected_hypothesis_shape": {
+    "required_keys": ["text", "high_confidence_areas", "uncertain_areas", "suggested_questions"]
+  },
+  "alert_context": {
+    "alert_name": "ServiceDown",
+    "description": "auth-service is returning 503",
+    "service": "auth-service",
+    "environment": "staging",
+    "labels": {"severity": "critical", "team": "platform"}
+  }
+}
