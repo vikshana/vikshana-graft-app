@@ -56,14 +56,23 @@ func (a *App) registerSessionRoutes(mux *http.ServeMux, settings backend.AppInst
 			req.URL.Scheme = target.Scheme
 			req.URL.Host = target.Host
 
+			// After StripPrefix("/sessions"), the path is "" / "/" / "/sub/path".
+			// Rewrite to /api/sessions (or /api/sessions/sub/path) so orca-backend
+			// receives the correct route.
+			stripped := req.URL.Path
+			switch {
+			case stripped == "" || stripped == "/":
+				req.URL.Path = "/api/sessions"
+			default:
+				req.URL.Path = "/api/sessions" + stripped
+			}
+
 			// Inject Grafana org ID (from PluginContext, not spoofable)
 			if orgID, ok := req.Context().Value(orgIDKey{}).(int64); ok {
 				req.Header.Set("X-Grafana-Org-Id", strconv.FormatInt(orgID, 10))
 			}
 
 			// Add HMAC signature when the internal secret is configured.
-			// The signature covers the timestamp + request path so it is
-			// replay-resistant and path-scoped.
 			if secret != "" {
 				ts := strconv.FormatInt(time.Now().Unix(), 10)
 				mac := hmac.New(sha256.New, []byte(secret))
@@ -79,12 +88,17 @@ func (a *App) registerSessionRoutes(mux *http.ServeMux, settings backend.AppInst
 		},
 	}
 
-	// Wrap with RBAC middleware before registering on the mux.
-	mux.Handle("/sessions/",
-		rbacMiddleware(allowed,
-			http.StripPrefix("/sessions", sessionProxy),
-		),
-	)
+	// Register /sessions/ for sub-paths AND /sessions (no trailing slash) to prevent
+	// Go's ServeMux from issuing a 301 redirect that loses the Grafana plugin prefix.
+	// Without the exact-match handler, a request to /sessions?limit=50 gets redirected
+	// to /sessions/?limit=50 (bare Grafana URL) which 404s.
+	sessionHandler := rbacMiddleware(allowed, http.StripPrefix("/sessions", sessionProxy))
+	mux.Handle("/sessions/", sessionHandler)
+	mux.HandleFunc("/sessions", func(w http.ResponseWriter, r *http.Request) {
+		// Normalise: treat /sessions as /sessions/ so StripPrefix works correctly
+		r.URL.Path = "/sessions/"
+		sessionHandler.ServeHTTP(w, r)
+	})
 }
 
 // rbacMiddleware returns an http.Handler that enforces Grafana role-based access

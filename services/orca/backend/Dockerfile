@@ -17,6 +17,7 @@ RUN opentelemetry-bootstrap -a install
 
 # Copy application code
 COPY app/ ./app/
+COPY harness/ ./harness/
 
 # Run as non-root user
 RUN useradd -m orca
