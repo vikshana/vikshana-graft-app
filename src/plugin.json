@@ -116,6 +116,14 @@
       "role": "Admin",
       "addToNav": true,
       "icon": "list-ul"
+    },
+    {
+      "type": "page",
+      "name": "Sessions",
+      "path": "/a/vikshana-graft-app/sessions",
+      "role": "Admin",
+      "addToNav": true,
+      "icon": "chat-alt-2"
     }
   ],
   "dependencies": {

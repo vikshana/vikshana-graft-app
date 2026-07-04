@@ -22,6 +22,9 @@ const PromptLibrary = lazy(() => import('../../../pages/PromptLibrary').then(m =
 const RCADashboard = lazy(() => import('../../../pages/RCADashboard').then(m => ({ default: m.RCADashboard })));
 const RCAList = lazy(() => import('../../../pages/RCAList').then(m => ({ default: m.RCAList })));
 const RCAInvestigate = lazy(() => import('../../../pages/RCAInvestigate').then(m => ({ default: m.RCAInvestigate })));
+// Phase 2: harness session pages (Option A — alongside existing RCA pages)
+const SessionList = lazy(() => import('../../../pages/SessionList').then(m => ({ default: m.SessionList })));
+const SessionPanel = lazy(() => import('../../../pages/SessionPanel').then(m => ({ default: m.SessionPanel })));
 
 
 export default function App(props: AppRootProps) {
@@ -56,6 +59,10 @@ export default function App(props: AppRootProps) {
             <Route path="/rca" element={<RCADashboard />} />
             <Route path="/rca/runs" element={<RCAList />} />
             <Route path="/rca/investigate/:threadId" element={<RCAInvestigate />} />
+
+            {/* Phase 2: Harness session pages (Option A — alongside existing /rca pages) */}
+            <Route path="/sessions" element={<SessionList />} />
+            <Route path="/sessions/:sessionId" element={<SessionPanel />} />
 
             {/* Fallback */}
             <Route path="*" element={<ChatInterface />} />

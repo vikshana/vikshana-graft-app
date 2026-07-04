@@ -572,3 +572,158 @@ async def post_session_feedback(
 
     return {"status": "ok", "session_id": session_id}
 
+
+# ---------------------------------------------------------------------------
+# GET /api/sessions/drill-down/{handle}  (JSON)
+# Option B: fetch full tool-result data for EvidencePanel re-execution.
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/sessions/drill-down/{handle}",
+    summary="Retrieve a stored tool result by drill-down handle",
+)
+async def get_drill_down(
+    handle: str,
+    x_grafana_org_id: str | None = Header(None),
+) -> dict:
+    """Return the full tool result stored for a drill-down handle.
+
+    The frontend EvidencePanel calls this endpoint to retrieve the original
+    Grafana query parameters (datasource_uid, expr, from_, to, query_type)
+    so it can re-execute the query as the current viewing user.
+
+    The ``full_result`` field contains whatever the tool stored; for native
+    Grafana tools this includes the raw API response plus any query parameters
+    that were embedded by the tool before storing.
+
+    Args:
+        handle: Opaque 64-character SHA-256 handle from a truncated ToolResult.
+        x_grafana_org_id: Grafana org ID from the Go proxy.
+
+    Returns:
+        Dict with tool_name, full_result, expires_at.
+
+    Raises:
+        HTTPException: 404 if handle not found or expired.
+    """
+    log = logger.bind(handle=handle[:16])
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            text(
+                "SELECT tool_name, full_result, expires_at "
+                "FROM drill_down_results "
+                "WHERE handle = :handle AND expires_at > now()"
+            ),
+            {"handle": handle},
+        )
+        row = result.fetchone()
+
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Drill-down handle not found or expired: {handle[:16]}...",
+        )
+
+    import json as _json
+    full_result = row.full_result
+    if isinstance(full_result, str):
+        try:
+            full_result = _json.loads(full_result)
+        except Exception:
+            pass
+
+    log.info("drill_down_retrieved", tool_name=row.tool_name)
+    return {
+        "handle": handle,
+        "tool_name": row.tool_name,
+        "full_result": full_result,
+        "expires_at": row.expires_at.isoformat() if hasattr(row.expires_at, "isoformat") else str(row.expires_at),
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET + POST /api/sessions  (JSON)
+# Thin session list / create endpoints consumed by SessionList.tsx
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/sessions",
+    summary="List harness sessions for the current organisation",
+)
+async def list_sessions(
+    status_filter: str | None = Query(None, alias="status"),
+    session_type: str | None = Query(None, alias="type"),
+    limit: int = Query(20, ge=1, le=100),
+    x_grafana_org_id: str | None = Header(None),
+) -> dict:
+    """List rca_sessions rows, optionally filtered by status/type.
+
+    Args:
+        status_filter: Filter by session status (active, paused, completed, etc.).
+        session_type: Filter by type (investigation, chat, etc.).
+        limit: Maximum number of results to return.
+        x_grafana_org_id: Grafana org ID from the Go proxy.
+
+    Returns:
+        Dict with 'sessions' list and 'total' count.
+    """
+    org_id = _parse_org_id(x_grafana_org_id)
+    log = logger.bind(org_id=org_id)
+
+    where_clauses = []
+    params: dict = {"limit": limit}
+
+    if org_id is not None:
+        where_clauses.append("org_id = :org_id")
+        params["org_id"] = org_id
+    if status_filter:
+        where_clauses.append("status = :status")
+        params["status"] = status_filter
+    if session_type:
+        where_clauses.append("type = :type")
+        params["type"] = session_type
+
+    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+    sql = text(f"""
+        SELECT id, type, status, alert_type, service, initiator_user_id,
+               initiator_channel, auth_mode, created_at, updated_at
+        FROM rca_sessions
+        {where_sql}
+        ORDER BY created_at DESC
+        LIMIT :limit
+    """)
+
+    count_sql = text(f"SELECT COUNT(*) FROM rca_sessions {where_sql}")
+
+    try:
+        async with AsyncSessionLocal() as db:
+            rows = (await db.execute(sql, params)).fetchall()
+            total = (await db.execute(count_sql, {k: v for k, v in params.items() if k != "limit"})).scalar() or 0
+
+        sessions = [
+            {
+                "id": row.id,
+                "type": row.type or "investigation",
+                "status": row.status or "active",
+                "alert_type": row.alert_type,
+                "service": row.service,
+                "initiator_user_id": row.initiator_user_id,
+                "initiator_channel": row.initiator_channel or "grafana",
+                "auth_mode": row.auth_mode or "service_account",
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+            }
+            for row in rows
+        ]
+        log.info("sessions_listed", count=len(sessions), total=total)
+        return {"sessions": sessions, "total": total}
+
+    except Exception as exc:
+        log.warning("sessions_list_failed", error=str(exc))
+        return {"sessions": [], "total": 0}
+
+
