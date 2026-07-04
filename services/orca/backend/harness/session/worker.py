@@ -186,12 +186,22 @@ class TurnWorker:
             # Resuming an interrupted graph (e.g. after await_input)
             from langgraph.types import Command
             command = Command(resume=resume_command)
-            await graph.ainvoke(command, config=config)
+            turn_result = await graph.ainvoke(command, config=config)
         else:
             # Fresh invocation
-            await graph.ainvoke(turn_input, config=config)
+            turn_result = await graph.ainvoke(turn_input, config=config)
 
         log.info("turn_executed")
+
+        # Best-effort Slack notification — failures are swallowed inside the notifier
+        try:
+            from harness.slack.notifier import SlackNotifier
+            from app.config import settings
+            if settings.SLACK_BOT_TOKEN:
+                notifier = SlackNotifier()
+                await notifier.post_turn_result(session_id, payload, turn_result=turn_result)
+        except Exception as _slack_exc:
+            log.debug("slack_notifier_skipped", error=str(_slack_exc))
 
     async def _mark_job(self, job_id: str, status: str) -> None:
         """Update a job's status to ``done`` or ``failed``.

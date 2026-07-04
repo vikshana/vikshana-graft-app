@@ -15,23 +15,24 @@ main
   └── feat/orca-rca-integration          ← base for all harness work
         ├── feat/agent-harness-phase-0   ✅ merged (PR #23)
         ├── feat/agent-harness-phase-1   ✅ merged (PR #24)
-        ├── feat/agent-harness-phase-2   🔄 open PR #25 (branch: feat/agent-harness-phase-2)
-        ├── feat/agent-harness-phase-3   🔲 not started
+        ├── feat/agent-harness-phase-2   ✅ merged (PR #25)
+        ├── feat/agent-harness-phase-3   🔄 open PR #26 (branch: feat/agent-harness-phase-3)
         └── feat/agent-harness-phase-4   🔲 not started
 ```
 
 **Rule:** Each phase branch is cut from `feat/orca-rca-integration`, work is done, then PR merges back into `feat/orca-rca-integration`. Final PR from `feat/orca-rca-integration` → `main` only when all phases complete.
 
-To continue on Phase 2:
+To continue on Phase 3:
 ```bash
 cd <worktree>
-git checkout feat/agent-harness-phase-2
+git checkout feat/agent-harness-phase-3
 ```
 
-To start Phase 3:
+To start Phase 4:
 ```bash
 git checkout feat/orca-rca-integration && git pull
-git checkout -b feat/agent-harness-phase-3
+git checkout -b feat/agent-harness-phase-4
+```
 ```
 
 ---
@@ -84,7 +85,7 @@ git checkout -b feat/agent-harness-phase-3
 
 ---
 
-### 🔄 Phase 2 — Grafana Plugin Integration (PR #25 open, branch: feat/agent-harness-phase-2)
+### ✅ Phase 2 — Grafana Plugin Integration (merged PR #25)
 
 **What was built:**
 - `pkg/plugin/session_proxy.go`: `/sessions/` + `/sessions` reverse proxy with RBAC (reads `agent_allowed_roles` from plugin JSONData, default `["Admin","Editor"]`), HMAC signing (`X-Agent-Signature` when `AGENT_INTERNAL_SECRET` set), `X-Grafana-Org-Id` injection, SSE passthrough
@@ -114,17 +115,16 @@ git checkout -b feat/agent-harness-phase-3
 
 ---
 
-### 🔲 Phase 3 — Slack Integration & Identity Linkage (not started)
+### 🔄 Phase 3 — Slack Integration & Identity Linkage (PR #26 open, branch: feat/agent-harness-phase-3)
 
-**Scope:**
-- Task 3.1: Entra identity linkage flow (Slack user → link account → Entra PKCE → `identities` row)
-- Task 3.2: Slack app (Bolt for Python) — `/obs ask`, `/obs investigate`, thread replies; mounted as ASGI sub-app in existing FastAPI; 3s ack guarantee, event idempotency, Block Kit batching, approval via buttons
-- Task 3.3: Alert-triggered auto-triage — Alertmanager webhook → reuse existing `app/agent/dedup.py` (adapter, don't reimplement); service-account auth; concurrency cap + circuit breaker on datasource query p95
+**What was built:**
+- Task 3.0: `slack_bolt>=1.18`, `slack_sdk>=3.27` added to `pyproject.toml`; 11 new config fields in `app/config.py` (`SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_SIGNING_SECRET`, `IDENTITY_LINK_STATE_TTL_S`, `ALERT_TRIAGE_*`); `docker-compose.yaml` updated with Slack env vars; Alembic migration `0003_phase3.py` (`identity_link_requests`, `slack_events` tables)
+- Task 3.1 (Identity linkage): `harness/auth/linkage.py` — PKCE S256 flow: `generate_link_request`, `complete_link` (with Entra OID exchange), `revoke_link`, `get_link_status`; `app/api/identity.py` — `/api/identity/link/start`, `/callback`, `/status`, `DELETE /link`; 17 unit tests covering happy path, expired/used/mismatched state, duplicate identity, idempotent re-link, revoke, status
+- Task 3.2 (Slack Bolt): `harness/slack/` package — `app.py` (AsyncApp singleton + Socket Mode factory), `handlers.py` (`/obs ask|investigate|link`, `approve_tool_call`/`reject_tool_call` actions, 3-second ack guarantee, background tasks), `block_kit.py` (5 pure Block Kit builders: thinking, tool_call, approval_prompt, final_answer, error), `idempotency.py` (Postgres `slack_events` dedup with 7-day lazy TTL), `notifier.py` (SlackNotifier reads `channel_refs`, posts to thread post-turn), `channel_refs.py` (ref JSONB helpers); `TurnWorker._execute_turn` calls `SlackNotifier` after graph invocation; 39 unit tests
+- Task 3.3 (Auto-triage): `harness/triage/` package — `dedup_adapter.py` (`DedupPort` protocol + `OrcaDedupAdapter` wrapping `app.agent.dedup`), `circuit_breaker.py` (3-state async circuit breaker: CLOSED/OPEN/HALF_OPEN, asyncio.Lock-protected), `auto_triage.py` (`AutoTriageService` with `asyncio.BoundedSemaphore` cap, circuit breaker, service-account session tagging, `enqueue_turn` dispatch); 25 unit tests
+- `app/main.py`: AutoTriageService wired in lifespan (`app.state.auto_triage`); Slack Socket Mode handler started when `SLACK_APP_TOKEN` set; `identity_router` registered
 
-**Key decisions:**
-- Slack app added as ASGI sub-app to existing FastAPI (not a new Docker service)
-- Use existing `app/agent/dedup.py` as-is behind an interface adapter
-- Auto-triage sessions tagged `auth_mode=service_account`, `initiator_user_id=NULL`; approvals impossible until human attaches
+**Verification status:** 87% coverage on `harness/`; 383 total Python tests pass (4 pre-existing failures unchanged); Go and frontend pass.
 
 ---
 

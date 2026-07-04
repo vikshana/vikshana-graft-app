@@ -38,6 +38,9 @@ dependencies = [
     "pyyaml>=6.0",           # skill frontmatter parsing
     "langfuse>=2.0.0",       # LLM eval tracking
     "langchain-openai>=0.3.0",  # OpenAICompatProvider
+    # Phase 3 harness — Slack integration
+    "slack_bolt>=1.18.0",    # Bolt for Python (slash commands, actions, Socket Mode)
+    "slack_sdk>=3.27.0",     # Slack SDK (AsyncWebClient for posting)
 ]
 
 [project.optional-dependencies]

@@ -160,6 +160,14 @@ services:
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-lf-pk-dev-0000000000000000}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-lf-sk-dev-0000000000000000}
       LANGFUSE_HOST: http://langfuse-web:3000
+      # Slack integration (Phase 3) — leave empty to disable; set in .env for live testing
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+      # Alert auto-triage circuit breaker tuning
+      ALERT_TRIAGE_MAX_CONCURRENT: ${ALERT_TRIAGE_MAX_CONCURRENT:-10}
+      ALERT_TRIAGE_CIRCUIT_BREAKER_THRESHOLD: ${ALERT_TRIAGE_CIRCUIT_BREAKER_THRESHOLD:-5}
+      ALERT_TRIAGE_CIRCUIT_BREAKER_TIMEOUT_S: ${ALERT_TRIAGE_CIRCUIT_BREAKER_TIMEOUT_S:-60}
     depends_on:
       orca-postgres:
         condition: service_healthy
