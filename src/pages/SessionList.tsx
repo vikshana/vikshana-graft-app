@@ -2,12 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStyles2, LoadingBar, Alert, Badge, Button } from '@grafana/ui';
 import { css } from '@emotion/css';
+import { GrafanaTheme2 } from '@grafana/data';
 import type { BadgeColor } from '@grafana/ui';
 
 import { listSessions } from '../services/sessionApi';
 import { prefixRoute } from '../utils/utils.routing';
 import { ROUTES } from '../constants';
-import { PageHeader } from '../components/common/PageHeader';
 import type { SessionListItem } from '../types/session.types';
 
 const STATUS_COLORS: Record<string, BadgeColor> = {
@@ -65,7 +65,9 @@ export function SessionList() {
 
   return (
     <div className={styles.container}>
-      <PageHeader title="Sessions" />
+      <div className={styles.header}>
+        <h1 className={styles.title}>Sessions</h1>
+      </div>
       {loading && <LoadingBar width={400} />}
       {error && (
         <Alert severity="error" title="Failed to load sessions">
@@ -85,18 +87,18 @@ export function SessionList() {
         </div>
       )}
       {sessions.length > 0 && (
-        <>
+        <div className={styles.content}>
           <div className={styles.count}>{total} session{total !== 1 ? 's' : ''}</div>
           <table className={styles.table}>
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Alert</th>
-                <th>Service</th>
-                <th>Auth</th>
-                <th>Created</th>
+                <th className={styles.th}>ID</th>
+                <th className={styles.th}>Type</th>
+                <th className={styles.th}>Status</th>
+                <th className={styles.th}>Alert</th>
+                <th className={styles.th}>Service</th>
+                <th className={styles.th}>Auth</th>
+                <th className={styles.th}>Created</th>
               </tr>
             </thead>
             <tbody>
@@ -107,71 +109,95 @@ export function SessionList() {
                   className={styles.row}
                   onClick={() => navigate(prefixRoute(`${ROUTES.Sessions}/${s.id}`))}
                 >
-                  <td className={styles.idCell}>{s.id.slice(0, 8)}…</td>
-                  <td>{s.type}</td>
-                  <td>{statusBadge(s.status)}</td>
-                  <td>{s.alert_type ?? '—'}</td>
-                  <td>{s.service ?? '—'}</td>
-                  <td>
-                    {s.auth_mode === 'service_account' ? (
-                      <span title="Running with team credentials" style={{ fontSize: 11, color: '#9fa7b3' }}>
-                        team creds
-                      </span>
-                    ) : (
-                      <span style={{ fontSize: 11 }}>{s.auth_mode}</span>
-                    )}
+                  <td className={`${styles.td} ${styles.idCell}`}>{s.id.slice(0, 8)}…</td>
+                  <td className={styles.td}>{s.type}</td>
+                  <td className={styles.td}>{statusBadge(s.status)}</td>
+                  <td className={styles.td}>{s.alert_type ?? '—'}</td>
+                  <td className={styles.td}>{s.service ?? '—'}</td>
+                  <td className={styles.td}>
+                    <span className={styles.meta}>
+                      {s.auth_mode === 'service_account' ? 'team creds' : s.auth_mode}
+                    </span>
                   </td>
-                  <td style={{ fontSize: 11, color: '#9fa7b3' }}>
-                    {s.created_at ? new Date(s.created_at).toLocaleString() : '—'}
+                  <td className={styles.td}>
+                    <span className={styles.meta}>
+                      {s.created_at ? new Date(s.created_at).toLocaleString() : '—'}
+                    </span>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </>
+        </div>
       )}
     </div>
   );
 }
 
-const getStyles = () => ({
+const getStyles = (theme: GrafanaTheme2) => ({
   container: css`
-    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  `,
+  header: css`
+    display: flex;
+    align-items: center;
+    padding: ${theme.spacing(2)};
+    border-bottom: 1px solid ${theme.colors.border.weak};
+    background: ${theme.colors.background.primary};
+    position: sticky;
+    top: 40px;
+    z-index: 10;
+  `,
+  title: css`
+    font-size: ${theme.typography.h4.fontSize};
+    font-weight: ${theme.typography.fontWeightMedium};
+    color: ${theme.colors.text.primary};
+    margin: 0;
+  `,
+  content: css`
+    padding: ${theme.spacing(2)};
   `,
   count: css`
-    font-size: 12px;
-    color: #9fa7b3;
-    margin-bottom: 8px;
+    font-size: ${theme.typography.bodySmall.fontSize};
+    color: ${theme.colors.text.secondary};
+    margin-bottom: ${theme.spacing(1)};
   `,
   table: css`
     width: 100%;
     border-collapse: collapse;
-    font-size: 13px;
-    th {
-      text-align: left;
-      padding: 6px 8px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-      color: #9fa7b3;
-      font-weight: 500;
-    }
+    font-size: ${theme.typography.bodySmall.fontSize};
+  `,
+  th: css`
+    text-align: left;
+    padding: ${theme.spacing(0.75, 1)};
+    border-bottom: 1px solid ${theme.colors.border.weak};
+    color: ${theme.colors.text.secondary};
+    font-weight: ${theme.typography.fontWeightMedium};
+  `,
+  td: css`
+    padding: ${theme.spacing(1)};
+    border-bottom: 1px solid ${theme.colors.border.weak};
+    color: ${theme.colors.text.primary};
   `,
   row: css`
     cursor: pointer;
-    td {
-      padding: 8px 8px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-    }
     &:hover td {
-      background: rgba(255, 255, 255, 0.03);
+      background: ${theme.colors.action.hover};
     }
   `,
   idCell: css`
-    font-family: monospace;
-    font-size: 11px;
+    font-family: ${theme.typography.fontFamilyMonospace};
+    font-size: ${theme.typography.bodySmall.fontSize};
+  `,
+  meta: css`
+    font-size: ${theme.typography.bodySmall.fontSize};
+    color: ${theme.colors.text.secondary};
   `,
   empty: css`
     text-align: center;
-    padding: 40px 0;
-    color: #9fa7b3;
+    padding: ${theme.spacing(6)} 0;
+    color: ${theme.colors.text.secondary};
   `,
 });
