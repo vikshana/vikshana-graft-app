@@ -23,6 +23,7 @@ interface ExploreContext {
 const LazyApp = lazy(() => import('./components/features/App/App'));
 const LazyAppConfig = lazy(() => import('./components/features/AppConfig/AppConfig'));
 const LazyAgentConfig = lazy(() => import('./components/features/AppConfig/AgentConfig'));
+const LazyMCPConfig = lazy(() => import('./components/features/AppConfig/MCPConfig'));
 
 import { mcp } from '@grafana/llm';
 
@@ -46,6 +47,14 @@ const AgentConfig = (props: AgentConfigProps) => (
   </Suspense>
 );
 
+import type { MCPConfigProps } from './components/features/AppConfig/MCPConfig';
+
+const MCPConfig = (props: MCPConfigProps) => (
+  <Suspense fallback={<LoadingPlaceholder text="" />}>
+    <LazyMCPConfig {...props} />
+  </Suspense>
+);
+
 export const plugin = new AppPlugin<{}>()
   .setRootPage(App)
   .addConfigPage({
@@ -59,6 +68,12 @@ export const plugin = new AppPlugin<{}>()
     icon: 'bolt',
     body: AgentConfig,
     id: 'agent',
+  })
+  .addConfigPage({
+    title: 'MCP Servers',
+    icon: 'plug',
+    body: MCPConfig,
+    id: 'mcp',
   })
 
   // ── Panel context menu: "Ask Graft" ─────────────────────────────────────
