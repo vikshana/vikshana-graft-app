@@ -1,0 +1,34 @@
+{
+  "_description": "Golden fixture for scenario_01: high error rate alert, 2 Q&A rounds, developer accepts.",
+  "scenario": "high_error_rate",
+  "expected_node_sequence": [
+    "data_gathering",
+    "historical_context",
+    "hypothesis_generation",
+    "await_input",
+    "refine",
+    "hypothesis_generation",
+    "await_input",
+    "refine",
+    "hypothesis_generation",
+    "await_input",
+    "finalize"
+  ],
+  "expected_hypothesis_shape": {
+    "required_keys": ["text", "high_confidence_areas", "uncertain_areas", "suggested_questions"],
+    "text_contains": "database"
+  },
+  "expected_final_report_keys": [
+    "executive_summary",
+    "root_cause",
+    "contributing_factors",
+    "recommendations"
+  ],
+  "alert_context": {
+    "alert_name": "HighErrorRate",
+    "description": "Error rate > 5% on checkout-service for the last 5 minutes",
+    "service": "checkout-service",
+    "environment": "production",
+    "labels": {"severity": "critical", "team": "checkout"}
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "_description": "Golden fixture for scenario_02: latency spike alert, max_rounds reached, force-finalize.",
+  "scenario": "latency_spike_force_finalize",
+  "expected_node_sequence": [
+    "data_gathering",
+    "historical_context",
+    "hypothesis_generation",
+    "await_input",
+    "refine",
+    "hypothesis_generation",
+    "await_input",
+    "force_finalize"
+  ],
+  "expected_hypothesis_shape": {
+    "required_keys": ["text", "high_confidence_areas", "uncertain_areas", "suggested_questions"],
+    "text_contains": "latency"
+  },
+  "expected_final_report_keys": [
+    "executive_summary",
+    "root_cause"
+  ],
+  "alert_context": {
+    "alert_name": "HighLatency",
+    "description": "P95 latency > 500ms on payment-service",
+    "service": "payment-service",
+    "environment": "production",
+    "labels": {"severity": "warning", "team": "payments"}
+  }
+}
