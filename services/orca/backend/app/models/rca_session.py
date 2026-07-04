@@ -10,12 +10,16 @@ Schema mirrors rca-architecture-brief.md §7.
 import uuid
 from datetime import datetime, timezone
 
+import sqlalchemy as sa
 from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
 from app.models.types import UUIDType
+
+# Cross-DB compatible JSON type: JSONB on Postgres, JSON on SQLite (for tests)
+_JSON = sa.JSON().with_variant(postgresql.JSONB(), "postgresql")
 
 
 class RCASession(Base):
@@ -44,8 +48,8 @@ class RCASession(Base):
     """True if accepted at low confidence or at max_rounds (force-finalised)."""
 
     final_hypothesis: Mapped[str | None] = mapped_column(Text, nullable=True)
-    final_report: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    hypothesis_trail: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    final_report: Mapped[dict | None] = mapped_column(_JSON, nullable=True)
+    hypothesis_trail: Mapped[list | None] = mapped_column(_JSON, nullable=True)
     """Append-only list of all hypothesis texts across all rounds."""
 
     # Timestamps

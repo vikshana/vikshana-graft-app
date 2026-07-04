@@ -100,11 +100,44 @@ class Settings(BaseSettings):
     OBO_ENCRYPTION_KEY: str = "devkey00000000000000000000000000"
 
     # -------------------------------------------------------------------------
-    # Langfuse — LLM eval tracking (Phase 1, Task 1.6)
+    # Phase 1 harness settings
     # -------------------------------------------------------------------------
-    LANGFUSE_PUBLIC_KEY: str = "lf-pk-dev-0000000000000000"
-    LANGFUSE_SECRET_KEY: str = "lf-sk-dev-0000000000000000"
-    LANGFUSE_HOST: str = "http://localhost:4100"
+
+    # LLM provider selection
+    LLM_PROVIDER: str = "anthropic"  # "anthropic" | "openai_compat"
+    LLM_MODEL: str = "claude-sonnet-4-5"
+
+    # OpenAI-compatible provider settings (only used when LLM_PROVIDER=openai_compat)
+    OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str = ""
+    AZURE_OPENAI_ENDPOINT: str = ""
+    AZURE_OPENAI_API_VERSION: str = "2024-02-01"
+
+    # Skills directory — provisioned by platform admins, not user-writable
+    SKILLS_DIR: str = "/skills"
+
+    # RBAC — Grafana roles allowed to use the agent
+    # Env format: RBAC_ALLOWED_ROLES='["Admin","Editor"]'
+    RBAC_ALLOWED_ROLES: list[str] = ["Admin", "Editor"]
+
+    # Query cost guard
+    MAX_QUERY_RANGE_HOURS: int = 24
+
+    # Timeout guards (seconds)
+    TOOL_TIMEOUT_S: int = 30
+    TURN_TIMEOUT_S: int = 120
+    SESSION_TIMEOUT_S: int = 1800
+
+    # Loop guard
+    MAX_TOOL_CALLS_PER_TURN: int = 25
+
+    # Budget guards (tokens)
+    BUDGET_SESSION_TOKENS: int = 100_000
+    BUDGET_USER_DAILY_TOKENS: int = 500_000
+    BUDGET_GLOBAL_DAILY_TOKENS: int = 10_000_000
+
+    # Turn worker poll interval
+    TURN_WORKER_POLL_MS: int = 200
 
 
 settings = Settings()

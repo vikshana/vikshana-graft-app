@@ -34,6 +34,10 @@ dependencies = [
     "cryptography>=42.0.0",
     # Migrations
     "alembic>=1.13.0",
+    # Phase 1 harness
+    "pyyaml>=6.0",           # skill frontmatter parsing
+    "langfuse>=2.0.0",       # LLM eval tracking
+    "langchain-openai>=0.3.0",  # OpenAICompatProvider
 ]
 
 [project.optional-dependencies]
@@ -66,5 +70,11 @@ exclude = ["tests/"]
 
 [tool.coverage.run]
 source = ["app", "harness"]
-omit = ["tests/*", "harness/migrations/*"]
+omit = [
+    "tests/*",
+    "harness/migrations/*",
+    # Vendor adapters only testable with live APIs — covered by contract tests via FakeProvider
+    "harness/llm/anthropic.py",
+    "harness/llm/openai_compat.py",
+]
 

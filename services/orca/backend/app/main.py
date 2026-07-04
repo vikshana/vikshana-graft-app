@@ -1,5 +1,6 @@
 """FastAPI application entrypoint with lifespan management."""
 
+import asyncio
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 from datetime import datetime, timedelta, timezone
@@ -15,6 +16,9 @@ from app.logging import configure_logging
 
 logger = structlog.get_logger()
 
+# Background task handle — kept to allow clean cancellation on shutdown
+_worker_task: asyncio.Task | None = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -24,13 +28,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     - Configures structlog
     - Creates all database tables (if not already present)
     - Attempts to install the pg_trgm extension for GIN trigram indexes
+    - Initialises the interactive RCA graph and registers it in GraphRegistry
+    - Starts the TurnWorker background loop
 
     On shutdown:
+    - Cancels the TurnWorker background task
     - Disposes the async engine connection pool
 
     Args:
         app: The FastAPI application instance.
     """
+    global _worker_task  # noqa: PLW0603
+
     configure_logging()
     log = structlog.get_logger()
     log.info("orca_starting", version="0.1.0")
@@ -58,6 +67,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         import app.models.rca_duplicate_alert  # noqa: F401
         import app.models.rca_session  # noqa: F401
         import app.models.rca_embedding  # noqa: F401
+        # Harness models — required for create_all to include them
+        import harness.session.models  # noqa: F401
 
         await conn.run_sync(Base.metadata.create_all)
         log.info("database_tables_created")
@@ -78,9 +89,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         log.info("column_migrations_applied")
 
         # ── Orphan RCA cleanup ────────────────────────────────────────────
-        # RCAs left in triggered/investigating after a container kill (SIGKILL)
-        # never reach _mark_rca_failed, so they stay stuck indefinitely.
-        # Mark any such RCA older than the agent timeout + 60s buffer as failed.
         import app.models.rca  # noqa: F401  (ensure RCA mapped before update)
         from app.models.rca import RCA as _RCA  # local import to avoid top-level
 
@@ -102,17 +110,38 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             log.info("orphan_rcas_cleaned_up", count=result.rowcount)
 
     # Initialise the interactive RCA graph (LangGraph + Postgres checkpointer)
+    # and register it in the GraphRegistry under "investigation"
     try:
-        from app.agent.rca_graph import init_rca_graph
+        from app.agent.rca_graph import init_rca_graph, get_rca_graph
         await init_rca_graph()
+
+        from harness.session.registry import graph_registry
+        graph_registry.register("investigation", get_rca_graph)
         log.info("rca_graph_ready")
     except Exception as exc:
         log.warning("rca_graph_init_failed", error=str(exc))
+
+    # Start the TurnWorker background loop
+    try:
+        from harness.session.worker import TurnWorker
+        worker = TurnWorker()
+        _worker_task = asyncio.create_task(worker.run_loop(), name="turn_worker")
+        log.info("turn_worker_started")
+    except Exception as exc:
+        log.warning("turn_worker_start_failed", error=str(exc))
 
     log.info("orca_ready")
     yield
 
     # Cleanup
+    if _worker_task is not None and not _worker_task.done():
+        _worker_task.cancel()
+        try:
+            await _worker_task
+        except asyncio.CancelledError:
+            pass
+        log.info("turn_worker_stopped")
+
     await async_engine.dispose()
     log.info("orca_shutdown")
 
