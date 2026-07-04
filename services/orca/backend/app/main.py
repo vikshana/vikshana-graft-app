@@ -136,7 +136,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Only started when SLACK_APP_TOKEN is configured — safe to skip in CI.
     if settings.SLACK_APP_TOKEN:
         try:
-            from harness.slack.app import create_socket_mode_handler
+            # Import through harness.slack (not harness.slack.app) so the package
+            # __init__.py runs register_handlers() before the Socket Mode handler starts.
+            from harness.slack import create_socket_mode_handler
             _slack_handler = create_socket_mode_handler()
             asyncio.create_task(_slack_handler.start_async(), name="slack_socket_mode")
             log.info("slack_socket_mode_started")

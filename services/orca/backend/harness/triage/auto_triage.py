@@ -18,7 +18,6 @@ the webhooks router.
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -76,7 +75,7 @@ class AutoTriageService:
 
     Args:
         dedup: Deduplication port (``OrcaDedupAdapter`` in production).
-        max_concurrent: Maximum simultaneous triage sessions (semaphore cap).
+        max_concurrent: Maximum simultaneous triage sessions (concurrency cap).
         breaker: Circuit breaker instance for datasource-query protection.
     """
 
@@ -87,7 +86,8 @@ class AutoTriageService:
         breaker: CircuitBreaker,
     ) -> None:
         self._dedup = dedup
-        self._semaphore = asyncio.BoundedSemaphore(max_concurrent)
+        self._max_concurrent = max_concurrent
+        self._active = 0  # count of in-flight triage operations
         self._breaker = breaker
 
     async def handle_alert(
@@ -117,10 +117,18 @@ class AutoTriageService:
         """
         log = logger.bind(alert_name=alert_name, org_id=org_id)
 
-        # 1. Circuit breaker check (non-blocking: raises immediately if OPEN)
-        # We wrap the actual work inside check_and_call to track success/failure.
-        async def _do() -> AutoTriageResult:
-            return await self._handle_with_semaphore(
+        # 1. Concurrency cap check — evaluated BEFORE the circuit breaker so that
+        # hitting the cap is never counted as a downstream failure.
+        if self._active >= self._max_concurrent:
+            log.warning("auto_triage_concurrency_limit_reached", active=self._active)
+            raise ConcurrencyLimitError(
+                "Auto-triage concurrency limit reached; alert will be retried by Alertmanager."
+            )
+
+        # 2. Circuit breaker wraps only the actual downstream work.
+        # Pass a factory so no coroutine is created until the circuit permits the call.
+        return await self._breaker.check_and_call(
+            lambda: self._triage_tracked(
                 alert_name=alert_name,
                 labels=labels,
                 alert_id=alert_id,
@@ -128,10 +136,9 @@ class AutoTriageService:
                 org_id=org_id,
                 log=log,
             )
+        )
 
-        return await self._breaker.check_and_call(_do())
-
-    async def _handle_with_semaphore(
+    async def _triage_tracked(
         self,
         alert_name: str,
         labels: dict[str, str],
@@ -140,7 +147,7 @@ class AutoTriageService:
         org_id: int | None,
         log: Any,
     ) -> AutoTriageResult:
-        """Acquire the semaphore and run the triage logic.
+        """Increment the active counter, run triage, then decrement in a finally block.
 
         Args:
             alert_name: Alert name.
@@ -152,18 +159,9 @@ class AutoTriageService:
 
         Returns:
             AutoTriageResult.
-
-        Raises:
-            ConcurrencyLimitError: If the semaphore cannot be acquired immediately.
         """
-        acquired = self._semaphore._value > 0  # noqa: SLF001 — inspect without blocking
-        if not acquired:
-            log.warning("auto_triage_concurrency_limit_reached")
-            raise ConcurrencyLimitError(
-                "Auto-triage concurrency limit reached; alert will be retried by Alertmanager."
-            )
-
-        async with self._semaphore:
+        self._active += 1
+        try:
             return await self._triage(
                 alert_name=alert_name,
                 labels=labels,
@@ -172,6 +170,8 @@ class AutoTriageService:
                 org_id=org_id,
                 log=log,
             )
+        finally:
+            self._active -= 1
 
     async def _triage(
         self,
@@ -238,8 +238,10 @@ class AutoTriageService:
                 text("UPDATE rca_sessions SET org_id = :oid WHERE id = :id"),
                 {"oid": org_id, "id": session_id},
             )
-        except Exception:
-            pass  # column may not exist in all schema versions
+        except Exception as exc:
+            # org_id column may not yet exist in older schema versions — expected.
+            # Log at debug so genuine DB failures are visible, not silently swallowed.
+            log.debug("org_id_column_update_skipped", error=str(exc))
 
         await db.commit()
 

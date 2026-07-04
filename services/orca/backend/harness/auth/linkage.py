@@ -287,7 +287,9 @@ async def complete_link(
     log = logger.bind(slack_user_id=slack_user_id, provider_subject=provider_subject)
 
     # Upsert user row (keyed on slack_user_id+slack_team_id via existing identities)
-    # First check if a Slack identity already exists → reuse its user_id
+    # Look up by composite Slack subject (team_id:user_id) to ensure
+    # cross-workspace uniqueness.
+    slack_subject = f"{slack_team_id}:{slack_user_id}"
     existing_slack = await db.execute(
         text("""
             SELECT u.id as user_id
@@ -295,7 +297,7 @@ async def complete_link(
             JOIN users u ON u.id = i.user_id
             WHERE i.provider = 'slack' AND i.provider_subject = :slack_sub
         """),
-        {"slack_sub": slack_user_id},
+        {"slack_sub": slack_subject},
     )
     slack_row = existing_slack.fetchone()
 
@@ -312,8 +314,10 @@ async def complete_link(
             """),
             {"id": user_id, "now": now},
         )
-        # Also create the Slack identity
+        # Also create the Slack identity using composite subject (team_id:user_id)
+        # to ensure uniqueness across workspaces.
         slack_identity_id = str(uuid.uuid4())
+        slack_subject = f"{slack_team_id}:{slack_user_id}"
         await db.execute(
             text("""
                 INSERT INTO identities (id, user_id, provider, provider_subject, linked_at)
@@ -323,7 +327,7 @@ async def complete_link(
             {
                 "id": slack_identity_id,
                 "user_id": user_id,
-                "subject": slack_user_id,
+                "subject": slack_subject,
                 "now": now,
             },
         )
@@ -344,7 +348,7 @@ async def complete_link(
         )
 
     # Upsert Entra identity (idempotent: same user re-linking is OK)
-    identity_id = str(uuid.uuid4())
+    identity_id = str(uuid.uuid4())  # used as the INSERT value; may be overridden below
     await db.execute(
         text("""
             INSERT INTO identities (id, user_id, provider, provider_subject, email, linked_at)
@@ -360,6 +364,19 @@ async def complete_link(
             "now": now,
         },
     )
+
+    # SELECT the persisted id — on the conflict/update path the row keeps its
+    # original id, so identity_id (newly generated above) may be incorrect.
+    persisted = await db.execute(
+        text(
+            "SELECT id FROM identities "
+            "WHERE provider = 'entra' AND provider_subject = :subject"
+        ),
+        {"subject": provider_subject},
+    )
+    persisted_row = persisted.fetchone()
+    identity_id = str(persisted_row.id) if persisted_row else identity_id
+
     await db.commit()
 
     log.info("identity_linked", user_id=user_id, email=email)
@@ -411,10 +428,11 @@ async def get_link_status(
             FROM identities is_
             JOIN users u ON u.id = is_.user_id
             JOIN identities ie ON ie.user_id = u.id AND ie.provider = 'entra'
-            WHERE is_.provider = 'slack' AND is_.provider_subject = :slack_sub
+            WHERE is_.provider = 'slack'
+              AND is_.provider_subject = :slack_sub
             LIMIT 1
         """),
-        {"slack_sub": slack_user_id},
+        {"slack_sub": f"{slack_team_id}:{slack_user_id}"},
     )
     row = result.fetchone()
     if row is None:

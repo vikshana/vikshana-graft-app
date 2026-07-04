@@ -22,7 +22,7 @@ class TestCircuitBreakerClosed:
         async def ok() -> str:
             return "done"
 
-        result = await breaker.check_and_call(ok())
+        result = await breaker.check_and_call(lambda: ok())
         assert result == "done"
         assert breaker.state == CircuitState.CLOSED
 
@@ -35,7 +35,7 @@ class TestCircuitBreakerClosed:
 
         for _ in range(3):
             with pytest.raises(RuntimeError):
-                await breaker.check_and_call(fail())
+                await breaker.check_and_call(lambda: fail())
 
         assert breaker.failure_count == 3
         assert breaker.state == CircuitState.CLOSED
@@ -49,7 +49,7 @@ class TestCircuitBreakerClosed:
 
         for _ in range(3):
             with pytest.raises(RuntimeError):
-                await breaker.check_and_call(fail())
+                await breaker.check_and_call(lambda: fail())
 
         assert breaker.state == CircuitState.OPEN
 
@@ -65,9 +65,9 @@ class TestCircuitBreakerClosed:
 
         for _ in range(3):
             with pytest.raises(RuntimeError):
-                await breaker.check_and_call(fail())
+                await breaker.check_and_call(lambda: fail())
 
-        await breaker.check_and_call(ok())
+        await breaker.check_and_call(lambda: ok())
         assert breaker.failure_count == 0
         assert breaker.state == CircuitState.CLOSED
 
@@ -81,7 +81,7 @@ class TestCircuitBreakerOpen:
             raise RuntimeError("boom")
 
         with pytest.raises(RuntimeError):
-            await breaker.check_and_call(fail())
+            await breaker.check_and_call(lambda: fail())
 
         assert breaker.state == CircuitState.OPEN
 
@@ -89,7 +89,7 @@ class TestCircuitBreakerOpen:
             return "ok"
 
         with pytest.raises(CircuitBreakerOpenError):
-            await breaker.check_and_call(ok())
+            await breaker.check_and_call(lambda: ok())
 
     async def test_open_error_has_seconds_remaining(self):
         """CircuitBreakerOpenError carries a positive seconds_remaining."""
@@ -99,13 +99,13 @@ class TestCircuitBreakerOpen:
             raise RuntimeError
 
         with pytest.raises(RuntimeError):
-            await breaker.check_and_call(fail())
+            await breaker.check_and_call(lambda: fail())
 
         async def ok():
             return None
 
         with pytest.raises(CircuitBreakerOpenError) as exc_info:
-            await breaker.check_and_call(ok())
+            await breaker.check_and_call(lambda: ok())
 
         assert exc_info.value.seconds_remaining > 0
 
@@ -119,7 +119,7 @@ class TestCircuitBreakerHalfOpen:
             raise RuntimeError
 
         with pytest.raises(RuntimeError):
-            await breaker.check_and_call(fail())
+            await breaker.check_and_call(lambda: fail())
 
         assert breaker.state == CircuitState.OPEN
 
@@ -129,7 +129,7 @@ class TestCircuitBreakerHalfOpen:
         async def ok():
             return "probed"
 
-        result = await breaker.check_and_call(ok())
+        result = await breaker.check_and_call(lambda: ok())
         assert result == "probed"
         assert breaker.state == CircuitState.CLOSED
 
@@ -141,13 +141,13 @@ class TestCircuitBreakerHalfOpen:
             raise RuntimeError("boom")
 
         with pytest.raises(RuntimeError):
-            await breaker.check_and_call(fail())
+            await breaker.check_and_call(lambda: fail())
 
         # Force to HALF_OPEN
         breaker._state = CircuitState.HALF_OPEN
 
         with pytest.raises(RuntimeError):
-            await breaker.check_and_call(fail())
+            await breaker.check_and_call(lambda: fail())
 
         assert breaker.state == CircuitState.OPEN
 

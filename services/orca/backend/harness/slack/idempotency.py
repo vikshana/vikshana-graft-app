@@ -18,6 +18,7 @@ from datetime import datetime, timezone, timedelta
 
 import structlog
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = structlog.get_logger()
@@ -66,7 +67,9 @@ class SlackEventDedup:
         now = datetime.now(timezone.utc)
         cutoff = now - timedelta(days=self._ttl_days)
 
-        # Insert — ignore conflict so concurrent handlers don't error
+        # Insert — only ignore IntegrityError (duplicate key).
+        # Other exceptions (connectivity, transaction state) are real failures
+        # that should propagate so the caller can decide how to handle them.
         try:
             await db.execute(
                 text(
@@ -76,9 +79,8 @@ class SlackEventDedup:
                 ),
                 {"eid": event_id, "now": now},
             )
-        except Exception:
-            # SQLite does not support ON CONFLICT DO NOTHING in all versions;
-            # swallow silently so tests pass.
+        except IntegrityError:
+            # Event already exists — concurrent handler won the race; this is fine.
             pass
 
         # Lazy TTL pruning — delete old rows while we have the session open

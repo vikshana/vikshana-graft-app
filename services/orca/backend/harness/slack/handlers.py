@@ -35,12 +35,10 @@ from harness.slack.block_kit import (
     error_message,
     thinking_message,
 )
-from harness.slack.channel_refs import build_slack_ref, merge_ref
-from harness.slack.idempotency import SlackEventDedup
+from harness.slack.channel_refs import build_slack_ref
 
 logger = structlog.get_logger()
 
-_dedup = SlackEventDedup()
 _handlers_registered = False
 
 

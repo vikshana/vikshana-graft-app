@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable
 from enum import Enum, auto
 from typing import Any, Awaitable, TypeVar
 
@@ -90,18 +91,24 @@ class CircuitBreaker:
         """Current consecutive failure count."""
         return self._failure_count
 
-    async def check_and_call(self, coro: Awaitable[T]) -> T:
-        """Execute *coro* if the circuit allows it; raise if OPEN.
+    async def check_and_call(self, coro_fn: Callable[[], Awaitable[T]]) -> T:
+        """Execute the coroutine produced by *coro_fn* if the circuit allows it.
+
+        Accepts a **zero-argument callable** (factory) rather than a pre-created
+        coroutine.  This prevents coroutine-leak warnings: if the circuit is OPEN
+        the factory is never called, so no coroutine object is created and nothing
+        goes un-awaited.
 
         Automatically transitions state based on success/failure:
         - Success: resets failure counter (stays/transitions to CLOSED).
         - Failure: increments counter; opens circuit on threshold.
 
         Args:
-            coro: The coroutine to execute.
+            coro_fn: Zero-arg callable that returns an awaitable when called.
+                     Example: ``lambda: my_coro(arg1, arg2)``
 
         Returns:
-            The result of *coro*.
+            The result of ``await coro_fn()``.
 
         Raises:
             CircuitBreakerOpenError: If the circuit is OPEN and the
@@ -119,7 +126,7 @@ class CircuitBreaker:
                 raise CircuitBreakerOpenError(seconds_remaining=remaining)
 
         try:
-            result = await coro
+            result = await coro_fn()
             await self._on_success()
             return result
         except Exception:

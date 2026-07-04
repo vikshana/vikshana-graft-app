@@ -383,40 +383,43 @@ class TestGetLinkStatus:
     """Tests for get_link_status."""
 
     async def test_returns_linked_true_when_identity_exists(self, link_db: AsyncSession):
-        """Returns linked=True with email when the Slack user has an Entra identity."""
-        import uuid
+         """Returns linked=True with email when the Slack user has an Entra identity."""
+         import uuid
 
-        user_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc)
-        slack_sub = "U_STATUS_TEST"
+         user_id = str(uuid.uuid4())
+         now = datetime.now(timezone.utc)
+         slack_user = "U_STATUS_TEST"
+         slack_team = "T_STATUS"
+         # Slack provider_subject must use the composite team_id:user_id format
+         slack_sub = f"{slack_team}:{slack_user}"
 
-        await link_db.execute(
-            text("INSERT INTO users (id, created_at) VALUES (:id, :now)"),
-            {"id": user_id, "now": now.isoformat()},
-        )
-        for provider, subject, email in [
-            ("slack", slack_sub, None),
-            ("entra", "entra-status-sub", "status@example.com"),
-        ]:
-            await link_db.execute(
-                text("""
-                    INSERT INTO identities (id, user_id, provider, provider_subject, email, linked_at)
-                    VALUES (:id, :uid, :provider, :subject, :email, :now)
-                """),
-                {
-                    "id": str(uuid.uuid4()),
-                    "uid": user_id,
-                    "provider": provider,
-                    "subject": subject,
-                    "email": email,
-                    "now": now.isoformat(),
-                },
-            )
-        await link_db.flush()
+         await link_db.execute(
+             text("INSERT INTO users (id, created_at) VALUES (:id, :now)"),
+             {"id": user_id, "now": now.isoformat()},
+         )
+         for provider, subject, email in [
+             ("slack", slack_sub, None),
+             ("entra", "entra-status-sub", "status@example.com"),
+         ]:
+             await link_db.execute(
+                 text("""
+                     INSERT INTO identities (id, user_id, provider, provider_subject, email, linked_at)
+                     VALUES (:id, :uid, :provider, :subject, :email, :now)
+                 """),
+                 {
+                     "id": str(uuid.uuid4()),
+                     "uid": user_id,
+                     "provider": provider,
+                     "subject": subject,
+                     "email": email,
+                     "now": now.isoformat(),
+                 },
+             )
+         await link_db.flush()
 
-        result = await get_link_status(slack_sub, "T_STATUS", link_db)
-        assert result["linked"] is True
-        assert result["email"] == "status@example.com"
+         result = await get_link_status(slack_user, slack_team, link_db)
+         assert result["linked"] is True
+         assert result["email"] == "status@example.com"
 
     async def test_returns_linked_false_when_no_identity(self, link_db: AsyncSession):
         """Returns linked=False for an unknown Slack user."""

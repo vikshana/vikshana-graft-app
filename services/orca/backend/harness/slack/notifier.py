@@ -159,11 +159,17 @@ def _build_blocks_for_result(
     if turn_result is None:
         return thinking_message(session_id=session_id)
 
-    # turn_result may be a dict (LangGraph state snapshot) or a typed state object
-    result_dict: dict[str, Any] = (
-        dict(turn_result) if hasattr(turn_result, "__iter__") and not isinstance(turn_result, str)
-        else {}
-    )
+    # turn_result may be a dict (LangGraph state snapshot) or a typed state object.
+    # Guard against iterables that are not mapping-like (lists, custom iterables)
+    # which would cause dict() to raise TypeError.
+    result_dict: dict[str, Any] = {}
+    if isinstance(turn_result, dict):
+        result_dict = turn_result
+    elif hasattr(turn_result, "__iter__") and not isinstance(turn_result, str):
+        try:
+            result_dict = dict(turn_result)
+        except (TypeError, ValueError):
+            result_dict = {}
 
     error = result_dict.get("error_message") or getattr(turn_result, "error_message", None)
     if error:

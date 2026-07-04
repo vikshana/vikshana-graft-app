@@ -144,22 +144,17 @@ class TestAutoTriageDedup:
 
 class TestAutoTriageConcurrencyCap:
     async def test_concurrent_cap_raises_concurrency_limit_error(self):
-        """When the semaphore is exhausted, ConcurrencyLimitError is raised."""
+        """When the active count equals max_concurrent, ConcurrencyLimitError is raised."""
         svc = _make_service(max_concurrent=1)
-
-        # Drain the semaphore manually
-        acquired = svc._semaphore._value  # noqa: SLF001
-        assert acquired == 1
-
-        # Consume the one slot
-        await svc._semaphore.acquire()
-        assert svc._semaphore._value == 0  # noqa: SLF001
-
         db = _mock_db()
+
+        # Simulate one in-flight operation by setting _active directly
+        svc._active = 1
+
         with pytest.raises(ConcurrencyLimitError):
             await svc.handle_alert("Alert", {}, uuid.uuid4(), db)
 
-        svc._semaphore.release()
+        svc._active = 0
 
 
 # ---------------------------------------------------------------------------
