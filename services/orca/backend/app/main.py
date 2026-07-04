@@ -166,6 +166,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         log.warning("auto_triage_service_init_failed", error=str(exc))
 
+    # ── MCP client manager (Phase 4) ─────────────────────────────────────
+    # Connect all enabled MCP servers and register their tools in ToolRegistry.
+    try:
+        from app.db import AsyncSessionLocal
+        from harness.mcp.client_manager import mcp_client_manager
+        async with AsyncSessionLocal() as _mcp_db:
+            await mcp_client_manager.startup(_mcp_db)
+        log.info("mcp_client_manager_started")
+    except Exception as exc:
+        log.warning("mcp_client_manager_start_failed", error=str(exc))
+
     log.info("orca_ready")
     yield
 
@@ -176,6 +187,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             log.info("slack_socket_mode_stopped")
         except Exception as exc:
             log.warning("slack_socket_mode_stop_failed", error=str(exc))
+
+    # Shutdown MCP client manager — deregister all MCP tools
+    try:
+        from harness.mcp.client_manager import mcp_client_manager
+        await mcp_client_manager.shutdown()
+        log.info("mcp_client_manager_stopped")
+    except Exception as exc:
+        log.warning("mcp_client_manager_stop_failed", error=str(exc))
 
     # Cleanup
     if _worker_task is not None and not _worker_task.done():
@@ -229,13 +248,15 @@ def create_app() -> FastAPI:
     # Register routers
     from app.api.webhooks import router as webhooks_router
     from app.api.rca import router as rca_router
-    from app.api.rca_sessions import router as rca_sessions_router
+    from app.api.sessions import router as sessions_router
     from app.api.identity import router as identity_router
+    from app.api.mcp_servers import router as mcp_servers_router
 
     app.include_router(webhooks_router, tags=["webhooks"])
     app.include_router(rca_router, prefix="/api", tags=["rca"])
-    app.include_router(rca_sessions_router, prefix="/api", tags=["rca-sessions"])
+    app.include_router(sessions_router, prefix="/api", tags=["sessions"])
     app.include_router(identity_router, prefix="/api", tags=["identity"])
+    app.include_router(mcp_servers_router, prefix="/api", tags=["mcp-servers"])
 
     @app.get("/health", tags=["health"])
     async def health_check() -> dict[str, str]:

@@ -31,6 +31,18 @@ const SESSION_API_BASE = '/api/plugins/vikshana-graft-app/resources/sessions';
 // ---------------------------------------------------------------------------
 
 /**
+ * Fetch metadata for a single session (id, initiator_user_id, status, etc.)
+ */
+export async function getSessionMeta(sessionId: string): Promise<{ id: string; initiator_user_id?: string; [key: string]: unknown }> {
+  const resp = await getBackendSrv().fetch<{ sessions: Array<{ id: string; initiator_user_id?: string; [key: string]: unknown }> }>({
+    url: `${SESSION_API_BASE}?limit=100`,
+    method: 'GET',
+  });
+  const data = await resp.toPromise().then((r) => r!.data);
+  return data.sessions.find((s) => s.id === sessionId) ?? { id: sessionId };
+}
+
+/**
  * List harness sessions for the current organisation.
  */
 export async function listSessions(

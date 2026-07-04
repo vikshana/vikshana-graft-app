@@ -25,6 +25,8 @@ const RCAInvestigate = lazy(() => import('../../../pages/RCAInvestigate').then(m
 // Phase 2: harness session pages (Option A — alongside existing RCA pages)
 const SessionList = lazy(() => import('../../../pages/SessionList').then(m => ({ default: m.SessionList })));
 const SessionPanel = lazy(() => import('../../../pages/SessionPanel').then(m => ({ default: m.SessionPanel })));
+// Phase 4: MCP server management
+const MCPServers = lazy(() => import('../../../pages/MCPServers').then(m => ({ default: m.MCPServers })));
 
 
 export default function App(props: AppRootProps) {
@@ -63,6 +65,9 @@ export default function App(props: AppRootProps) {
             {/* Phase 2: Harness session pages (Option A — alongside existing /rca pages) */}
             <Route path="/sessions" element={<SessionList />} />
             <Route path="/sessions/:sessionId" element={<SessionPanel />} />
+
+            {/* Phase 4: MCP server management */}
+            <Route path="/mcp" element={<MCPServers />} />
 
             {/* Fallback */}
             <Route path="*" element={<ChatInterface />} />

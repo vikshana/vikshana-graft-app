@@ -25,7 +25,7 @@ import { Alert, Button, LoadingBar, Stack, TextArea } from '@grafana/ui';
 import { useStyles2 } from '@grafana/ui';
 import { css } from '@emotion/css';
 
-import { parseSseChunk, streamSession } from '../services/sessionApi';
+import { parseSseChunk, streamSession, getSessionMeta } from '../services/sessionApi';
 import { PageHeader } from '../components/common/PageHeader';
 import {
   AgentBusyBanner,
@@ -62,11 +62,21 @@ export function SessionPanel() {
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Determine if the current user is the session initiator.
-  // We use a lazy approach: assume initiator until proven otherwise.
-  // The real initiator_user_id comes from the session metadata; for now we
-  // default to true so the ApprovalModal renders in demos without a full session fetch.
-  const isInitiator = true; // TODO Phase 4: compare contextSrv.user.id with session.initiator_user_id
+  // Determine if the current user is the session initiator by comparing
+  // contextSrv.user.login with the session's initiator_user_id from the API.
+  const [isInitiator, setIsInitiator] = useState(false);
+
+  useEffect(() => {
+    if (!sessionId) { return; }
+    getSessionMeta(sessionId).then((meta) => {
+      // Access the current user login via the Grafana runtime contextSrv shim
+      // (available as a module augmentation in the test environment and as
+      //  window.grafanaBootData in the real app).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const login: string = (window as any).grafanaBootData?.user?.login ?? '';
+      setIsInitiator(!!login && login === meta.initiator_user_id);
+    }).catch(() => {/* non-fatal: default false */});
+  }, [sessionId]);
 
   // Auto-scroll to bottom as steps arrive
   useEffect(() => {

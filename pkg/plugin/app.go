@@ -56,6 +56,8 @@ func NewApp(_ context.Context, settings backend.AppInstanceSettings) (instancemg
 	app.registerRoutes(mux)
 	// Register session proxy routes (Phase 2) — requires settings for RBAC config.
 	app.registerSessionRoutes(mux, settings)
+	// Register MCP management proxy routes (Phase 4) — same RBAC and HMAC signing.
+	app.registerMCPRoutes(mux, settings)
 	app.CallResourceHandler = httpadapter.New(mux)
 
 	// Get TracerProvider from our custom global store

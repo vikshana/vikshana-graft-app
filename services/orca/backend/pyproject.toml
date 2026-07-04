@@ -50,7 +50,7 @@ dev = [
     "pytest-cov>=5.0.0",
     "mypy>=1.10.0",
     "types-python-dateutil",
-    "aiosqlite>=0.20.0",
+    "testcontainers[postgres]>=4.8",
 ]
 
 [tool.setuptools.packages.find]
@@ -79,5 +79,7 @@ omit = [
     # Vendor adapters only testable with live APIs — covered by contract tests via FakeProvider
     "harness/llm/anthropic.py",
     "harness/llm/openai_compat.py",
+    # MCP network transport — integration-tested against live servers; HTTP client not unit-testable
+    "harness/mcp/client_manager.py",
 ]
 

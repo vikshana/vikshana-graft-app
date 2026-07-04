@@ -172,5 +172,11 @@ class Settings(BaseSettings):
     # Seconds to wait in OPEN state before attempting a half-open probe.
     ALERT_TRIAGE_CIRCUIT_BREAKER_TIMEOUT_S: int = 60
 
+    # Phase 4 — Security hardening
+    HARNESS_PII_REDACTION_ENABLED: bool = False
+
+    # Phase 4 — MCP server integration
+    MCP_ENCRYPTION_KEY: str = ""  # 32-byte URL-safe base64; empty = no-op (dev only)
+
 
 settings = Settings()

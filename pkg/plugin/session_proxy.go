@@ -138,3 +138,73 @@ func parseAllowedRoles(settings backend.AppInstanceSettings) []string {
 	}
 	return cfg.AllowedRoles
 }
+
+// registerMCPRoutes registers the /mcp/ reverse proxy with RBAC and HMAC signing.
+// It is called from registerRoutes in app.go so all MCP management endpoints
+// share the same mux as the existing /sessions/ proxy.
+//
+// The /mcp/ path is forwarded to the ORCA FastAPI backend at /api/mcp/:
+//   - X-Grafana-Org-Id injected from PluginContext (not spoofable)
+//   - Plugin-level RBAC: only allowed Grafana roles may reach the backend
+//   - X-Agent-Signature HMAC header when AGENT_INTERNAL_SECRET is set
+func (a *App) registerMCPRoutes(mux *http.ServeMux, settings backend.AppInstanceSettings) {
+	rcaBackendURL := getEnv("RCA_BACKEND_URL", "http://orca-backend:8000")
+	target, err := url.Parse(rcaBackendURL)
+	if err != nil {
+		backend.Logger.Error("Failed to parse RCA_BACKEND_URL for MCP proxy",
+			"url", rcaBackendURL, "err", err)
+		return
+	}
+
+	// Parse allowed roles from plugin settings, fall back to defaults.
+	allowed := parseAllowedRoles(settings)
+	secret := getEnv("AGENT_INTERNAL_SECRET", "")
+
+	mcpProxy := &httputil.ReverseProxy{
+		FlushInterval: -1, // preserve streaming responses
+		Director: func(req *http.Request) {
+			req.URL.Scheme = target.Scheme
+			req.URL.Host = target.Host
+
+			// After StripPrefix("/mcp"), the path is "" / "/" / "/sub/path".
+			// Rewrite to /api/mcp (or /api/mcp/sub/path) so orca-backend
+			// receives the correct route.
+			stripped := req.URL.Path
+			switch {
+			case stripped == "" || stripped == "/":
+				req.URL.Path = "/api/mcp"
+			default:
+				req.URL.Path = "/api/mcp" + stripped
+			}
+
+			// Inject Grafana org ID (from PluginContext, not spoofable)
+			if orgID, ok := req.Context().Value(orgIDKey{}).(int64); ok {
+				req.Header.Set("X-Grafana-Org-Id", strconv.FormatInt(orgID, 10))
+			}
+
+			// Add HMAC signature when the internal secret is configured.
+			if secret != "" {
+				ts := strconv.FormatInt(time.Now().Unix(), 10)
+				mac := hmac.New(sha256.New, []byte(secret))
+				mac.Write([]byte(ts + ":" + req.URL.Path))
+				req.Header.Set("X-Agent-Signature", hex.EncodeToString(mac.Sum(nil)))
+				req.Header.Set("X-Agent-Timestamp", ts)
+			}
+		},
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			backend.Logger.Error("MCP proxy error", "err", err)
+			a.rcaRequestErrors.Add(r.Context(), 1)
+			http.Error(w, "Agent backend unavailable", http.StatusBadGateway)
+		},
+	}
+
+	// Register /mcp/ for sub-paths AND /mcp (no trailing slash) to prevent
+	// Go's ServeMux from issuing a 301 redirect that loses the Grafana plugin prefix.
+	mcpHandler := rbacMiddleware(allowed, http.StripPrefix("/mcp", mcpProxy))
+	mux.Handle("/mcp/", mcpHandler)
+	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+		// Normalise: treat /mcp as /mcp/ so StripPrefix works correctly
+		r.URL.Path = "/mcp/"
+		mcpHandler.ServeHTTP(w, r)
+	})
+}

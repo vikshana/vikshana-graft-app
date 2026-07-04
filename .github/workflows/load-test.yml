@@ -1,0 +1,65 @@
+name: Load Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      users:
+        description: Number of concurrent users
+        required: false
+        default: "500"
+      run_time:
+        description: "Test duration (e.g. 2m, 5m)"
+        required: false
+        default: "2m"
+      host:
+        description: Backend host URL
+        required: false
+        default: "http://localhost:8001"
+
+jobs:
+  load-test:
+    name: Locust load test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Locust
+        run: pip install locust
+
+      - name: Start Orca stack
+        working-directory: services/orca
+        run: |
+          docker compose up --build -d orca-postgres orca-backend
+          timeout 60 bash -c 'until curl -sf http://localhost:8001/health; do sleep 2; done'
+
+      - name: Run load test
+        working-directory: services/orca/backend
+        run: |
+          mkdir -p output
+          locust \
+            -f tests/load/locustfile.py \
+            --headless \
+            -u ${{ github.event.inputs.users }} \
+            -r 20 \
+            --run-time ${{ github.event.inputs.run_time }} \
+            --host ${{ github.event.inputs.host }} \
+            --html output/load-report.html \
+            --csv output/load
+
+      - name: Assert p95 SLA
+        working-directory: services/orca/backend
+        run: python tests/load/assert_p95.py output/load_stats.csv
+
+      - name: Upload load test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-report
+          path: services/orca/backend/output/
+          retention-days: 30

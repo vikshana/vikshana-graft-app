@@ -12,6 +12,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 // Mock sessionApi before importing components
 jest.mock('../services/sessionApi', () => ({
   listSessions: jest.fn(),
+  getSessionMeta: jest.fn().mockResolvedValue({ id: 'test-session', initiator_user_id: undefined }),
   postTurn: jest.fn().mockResolvedValue({ job_id: 'j1', is_busy: false }),
   approveAction: jest.fn().mockResolvedValue(undefined),
   postFeedback: jest.fn().mockResolvedValue(undefined),
@@ -183,6 +184,13 @@ describe('SessionPanel', () => {
   });
 
   it('renders ApprovalModal when awaiting_approval event received', async () => {
+    // Make current user the initiator so the modal is shown
+    (require('../services/sessionApi').getSessionMeta as jest.Mock).mockResolvedValue({
+      id: 'test-session-id',
+      initiator_user_id: 'testuser',
+    });
+    (window as any).grafanaBootData = { user: { login: 'testuser' } };
+
     mockStreamSession.mockResolvedValue(
       buildSseMockResponse([
         {
@@ -204,6 +212,12 @@ describe('SessionPanel', () => {
   });
 
   it('calls approveAction with approved on approve button click', async () => {
+    (require('../services/sessionApi').getSessionMeta as jest.Mock).mockResolvedValue({
+      id: 'test-session-id',
+      initiator_user_id: 'testuser',
+    });
+    (window as any).grafanaBootData = { user: { login: 'testuser' } };
+
     mockStreamSession.mockResolvedValue(
       buildSseMockResponse([
         {

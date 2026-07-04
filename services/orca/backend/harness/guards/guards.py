@@ -437,8 +437,10 @@ def make_default_pipeline() -> "GuardPipeline":
         Configured GuardPipeline instance.
     """
     from harness.guards.pipeline import GuardPipeline
+    from harness.guards.pii import PIIRedactionGuard
     return GuardPipeline([
         RBACGuard(),
+        PIIRedactionGuard(),
         CostGuard(),
         BudgetGuard(),
         TimeoutGuard(),

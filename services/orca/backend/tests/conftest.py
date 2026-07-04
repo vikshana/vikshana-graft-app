@@ -1,5 +1,6 @@
 """Test fixtures for unit and integration tests."""
 
+import subprocess
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
@@ -10,42 +11,48 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from testcontainers.postgres import PostgresContainer
 
 from app.agent.rca_state import AlertContext, RCAState
 from app.agent.state import OrcaState
-from app.db import Base, get_session
+from app.db import get_session
 from app.main import app
 
 # ---------------------------------------------------------------------------
-# Database fixtures
+# Database fixtures — real PostgreSQL via Testcontainers
 # ---------------------------------------------------------------------------
 
-TEST_DATABASE_URL = "sqlite+aiosqlite:///./test.db"
+@pytest.fixture(scope="session")
+def pg_container():
+    """Start a PostgreSQL 16 container for the entire test session."""
+    with PostgresContainer("postgres:16-alpine", driver="asyncpg") as pg:
+        yield pg
 
 
 @pytest_asyncio.fixture(scope="session")
-async def test_engine():
-    """Create a test async engine using SQLite."""
-    engine = create_async_engine(
-        TEST_DATABASE_URL,
-        echo=False,
+async def test_engine(pg_container):
+    """Create an async engine connected to the test Postgres container.
+
+    Runs the full Alembic migration chain so the schema is always in sync
+    with migrations rather than reflecting from SQLAlchemy metadata.
+    """
+    async_url = pg_container.get_connection_url()  # postgresql+asyncpg://...
+    # Alembic uses a sync engine internally — strip the async driver for it
+    sync_url = async_url.replace("+asyncpg", "")
+
+    # Run alembic upgrade head synchronously (it manages its own engine)
+    result = subprocess.run(
+        ["alembic", "upgrade", "head"],
+        env={**__import__("os").environ, "DATABASE_URL": sync_url},
+        capture_output=True,
+        text=True,
+        cwd="/Users/av/Repositories/vikshana/vikshana-graft-app/.claude/worktrees/awesome-boyd/services/orca/backend",
     )
-    # Create all tables
-    async with engine.begin() as conn:
-        # Import all models so SQLAlchemy knows about them
-        import app.models.alert  # noqa: F401
-        import app.models.rca  # noqa: F401
-        import app.models.agent_step  # noqa: F401
-        import app.models.rca_duplicate_alert  # noqa: F401
-        import app.models.rca_session  # noqa: F401
-        import app.models.rca_embedding  # noqa: F401
+    if result.returncode != 0:
+        raise RuntimeError(f"Alembic upgrade failed:\n{result.stderr}")
 
-        await conn.run_sync(Base.metadata.create_all)
-
+    engine = create_async_engine(async_url, echo=False)
     yield engine
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
 
 

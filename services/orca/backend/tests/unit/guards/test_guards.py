@@ -526,9 +526,9 @@ class TestGuardPipeline:
         assert isinstance(verdict, Deny)
         assert "Guard error" in verdict.reason
 
-    def test_make_default_pipeline_has_6_guards(self):
-        """make_default_pipeline returns a pipeline with all 6 guards."""
+    def test_make_default_pipeline_has_7_guards(self):
+        """make_default_pipeline returns a pipeline with all 7 guards (PII added in Phase 4)."""
         pipeline = make_default_pipeline()
-        assert len(pipeline._guards) == 6
+        assert len(pipeline._guards) == 7
         names = {g.name for g in pipeline._guards}
-        assert names == {"rbac", "cost", "budget", "timeout", "write", "loop"}
+        assert names == {"rbac", "pii_redaction", "cost", "budget", "timeout", "write", "loop"}

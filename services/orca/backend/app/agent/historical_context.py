@@ -11,56 +11,12 @@ it queries pgvector directly without going through the MCP server.
 from typing import Any
 
 import structlog
-from langchain_anthropic import ChatAnthropic
 
 from app.agent.rca_state import AlertContext
-from app.config import settings
 from app.db import AsyncSessionLocal
+from harness.search.embeddings import embed_text
 
 logger = structlog.get_logger()
-
-# Reuse the same model instance for embeddings (small + fast)
-_embed_model = ChatAnthropic(
-    model="claude-haiku-4-5",
-    api_key=settings.ANTHROPIC_API_KEY,
-)
-
-
-async def embed_text(text: str) -> list[float]:
-    """Generate a text embedding using the Anthropic embedding API.
-
-    Note: Anthropic doesn't provide a dedicated embeddings endpoint.
-    This uses a simple prompt-based approach to generate a fixed-size
-    representation.  In production, replace with a dedicated embedding
-    model (e.g. OpenAI text-embedding-3-small or a self-hosted model).
-
-    For now we use a deterministic hash-based placeholder that produces
-    a 1536-dimensional vector — sufficient for pgvector storage.
-
-    Args:
-        text: Text to embed.
-
-    Returns:
-        1536-dimensional float list.
-    """
-    import hashlib
-    import math
-
-    # Deterministic pseudo-embedding from text hash.
-    # Replace this with a real embedding model call in production.
-    digest = hashlib.sha256(text.encode()).digest()
-    values: list[float] = []
-    for i in range(1536):
-        byte_idx = i % len(digest)
-        angle = (digest[byte_idx] / 255.0) * 2 * math.pi * (i + 1)
-        values.append(math.sin(angle) * 0.1)
-
-    # Normalise to unit vector
-    magnitude = math.sqrt(sum(v * v for v in values))
-    if magnitude > 0:
-        values = [v / magnitude for v in values]
-
-    return values
 
 
 async def gather_historical_context(
