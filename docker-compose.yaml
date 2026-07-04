@@ -168,7 +168,9 @@ services:
       mcp-postgres:
         condition: service_started
       langfuse-web:
-        condition: service_healthy
+        # Langfuse is optional for core RCA — use service_started so orca-backend
+        # comes up even when ClickHouse is still initialising on first boot.
+        condition: service_started
     ports:
       - "8001:8000"
 
@@ -226,10 +228,12 @@ services:
     volumes:
       - langfuse-clickhouse-data:/var/lib/clickhouse
     healthcheck:
+      # ClickHouse alpine is slow to initialise — give it 60s before first check
       test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping | grep -q Ok"]
       interval: 10s
-      timeout: 5s
-      retries: 10
+      timeout: 10s
+      retries: 20
+      start_period: 60s
 
   langfuse-redis:
     image: redis:7-alpine

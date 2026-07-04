@@ -518,3 +518,57 @@ async def search_rcas(
     except Exception as exc:
         log.warning("rca_search_query_failed", error=str(exc))
         return RCASearchResponse(query=q, results=[])
+
+
+# ---------------------------------------------------------------------------
+# POST /api/sessions/{session_id}/feedback  (JSON)
+# ---------------------------------------------------------------------------
+
+
+from pydantic import BaseModel as _BaseModel
+
+
+class FeedbackRequest(_BaseModel):
+    """Feedback payload for a session."""
+
+    score: float  # 1.0 = thumbs-up, 0.0 = thumbs-down
+    comment: str = ""
+
+
+@router.post(
+    "/sessions/{session_id}/feedback",
+    summary="Record user feedback for a session",
+    status_code=200,
+)
+async def post_session_feedback(
+    session_id: str,
+    body: FeedbackRequest,
+    x_grafana_org_id: str | None = Header(None),
+) -> dict[str, str]:
+    """Record thumbs-up/down feedback for a session and forward to Langfuse.
+
+    Args:
+        session_id: Session or thread ID.
+        body: Feedback score and optional comment.
+        x_grafana_org_id: Grafana org ID from the Go proxy.
+
+    Returns:
+        Confirmation dict.
+    """
+    log = logger.bind(session_id=session_id, score=body.score)
+    log.info("session_feedback_received")
+
+    try:
+        from harness.observability.langfuse import make_langfuse_client
+        client = make_langfuse_client()
+        client.record_feedback(
+            session_id=session_id,
+            score=body.score,
+            comment=body.comment,
+            trace_id=session_id,
+        )
+    except Exception as exc:
+        log.warning("feedback_langfuse_failed", error=str(exc))
+
+    return {"status": "ok", "session_id": session_id}
+
