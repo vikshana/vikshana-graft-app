@@ -8,6 +8,7 @@ import type { BadgeColor } from '@grafana/ui';
 import { listSessions } from '../services/sessionApi';
 import { prefixRoute } from '../utils/utils.routing';
 import { ROUTES } from '../constants';
+import { PageHeader } from '../components/common/PageHeader';
 import type { SessionListItem } from '../types/session.types';
 
 const STATUS_COLORS: Record<string, BadgeColor> = {
@@ -65,9 +66,7 @@ export function SessionList() {
 
   return (
     <div className={styles.container}>
-      <div className={styles.header}>
-        <h1 className={styles.title}>Sessions</h1>
-      </div>
+      <PageHeader title="Sessions" backTo=".." />
       {loading && <LoadingBar width={400} />}
       {error && (
         <Alert severity="error" title="Failed to load sessions">
@@ -139,22 +138,6 @@ const getStyles = (theme: GrafanaTheme2) => ({
     display: flex;
     flex-direction: column;
     height: 100%;
-  `,
-  header: css`
-    display: flex;
-    align-items: center;
-    padding: ${theme.spacing(2)};
-    border-bottom: 1px solid ${theme.colors.border.weak};
-    background: ${theme.colors.background.primary};
-    position: sticky;
-    top: 40px;
-    z-index: 10;
-  `,
-  title: css`
-    font-size: ${theme.typography.h4.fontSize};
-    font-weight: ${theme.typography.fontWeightMedium};
-    color: ${theme.colors.text.primary};
-    margin: 0;
   `,
   content: css`
     padding: ${theme.spacing(2)};
