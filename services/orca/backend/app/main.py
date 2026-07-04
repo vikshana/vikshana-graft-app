@@ -4,6 +4,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import structlog
 from fastapi import FastAPI
@@ -16,8 +17,9 @@ from app.logging import configure_logging
 
 logger = structlog.get_logger()
 
-# Background task handle — kept to allow clean cancellation on shutdown
+# Background task handles — kept to allow clean cancellation on shutdown
 _worker_task: asyncio.Task | None = None
+_slack_handler: Any | None = None
 
 
 @asynccontextmanager
@@ -38,7 +40,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Args:
         app: The FastAPI application instance.
     """
-    global _worker_task  # noqa: PLW0603
+    global _worker_task, _slack_handler  # noqa: PLW0603
 
     configure_logging()
     log = structlog.get_logger()
@@ -130,8 +132,50 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         log.warning("turn_worker_start_failed", error=str(exc))
 
+    # ── Slack Socket Mode handler (Phase 3) ───────────────────────────────
+    # Only started when SLACK_APP_TOKEN is configured — safe to skip in CI.
+    if settings.SLACK_APP_TOKEN:
+        try:
+            # Import through harness.slack (not harness.slack.app) so the package
+            # __init__.py runs register_handlers() before the Socket Mode handler starts.
+            from harness.slack import create_socket_mode_handler
+            _slack_handler = create_socket_mode_handler()
+            asyncio.create_task(_slack_handler.start_async(), name="slack_socket_mode")
+            log.info("slack_socket_mode_started")
+        except Exception as exc:
+            log.warning("slack_socket_mode_start_failed", error=str(exc))
+
+    # ── AutoTriageService singleton (Phase 3) ─────────────────────────────
+    try:
+        from harness.triage.auto_triage import AutoTriageService
+        from harness.triage.circuit_breaker import CircuitBreaker
+        from harness.triage.dedup_adapter import OrcaDedupAdapter
+
+        _auto_triage_service = AutoTriageService(
+            dedup=OrcaDedupAdapter(),
+            max_concurrent=settings.ALERT_TRIAGE_MAX_CONCURRENT,
+            breaker=CircuitBreaker(
+                threshold=settings.ALERT_TRIAGE_CIRCUIT_BREAKER_THRESHOLD,
+                timeout_s=settings.ALERT_TRIAGE_CIRCUIT_BREAKER_TIMEOUT_S,
+                name="alert_triage",
+            ),
+        )
+        # Make available to the webhooks router via app state
+        app.state.auto_triage = _auto_triage_service
+        log.info("auto_triage_service_ready")
+    except Exception as exc:
+        log.warning("auto_triage_service_init_failed", error=str(exc))
+
     log.info("orca_ready")
     yield
+
+    # Cleanup
+    if _slack_handler is not None:
+        try:
+            await _slack_handler.close_async()
+            log.info("slack_socket_mode_stopped")
+        except Exception as exc:
+            log.warning("slack_socket_mode_stop_failed", error=str(exc))
 
     # Cleanup
     if _worker_task is not None and not _worker_task.done():
@@ -186,10 +230,12 @@ def create_app() -> FastAPI:
     from app.api.webhooks import router as webhooks_router
     from app.api.rca import router as rca_router
     from app.api.rca_sessions import router as rca_sessions_router
+    from app.api.identity import router as identity_router
 
     app.include_router(webhooks_router, tags=["webhooks"])
     app.include_router(rca_router, prefix="/api", tags=["rca"])
     app.include_router(rca_sessions_router, prefix="/api", tags=["rca-sessions"])
+    app.include_router(identity_router, prefix="/api", tags=["identity"])
 
     @app.get("/health", tags=["health"])
     async def health_check() -> dict[str, str]:

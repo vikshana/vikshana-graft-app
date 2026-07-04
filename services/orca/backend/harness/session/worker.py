@@ -32,7 +32,6 @@ import socket
 import uuid
 from datetime import datetime, timezone
 from typing import Any
-
 import structlog
 from sqlalchemy import text
 
@@ -70,6 +69,7 @@ class TurnWorker:
         self._worker_id = worker_id
         self._stop_event = stop_event or asyncio.Event()
         self._processed = 0
+        self._slack_notifier: Any | None = None  # lazily initialised, reused across turns
 
     async def run_loop(self) -> None:
         """Main poll loop — runs until the stop event is set.
@@ -186,12 +186,24 @@ class TurnWorker:
             # Resuming an interrupted graph (e.g. after await_input)
             from langgraph.types import Command
             command = Command(resume=resume_command)
-            await graph.ainvoke(command, config=config)
+            turn_result = await graph.ainvoke(command, config=config)
         else:
             # Fresh invocation
-            await graph.ainvoke(turn_input, config=config)
+            turn_result = await graph.ainvoke(turn_input, config=config)
 
         log.info("turn_executed")
+
+        # Best-effort Slack notification — failures are swallowed inside the notifier.
+        # Notifier is cached on self to avoid creating a new AsyncWebClient each turn.
+        try:
+            from app.config import settings
+            if settings.SLACK_BOT_TOKEN:
+                if self._slack_notifier is None:
+                    from harness.slack.notifier import SlackNotifier
+                    self._slack_notifier = SlackNotifier()
+                await self._slack_notifier.post_turn_result(session_id, payload, turn_result=turn_result)
+        except Exception as _slack_exc:
+            log.debug("slack_notifier_skipped", error=str(_slack_exc))
 
     async def _mark_job(self, job_id: str, status: str) -> None:
         """Update a job's status to ``done`` or ``failed``.

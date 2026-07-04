@@ -32,6 +32,13 @@ class Settings(BaseSettings):
         LANGFUSE_PUBLIC_KEY: Langfuse project public key for eval tracking.
         LANGFUSE_SECRET_KEY: Langfuse project secret key.
         LANGFUSE_HOST: Langfuse server URL (default: cloud; override for self-hosted).
+        SLACK_BOT_TOKEN: Slack OAuth bot token (xoxb-...) for Bolt interactions.
+        SLACK_APP_TOKEN: Slack app-level token (xapp-...) for Socket Mode.
+        SLACK_SIGNING_SECRET: Slack signing secret for HTTP-mode request verification.
+        IDENTITY_LINK_STATE_TTL_S: TTL (seconds) for PKCE link-request state records.
+        ALERT_TRIAGE_MAX_CONCURRENT: Max concurrent auto-triage sessions (semaphore cap).
+        ALERT_TRIAGE_CIRCUIT_BREAKER_THRESHOLD: Consecutive failures to open the circuit.
+        ALERT_TRIAGE_CIRCUIT_BREAKER_TIMEOUT_S: Cool-down seconds before half-open probe.
     """
 
     model_config = SettingsConfigDict(
@@ -52,8 +59,24 @@ class Settings(BaseSettings):
     LANGCHAIN_API_KEY: str = ""
     LANGCHAIN_PROJECT: str = "orca-dev"
 
-    # Slack (optional)
+    # -------------------------------------------------------------------------
+    # Slack integration (Phase 3)
+    # -------------------------------------------------------------------------
+    # Incoming webhook URL for simple notifications (legacy; Bolt supersedes this
+    # for interactive flows but it is retained for backward compat).
     SLACK_WEBHOOK_URL: str = ""
+    # OAuth bot token (xoxb-...) — required for Bolt slash commands and posting.
+    SLACK_BOT_TOKEN: str = ""
+    # Socket Mode app-level token (xapp-...) — required for Socket Mode (no public URL).
+    SLACK_APP_TOKEN: str = ""
+    # Signing secret — used to verify HTTP-mode request signatures.
+    SLACK_SIGNING_SECRET: str = ""
+
+    # -------------------------------------------------------------------------
+    # Identity linkage (Phase 3, Task 3.1)
+    # -------------------------------------------------------------------------
+    # TTL for PKCE state stored in identity_link_requests (seconds).
+    IDENTITY_LINK_STATE_TTL_S: int = 600  # 10 minutes
 
     # Grafana
     GRAFANA_URL: str = "http://localhost:3000"
@@ -138,6 +161,16 @@ class Settings(BaseSettings):
 
     # Turn worker poll interval
     TURN_WORKER_POLL_MS: int = 200
+
+    # -------------------------------------------------------------------------
+    # Alert auto-triage (Phase 3, Task 3.3)
+    # -------------------------------------------------------------------------
+    # Maximum number of alert sessions that can be triaged concurrently.
+    ALERT_TRIAGE_MAX_CONCURRENT: int = 10
+    # Number of consecutive datasource-query failures before the circuit opens.
+    ALERT_TRIAGE_CIRCUIT_BREAKER_THRESHOLD: int = 5
+    # Seconds to wait in OPEN state before attempting a half-open probe.
+    ALERT_TRIAGE_CIRCUIT_BREAKER_TIMEOUT_S: int = 60
 
 
 settings = Settings()
