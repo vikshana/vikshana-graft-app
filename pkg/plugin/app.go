@@ -54,6 +54,8 @@ func NewApp(_ context.Context, settings backend.AppInstanceSettings) (instancemg
 
 	mux := http.NewServeMux()
 	app.registerRoutes(mux)
+	// Register session proxy routes (Phase 2) — requires settings for RBAC config.
+	app.registerSessionRoutes(mux, settings)
 	app.CallResourceHandler = httpadapter.New(mux)
 
 	// Get TracerProvider from our custom global store
@@ -294,11 +296,15 @@ func (a *App) handleTools(w http.ResponseWriter, r *http.Request) {
 }
 
 // CallResource intercepts SDK call-resource requests to thread the Grafana org ID
-// into the http.Request context before the mux routes it.  This ensures the RCA
-// proxy Director can read the org ID (from PluginContext, not from the URL/body,
-// so it cannot be spoofed by the browser client).
+// and org role into the http.Request context before the mux routes it.
+// - OrgID from PluginContext is used by both /rca/ and /sessions/ proxies to
+//   inject X-Grafana-Org-Id (not spoofable by browser clients).
+// - OrgRole from PluginContext.User is used by the /sessions/ RBAC middleware.
 func (a *App) CallResource(ctx context.Context, req *backend.CallResourceRequest, sender backend.CallResourceResponseSender) error {
 	ctx = context.WithValue(ctx, orgIDKey{}, req.PluginContext.OrgID)
+	if req.PluginContext.User != nil {
+		ctx = context.WithValue(ctx, orgRoleKey{}, req.PluginContext.User.Role)
+	}
 	return a.CallResourceHandler.CallResource(ctx, req, sender)
 }
 

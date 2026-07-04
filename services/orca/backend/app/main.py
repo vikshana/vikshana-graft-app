@@ -176,6 +176,12 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # HMAC validation middleware for Go gateway → Python service calls.
+    # Applied to /api/sessions/* only; transparent pass-through when
+    # AGENT_INTERNAL_SECRET is not configured (dev mode).
+    from harness.auth.internal_auth import InternalAuthMiddleware
+    app.add_middleware(InternalAuthMiddleware)
+
     # Register routers
     from app.api.webhooks import router as webhooks_router
     from app.api.rca import router as rca_router
