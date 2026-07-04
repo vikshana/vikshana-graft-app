@@ -1,5 +1,5 @@
 import React from 'react';
-import { Icon, Spinner, Stack } from '@grafana/ui';
+import { Icon, Spinner } from '@grafana/ui';
 import { css } from '@emotion/css';
 import { useStyles2 } from '@grafana/ui';
 

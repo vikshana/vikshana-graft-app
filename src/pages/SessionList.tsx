@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useStyles2, LoadingBar, Alert, Badge, Button, Stack } from '@grafana/ui';
+import { useStyles2, LoadingBar, Alert, Badge, Button } from '@grafana/ui';
 import { css } from '@emotion/css';
+import type { BadgeColor } from '@grafana/ui';
 
 import { listSessions } from '../services/sessionApi';
 import { prefixRoute } from '../utils/utils.routing';
@@ -9,7 +10,7 @@ import { ROUTES } from '../constants';
 import { PageHeader } from '../components/common/PageHeader';
 import type { SessionListItem } from '../types/session.types';
 
-const STATUS_COLORS: Record<string, 'blue' | 'green' | 'red' | 'orange' | 'gray'> = {
+const STATUS_COLORS: Record<string, BadgeColor> = {
   active: 'blue',
   completed: 'green',
   failed: 'red',
@@ -18,7 +19,7 @@ const STATUS_COLORS: Record<string, 'blue' | 'green' | 'red' | 'orange' | 'gray'
 };
 
 function statusBadge(status: string) {
-  const color = STATUS_COLORS[status] ?? 'gray';
+  const color: BadgeColor = STATUS_COLORS[status] ?? 'darkgrey';
   return <Badge text={status} color={color} />;
 }
 

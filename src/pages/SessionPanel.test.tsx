@@ -45,14 +45,11 @@ function buildSseMockResponse(events: Array<Record<string, unknown>>) {
   const encoded = encoder.encode(body);
 
   // Build a minimal ReadableStream-compatible reader
-  let released = false;
-  let consumed = false;
   const reader = {
     read: jest.fn().mockImplementationOnce(() => {
-      consumed = true;
       return Promise.resolve({ done: false, value: encoded });
     }).mockImplementation(() => Promise.resolve({ done: true, value: undefined })),
-    releaseLock: jest.fn(() => { released = true; }),
+    releaseLock: jest.fn(),
   };
 
   return {

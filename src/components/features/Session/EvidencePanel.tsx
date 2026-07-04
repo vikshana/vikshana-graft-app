@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Spinner, Stack, Button } from '@grafana/ui';
+import { Alert, Spinner, Stack } from '@grafana/ui';
 import { getBackendSrv } from '@grafana/runtime';
 
 import { getDrillDown } from '../../../services/sessionApi';
@@ -170,15 +170,14 @@ export function EvidencePanel({ handle, sessionId }: Props) {
             {result?.queryType}: <code>{result?.expr}</code> ({result?.from} → {result?.to})
           </span>
           {result?.exploreUrl && (
-            <Button
-              size="sm"
-              variant="secondary"
-              icon="compass"
+            <a
               href={result.exploreUrl}
               target="_blank"
+              rel="noreferrer"
+              style={{ fontSize: 12, color: '#6e9fff' }}
             >
-              Open in Explore
-            </Button>
+              Open in Explore ↗
+            </a>
           )}
         </Stack>
         <pre

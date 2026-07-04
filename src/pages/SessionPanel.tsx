@@ -21,14 +21,11 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Alert, Button, LoadingBar, Spinner, Stack, TextArea } from '@grafana/ui';
+import { Alert, Button, LoadingBar, Stack, TextArea } from '@grafana/ui';
 import { useStyles2 } from '@grafana/ui';
-import { contextSrv } from '@grafana/runtime';
 import { css } from '@emotion/css';
 
 import { parseSseChunk, streamSession } from '../services/sessionApi';
-import { prefixRoute } from '../utils/utils.routing';
-import { ROUTES } from '../constants';
 import { PageHeader } from '../components/common/PageHeader';
 import {
   AgentBusyBanner,
@@ -54,7 +51,6 @@ export function SessionPanel() {
   const [status, setStatus] = useState<SessionStatus>('idle');
   const [toolSteps, setToolSteps] = useState<ToolCallStep[]>([]);
   const [hypothesis, setHypothesis] = useState<{ text: string; suggested_questions: string[] } | null>(null);
-  const [confidence, setConfidence] = useState(0);
   const [question, setQuestion] = useState('');
   const [approvalRequest, setApprovalRequest] = useState<AwaitingApprovalEvent | null>(null);
   const [pausedReason, setPausedReason] = useState<PausedReason | null>(null);
@@ -62,7 +58,6 @@ export function SessionPanel() {
   const [busyPosition, setBusyPosition] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [activeDrillDown, setActiveDrillDown] = useState<string | null>(null);
-  const [finalReport, setFinalReport] = useState<Record<string, unknown> | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -120,7 +115,7 @@ export function SessionPanel() {
           break;
         }
         const text = decoder.decode(value);
-        const events = parseSseChunk(text) as SessionStreamEvent[];
+        const events = parseSseChunk(text) as unknown as SessionStreamEvent[];
         for (const event of events) {
           handleEvent(event);
         }
@@ -168,14 +163,12 @@ export function SessionPanel() {
 
       case 'hypothesis':
         setHypothesis(event.hypothesis);
-        setConfidence(event.confidence);
         break;
 
       case 'interrupt':
         if (event.hypothesis) {
           setHypothesis(event.hypothesis);
         }
-        setConfidence(event.confidence);
         setStatus('awaiting_input');
         break;
 
