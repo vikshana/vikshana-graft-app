@@ -2,7 +2,7 @@ import type { ToolExecution } from '../types/llm.types';
 import type { McpClient } from './dashboardChunkedUpdate';
 import { callMcpTool } from './mcpToolClient';
 import { extractDashboardFromGetByUid } from './programmaticDashboardClone';
-import { extractDashboardUidFromMessage } from './dashboardMentionParse';
+import { extractAllDashboardUids, extractDashboardUidFromMessage } from './dashboardMentionParse';
 import { findPanelForRemoval, listDashboardPanels } from './panelDiscovery';
 import { getTurnDashboardBaseline } from './llmDashboardSnapshot';
 import { parsePanelCreateRequest } from './panelCreateParse';
@@ -137,6 +137,18 @@ export async function verifyLlmDashboardSave(
     }
 
     const renameReq = parsePanelRenameRequest(userMessage);
+    const requestedUids = extractAllDashboardUids(userMessage);
+    if (requestedUids.length === 1 && uid && requestedUids[0] !== uid) {
+        return {
+            verified: false,
+            skipped: false,
+            uid,
+            version,
+            detail:
+                `Prompt specified dashboard uid \`${requestedUids[0]}\` but the save targeted \`${uid}\`. ` +
+                'Retry with the programmatic panel-rename fast path or verify the uid in Grafana.',
+        };
+    }
     if (renameReq && renameReq.dashboardUid === uid) {
         const hasNew = currentTitles.some(
             (t) => t.toLowerCase() === renameReq.newPanelTitle.toLowerCase()

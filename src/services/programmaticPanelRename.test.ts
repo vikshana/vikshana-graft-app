@@ -129,4 +129,54 @@ describe('programmaticPanelRename', () => {
         expect(result.clarification).toBe(true);
         expect(result.error).toContain('could not find a matching panel');
     });
+
+    it('renames the data panel when a row header shares the same title', async () => {
+        const skywater = {
+            uid: 'idHkqdqnkmfv',
+            title: '2103-176030 / Skywater-MN Test',
+            version: 3,
+            panels: [
+                { id: 1, title: 'Levels', type: 'row', gridPos: { x: 0, y: 0, w: 24, h: 1 }, panels: [] },
+                { id: 2, title: 'Levels', type: 'timeseries', gridPos: { x: 0, y: 1, w: 12, h: 8 } },
+            ],
+        };
+        let savedPanels: { id?: number; title?: string }[] | undefined;
+        const client = {
+            callTool: jest.fn(async ({ name, arguments: args }: { name: string; arguments: unknown }) => {
+                if (name === 'get_dashboard_by_uid') {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: JSON.stringify({
+                                    dashboard: {
+                                        ...skywater,
+                                        version: savedPanels ? 4 : skywater.version,
+                                        panels: savedPanels ?? skywater.panels,
+                                    },
+                                }),
+                            },
+                        ],
+                    };
+                }
+                if (name === 'update_dashboard') {
+                    savedPanels = (args as { dashboard?: { panels?: { id?: number; title?: string }[] } }).dashboard
+                        ?.panels;
+                    return {
+                        content: [{ type: 'text', text: JSON.stringify({ uid: skywater.uid, version: 4 }) }],
+                    };
+                }
+                throw new Error(`unexpected tool ${name}`);
+            }),
+        };
+        const result = await runProgrammaticPanelRename(client, {
+            currentPanelTitle: 'Levels',
+            newPanelTitle: 'Machine Levels',
+            dashboardUid: 'idHkqdqnkmfv',
+        });
+        expect(result.ok).toBe(true);
+        expect(result.panelId).toBe(2);
+        expect(savedPanels?.find((p) => p.id === 1)?.title).toBe('Levels');
+        expect(savedPanels?.find((p) => p.id === 2)?.title).toBe('Machine Levels');
+    });
 });

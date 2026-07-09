@@ -88,6 +88,39 @@ export function findPanelByStrictTitle(
     return entries.find((e) => normalizePanelTitleForMatch(e.title) === want);
 }
 
+const DATA_PANEL_TYPES = new Set(['timeseries', 'gauge', 'stat', 'barchart', 'table', 'heatmap', 'logs']);
+
+/**
+ * Rename lookup: exact title match, but when a row header and a data panel share the same
+ * title (e.g. "Levels"), prefer the data panel the operator actually charts.
+ */
+export function findPanelForRename(
+    entries: DashboardPanelEntry[],
+    title: string
+): DashboardPanelEntry | undefined {
+    const want = normalizePanelTitleForMatch(title);
+    if (!want) {
+        return undefined;
+    }
+    const matches = entries.filter((e) => normalizePanelTitleForMatch(e.title) === want);
+    if (matches.length === 0) {
+        return undefined;
+    }
+    if (matches.length === 1) {
+        return matches[0];
+    }
+    const nonRows = matches.filter((e) => String(e.panel.type ?? '').toLowerCase() !== 'row');
+    const pool = nonRows.length > 0 ? nonRows : matches;
+    const dataPanels = pool.filter((e) => DATA_PANEL_TYPES.has(String(e.panel.type ?? '').toLowerCase()));
+    if (dataPanels.length === 1) {
+        return dataPanels[0];
+    }
+    if (dataPanels.length > 1) {
+        return dataPanels[0];
+    }
+    return pool[0];
+}
+
 function stripPanelWordSuffix(title: string): string {
     return title.replace(/\s+panel\s*$/i, '').trim();
 }

@@ -33,6 +33,18 @@ describe('panelRenameParse', () => {
         expect(req?.dashboardUid).toBe('abc123xyz');
     });
 
+    it('parses change-the-name phrasing (Skywater Levels → Machine Levels)', () => {
+        const prompt =
+            'Change the name of the "Levels" panel to "Machine Levels" on the dashboard with UID = idHkqdqnkmfv.';
+        const req = parsePanelRenameRequest(prompt);
+        expect(req).not.toBeNull();
+        expect(req?.currentPanelTitle).toBe('Levels');
+        expect(req?.newPanelTitle).toBe('Machine Levels');
+        expect(req?.dashboardUid).toBe('idHkqdqnkmfv');
+        expect(messageDescribesPanelRename(prompt)).toBe(true);
+        expect(userWantsPanelRename(prompt)).toBe(true);
+    });
+
     it('parses rename panel titled phrasing', () => {
         const req = parsePanelRenameRequest(
             'Rename panel titled "Old Name" to "New Name" on dashboard uid=deadbeef01'

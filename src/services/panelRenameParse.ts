@@ -14,6 +14,9 @@ function normalizeMessageQuotes(text: string): string {
 
 function extractCurrentPanelTitle(text: string): string | undefined {
     const patterns = [
+        /\bchange\s+(?:the\s+)?name\s+of\s+(?:the\s+)?"([^"]+)"\s+panel/i,
+        /\bchange\s+(?:the\s+)?name\s+of\s+(?:the\s+)?'([^']+)'\s+panel/i,
+        /\bchange\s+(?:the\s+)?name\s+of\s+(?:the\s+)?([A-Za-z][A-Za-z0-9_ -]{1,80}?)\s+panel\b/i,
         /\brename\s+(?:the\s+)?"([^"]+)"\s+panel/i,
         /\brename\s+(?:the\s+)?'([^']+)'\s+panel/i,
         /\brename\s+(?:the\s+)?panel(?:\s+titled|\s+named|\s+called)?\s+"([^"]+)"/i,
@@ -66,13 +69,15 @@ function extractMachineIdForPanelRename(message: string): string | undefined {
 /** User wants to rename a panel title, not the dashboard title. */
 export function messageDescribesPanelRename(message: string): boolean {
     const text = normalizeMessageQuotes(message.trim());
-    if (!/\brename\b/i.test(text) || !/\bpanel\b/i.test(text)) {
+    const renameVerb =
+        /\brename\b/i.test(text) || /\bchange\s+(?:the\s+)?name\b/i.test(text);
+    if (!renameVerb || !/\bpanel\b/i.test(text)) {
         return false;
     }
     if (/\brename\s+(?:the\s+)?dashboard\b/i.test(text) && !extractCurrentPanelTitle(text)) {
         return false;
     }
-    return Boolean(extractCurrentPanelTitle(text) || /\brename\s+(?:the\s+)?panel\b/i.test(text));
+    return Boolean(extractCurrentPanelTitle(text) || /\b(?:rename|change\s+(?:the\s+)?name)\s+(?:the\s+)?panel\b/i.test(text));
 }
 
 export function parsePanelRenameRequest(message: string): PanelRenameRequest | null {

@@ -6,6 +6,7 @@ import { stampDashboardForOverwrite } from './fluxQueryFix';
 import { normalizeUpdateDashboardArgs } from './updateDashboardArgs';
 import {
     findPanelByStrictTitle,
+    findPanelForRename,
     listDashboardPanels,
     normalizePanelTitleForMatch,
 } from './panelDiscovery';
@@ -131,7 +132,7 @@ export async function runProgrammaticPanelRename(
     const baseline = extracted.dashboard;
     const dashboardTitle = typeof baseline.title === 'string' ? baseline.title : resolved.title;
     const entries = listDashboardPanels(baseline.panels);
-    const panelEntry = findPanelByStrictTitle(entries, request.currentPanelTitle);
+    const panelEntry = findPanelForRename(entries, request.currentPanelTitle);
     if (!panelEntry) {
         return {
             ok: false,
@@ -162,7 +163,10 @@ export async function runProgrammaticPanelRename(
 
     const proposed = JSON.parse(JSON.stringify(baseline)) as Record<string, unknown>;
     const proposedEntries = listDashboardPanels(proposed.panels);
-    const proposedEntry = findPanelByStrictTitle(proposedEntries, request.currentPanelTitle);
+    const proposedEntry =
+        proposedEntries.find(
+            (e) => e.panelId === panelEntry.panelId && e.arrayIndex === panelEntry.arrayIndex
+        ) ?? findPanelForRename(proposedEntries, request.currentPanelTitle);
     if (!proposedEntry) {
         return { ok: false, error: 'Could not locate panel in dashboard copy', toolExecutions, dashboardUid: targetUid };
     }
