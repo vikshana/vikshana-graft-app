@@ -44,7 +44,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     configure_logging()
     log = structlog.get_logger()
-    log.info("orca_starting", version="0.1.0")
+    log.info("orca_starting", version="0.1.0", environment=settings.ENVIRONMENT)
+
+    # Fail fast in production if encryption keys are insecure (empty / dev defaults).
+    secret_errors = settings.validate_production_secrets()
+    if secret_errors:
+        for err in secret_errors:
+            log.error("insecure_production_secret", error=err)
+        raise RuntimeError(
+            "Refusing to start in production with insecure secrets: "
+            + "; ".join(secret_errors)
+        )
 
     # Create all tables and attempt to enable extensions
     async with async_engine.begin() as conn:

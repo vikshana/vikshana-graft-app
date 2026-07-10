@@ -275,6 +275,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Reject tracked Python bytecode
+        run: |
+          tracked_pyc=$(git ls-files | grep -E '(__pycache__/|\.pyc$)' || true)
+          if [ -n "$tracked_pyc" ]; then
+            echo "::error::Committed Python bytecode / __pycache__ artifacts found:"
+            echo "$tracked_pyc"
+            exit 1
+          fi
+          echo "No tracked .pyc / __pycache__ artifacts."
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

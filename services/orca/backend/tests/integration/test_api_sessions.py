@@ -89,14 +89,25 @@ class TestSearchSessions:
 
 
 class TestGetDrillDown:
-    async def test_returns_404_for_unknown_handle(self, client: AsyncClient) -> None:
+    async def test_missing_org_header_returns_400(self, client: AsyncClient) -> None:
         handle = "a" * 64
         resp = await client.get(f"/api/sessions/drill-down/{handle}")
+        assert resp.status_code == 400
+
+    async def test_returns_404_for_unknown_handle(self, client: AsyncClient) -> None:
+        handle = "a" * 64
+        resp = await client.get(
+            f"/api/sessions/drill-down/{handle}",
+            headers={"X-Grafana-Org-Id": "1"},
+        )
         assert resp.status_code == 404
 
     async def test_404_detail_contains_truncated_handle(self, client: AsyncClient) -> None:
         handle = "b" * 64
-        resp = await client.get(f"/api/sessions/drill-down/{handle}")
+        resp = await client.get(
+            f"/api/sessions/drill-down/{handle}",
+            headers={"X-Grafana-Org-Id": "1"},
+        )
         assert "bbbbbbbbbbbbbbbb" in resp.json()["detail"]
 
 
@@ -105,34 +116,76 @@ class TestGetDrillDown:
 # ---------------------------------------------------------------------------
 
 
+async def _seed_session(test_session, org_id: int) -> str:
+    """Insert a minimal rca_sessions row and return its id."""
+    from sqlalchemy import text as _text
+
+    sid = str(uuid.uuid4())
+    await test_session.execute(
+        _text(
+            "INSERT INTO rca_sessions (id, org_id, status, created_at) "
+            "VALUES (:id, :org_id, 'completed', now())"
+        ),
+        {"id": sid, "org_id": org_id},
+    )
+    await test_session.commit()
+    return sid
+
+
 class TestPostSessionFeedback:
-    async def test_thumbs_up_returns_ok(self, client: AsyncClient) -> None:
+    async def test_missing_org_header_returns_400(self, client: AsyncClient) -> None:
+        resp = await client.post(
+            f"/api/sessions/{uuid.uuid4()}/feedback",
+            json={"score": 1.0},
+        )
+        assert resp.status_code == 400
+
+    async def test_unknown_session_returns_404(self, client: AsyncClient) -> None:
+        resp = await client.post(
+            f"/api/sessions/{uuid.uuid4()}/feedback",
+            json={"score": 1.0},
+            headers={"X-Grafana-Org-Id": "1"},
+        )
+        assert resp.status_code == 404
+
+    async def test_owned_session_thumbs_up_returns_ok(
+        self, client: AsyncClient, test_session
+    ) -> None:
+        sid = await _seed_session(test_session, org_id=1)
         with patch("app.api.sessions.make_langfuse_client") as mock_lf:
             mock_lf.return_value = MagicMock()
             resp = await client.post(
-                f"/api/sessions/{uuid.uuid4()}/feedback",
+                f"/api/sessions/{sid}/feedback",
                 json={"score": 1.0, "comment": "Great!"},
+                headers={"X-Grafana-Org-Id": "1"},
             )
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
 
-    async def test_thumbs_down_returns_ok(self, client: AsyncClient) -> None:
-        with patch("app.api.sessions.make_langfuse_client") as mock_lf:
-            mock_lf.return_value = MagicMock()
-            resp = await client.post(
-                f"/api/sessions/{uuid.uuid4()}/feedback",
-                json={"score": 0.0},
-            )
-        assert resp.status_code == 200
+    async def test_cross_org_session_returns_404(
+        self, client: AsyncClient, test_session
+    ) -> None:
+        # Session owned by org 1; caller claims org 2 → must not be found.
+        sid = await _seed_session(test_session, org_id=1)
+        resp = await client.post(
+            f"/api/sessions/{sid}/feedback",
+            json={"score": 0.0},
+            headers={"X-Grafana-Org-Id": "2"},
+        )
+        assert resp.status_code == 404
 
-    async def test_langfuse_failure_does_not_propagate(self, client: AsyncClient) -> None:
+    async def test_langfuse_failure_does_not_propagate(
+        self, client: AsyncClient, test_session
+    ) -> None:
+        sid = await _seed_session(test_session, org_id=1)
         with patch(
             "app.api.sessions.make_langfuse_client",
             side_effect=RuntimeError("langfuse down"),
         ):
             resp = await client.post(
-                f"/api/sessions/{uuid.uuid4()}/feedback",
+                f"/api/sessions/{sid}/feedback",
                 json={"score": 0.5},
+                headers={"X-Grafana-Org-Id": "1"},
             )
         assert resp.status_code == 200
 
@@ -140,5 +193,6 @@ class TestPostSessionFeedback:
         resp = await client.post(
             f"/api/sessions/{uuid.uuid4()}/feedback",
             json={"comment": "missing score"},
+            headers={"X-Grafana-Org-Id": "1"},
         )
         assert resp.status_code == 422

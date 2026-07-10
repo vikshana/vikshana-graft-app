@@ -30,7 +30,7 @@ import asyncio
 import os
 import socket
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 import structlog
 from sqlalchemy import text
@@ -42,6 +42,14 @@ logger = structlog.get_logger()
 
 # Default poll interval when the queue is empty
 _DEFAULT_POLL_MS = int(os.environ.get("TURN_WORKER_POLL_MS", "200"))
+
+# Lease TTL: a claimed job whose claimed_at is older than this is considered
+# orphaned (the claiming worker crashed) and is reset to pending by the reaper.
+_CLAIM_LEASE_TTL_S = int(os.environ.get("TURN_JOB_LEASE_TTL_S", "600"))
+
+# Maximum times a job may be reclaimed after an orphaned lease before it is
+# marked failed to prevent an infinite crash-retry loop.
+_MAX_JOB_ATTEMPTS = int(os.environ.get("TURN_JOB_MAX_ATTEMPTS", "5"))
 
 # Worker identifier (defaults to hostname + pid)
 _WORKER_ID = os.environ.get(
@@ -82,6 +90,7 @@ class TurnWorker:
 
         while not self._stop_event.is_set():
             try:
+                await self._reap_orphaned_jobs()
                 processed = await self._poll_once()
                 if not processed:
                     await asyncio.sleep(self._poll_ms / 1000)
@@ -91,6 +100,63 @@ class TurnWorker:
             except Exception as exc:
                 log.error("turn_worker_unexpected_error", error=str(exc), exc_info=True)
                 await asyncio.sleep(1)
+
+    async def _reap_orphaned_jobs(self) -> int:
+        """Recover jobs orphaned by a crashed worker.
+
+        A job left in ``claimed`` state with a ``claimed_at`` older than the
+        lease TTL means the worker that claimed it died before marking it
+        done/failed. Such jobs are reset to ``pending`` so another worker can
+        retry them, unless they have already been attempted ``_MAX_JOB_ATTEMPTS``
+        times, in which case they are marked ``failed`` to stop a crash-retry
+        loop.
+
+        Returns:
+            Number of jobs transitioned (requeued + failed).
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=_CLAIM_LEASE_TTL_S)
+
+        async with AsyncSessionLocal() as db:
+            # Give up on jobs that have exhausted their attempt budget.
+            failed_result = await db.execute(
+                text("""
+                    UPDATE turn_jobs
+                    SET status = 'failed'
+                    WHERE status = 'claimed'
+                      AND claimed_at < :cutoff
+                      AND attempts >= :max_attempts
+                    RETURNING id
+                """),
+                {"cutoff": cutoff, "max_attempts": _MAX_JOB_ATTEMPTS},
+            )
+            failed_ids = [str(r.id) for r in failed_result.fetchall()]
+
+            # Requeue the rest for another attempt.
+            requeue_result = await db.execute(
+                text("""
+                    UPDATE turn_jobs
+                    SET status = 'pending',
+                        worker_id = NULL,
+                        claimed_at = NULL
+                    WHERE status = 'claimed'
+                      AND claimed_at < :cutoff
+                      AND attempts < :max_attempts
+                    RETURNING id
+                """),
+                {"cutoff": cutoff, "max_attempts": _MAX_JOB_ATTEMPTS},
+            )
+            requeued_ids = [str(r.id) for r in requeue_result.fetchall()]
+            await db.commit()
+
+        if failed_ids or requeued_ids:
+            logger.warning(
+                "turn_jobs_reaped",
+                worker_id=self._worker_id,
+                requeued=len(requeued_ids),
+                failed=len(failed_ids),
+                lease_ttl_s=_CLAIM_LEASE_TTL_S,
+            )
+        return len(failed_ids) + len(requeued_ids)
 
         log.info("turn_worker_stopped", total_processed=self._processed)
 
@@ -107,7 +173,8 @@ class TurnWorker:
                     UPDATE turn_jobs
                     SET status = 'claimed',
                         claimed_at = :now,
-                        worker_id = :worker_id
+                        worker_id = :worker_id,
+                        attempts = attempts + 1
                     WHERE id = (
                         SELECT id FROM turn_jobs
                         WHERE status = 'pending'

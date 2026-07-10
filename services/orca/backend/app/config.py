@@ -178,5 +178,44 @@ class Settings(BaseSettings):
     # Phase 4 — MCP server integration
     MCP_ENCRYPTION_KEY: str = ""  # 32-byte URL-safe base64; empty = no-op (dev only)
 
+    # Deployment environment: "development" | "production".
+    # In production, insecure default/empty encryption keys are rejected at startup.
+    ENVIRONMENT: str = "development"
+
+    # The hardcoded development default for OBO_ENCRYPTION_KEY. Startup validation
+    # rejects this exact value when ENVIRONMENT=production.
+    _INSECURE_OBO_KEY_DEFAULT: str = "devkey00000000000000000000000000"
+
+    def is_production(self) -> bool:
+        """Return True when running in a production deployment."""
+        return self.ENVIRONMENT.strip().lower() == "production"
+
+    def validate_production_secrets(self) -> list[str]:
+        """Return a list of insecure-secret errors for a production deployment.
+
+        Empty list means the configuration is safe. Non-empty means startup
+        should abort. Only enforced when ``is_production()`` is True.
+
+        Returns:
+            List of human-readable error strings.
+        """
+        errors: list[str] = []
+        if not self.is_production():
+            return errors
+
+        if not self.OBO_ENCRYPTION_KEY or self.OBO_ENCRYPTION_KEY == self._INSECURE_OBO_KEY_DEFAULT:
+            errors.append(
+                "OBO_ENCRYPTION_KEY is empty or set to the insecure development default; "
+                "set a real Fernet key in production."
+            )
+        if self.AUTH_ENTRA_OBO_ENABLED and not self.OBO_ENCRYPTION_KEY:
+            errors.append("AUTH_ENTRA_OBO_ENABLED is true but OBO_ENCRYPTION_KEY is empty.")
+        if not self.MCP_ENCRYPTION_KEY:
+            errors.append(
+                "MCP_ENCRYPTION_KEY is empty; MCP bearer tokens would be stored in plaintext. "
+                "Set a 32-byte URL-safe base64 Fernet key in production."
+            )
+        return errors
+
 
 settings = Settings()

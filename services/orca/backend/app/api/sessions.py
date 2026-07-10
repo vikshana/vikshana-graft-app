@@ -249,33 +249,49 @@ async def search_sessions(
 )
 async def get_drill_down(
     handle: str,
-    x_grafana_org_id: str | None = Header(None),  # noqa: ARG001 — reserved for future org scoping
+    x_grafana_org_id: str | None = Header(None),
 ) -> dict[str, Any]:
     """Return the full tool result stored for a drill-down handle.
 
     The frontend EvidencePanel calls this endpoint to retrieve the original
     Grafana query parameters so it can re-execute the query as the viewing user.
 
+    Access is scoped to the caller's org: the drill-down row is joined to its
+    owning ``rca_sessions`` row and only returned when the session's ``org_id``
+    matches the caller. A missing/mismatched org yields 404 (not 403) so a
+    leaked handle cannot be used to confirm existence across orgs.
+
     Args:
         handle: Opaque 64-character SHA-256 handle from a truncated ToolResult.
-        x_grafana_org_id: Grafana org ID (reserved for future org scoping).
+        x_grafana_org_id: Grafana org ID injected by the Go proxy.
 
     Returns:
         Dict with handle, tool_name, full_result, expires_at.
 
     Raises:
-        HTTPException: 404 if handle not found or expired.
+        HTTPException: 400 if the org header is missing/invalid.
+        HTTPException: 404 if handle not found, expired, or not owned by the org.
     """
-    log = logger.bind(handle=handle[:16])
+    org_id = _parse_org_id(x_grafana_org_id)
+    if org_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing or invalid X-Grafana-Org-Id header.",
+        )
+
+    log = logger.bind(handle=handle[:16], org_id=org_id)
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             text(
-                "SELECT tool_name, full_result, expires_at "
-                "FROM drill_down_results "
-                "WHERE handle = :handle AND expires_at > now()"
+                "SELECT d.tool_name, d.full_result, d.expires_at "
+                "FROM drill_down_results d "
+                "JOIN rca_sessions s ON s.id = d.session_id "
+                "WHERE d.handle = :handle "
+                "  AND d.expires_at > now() "
+                "  AND s.org_id = :org_id"
             ),
-            {"handle": handle},
+            {"handle": handle, "org_id": org_id},
         )
         row = result.fetchone()
 
@@ -325,19 +341,48 @@ class FeedbackRequest(BaseModel):
 async def post_session_feedback(
     session_id: str,
     body: FeedbackRequest,
-    x_grafana_org_id: str | None = Header(None),  # noqa: ARG001
+    x_grafana_org_id: str | None = Header(None),
 ) -> dict[str, str]:
     """Record thumbs-up/down feedback for a session and forward to Langfuse.
+
+    Verifies the session belongs to the caller's org before recording, so
+    feedback cannot be written against another org's sessions.
 
     Args:
         session_id: Session or thread ID.
         body: Feedback score and optional comment.
-        x_grafana_org_id: Grafana org ID (reserved).
+        x_grafana_org_id: Grafana org ID injected by the Go proxy.
 
     Returns:
         Confirmation dict with status and session_id.
+
+    Raises:
+        HTTPException: 400 if the org header is missing/invalid.
+        HTTPException: 404 if the session is not owned by the caller's org.
     """
-    log = logger.bind(session_id=session_id, score=body.score)
+    org_id = _parse_org_id(x_grafana_org_id)
+    if org_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing or invalid X-Grafana-Org-Id header.",
+        )
+
+    log = logger.bind(session_id=session_id, score=body.score, org_id=org_id)
+
+    async with AsyncSessionLocal() as db:
+        owned = (
+            await db.execute(
+                text("SELECT 1 FROM rca_sessions WHERE id = :id AND org_id = :org_id"),
+                {"id": session_id, "org_id": org_id},
+            )
+        ).fetchone()
+
+    if owned is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session {session_id} not found.",
+        )
+
     log.info("session_feedback_received")
 
     try:

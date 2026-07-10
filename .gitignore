@@ -6,6 +6,11 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# Python bytecode (guard against force-added artifacts under services/)
+__pycache__/
+*.pyc
+*.pyo
+
 node_modules/
 
 # yarn

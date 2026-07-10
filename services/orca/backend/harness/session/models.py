@@ -210,6 +210,9 @@ class TurnJob(Base):
         sa.DateTime(timezone=True), nullable=True
     )
     worker_id: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
+    attempts: Mapped[int] = mapped_column(
+        sa.Integer, nullable=False, default=0, server_default="0"
+    )
 
     def __repr__(self) -> str:
         return (
