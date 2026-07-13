@@ -1,7 +1,9 @@
 import {
     extractOwnHistoryMetricLabel,
+    messageMentionsOwnHistoryPanel,
     parseAddOwnHistoryPanelRequest,
 } from './ownHistoryPanelParse';
+import { messageDescribesPanelCreate, parsePanelCreateRequest } from './panelCreateParse';
 
 describe('ownHistoryPanelParse — target metric', () => {
     it('extracts a named signal from the prompt', () => {
@@ -42,6 +44,20 @@ describe('ownHistoryPanelParse — target metric', () => {
             'Add a vs. Own History (±2σ) panel on the dashboard with UID = afq7tc6hl1m9sb.'
         );
         expect(req?.moduleNumber).toBe(5);
+        expect(req?.metricLabel).toBeUndefined();
+    });
+
+    const alertTestPrompt =
+        'Create a new time series panel titled "Module 1 Current — Alert Test Own History ±2σ" on the dashboard with UID = afq7tc6hl1m9sb. Create four visible lines: Module 1 Actual = the current value over time Historical Mean = average of Module1_Current_A Upper Bound = Historical Mean + 2 × Standard Deviation Lower Bound = Historical Mean - 2 × Standard Deviation Make sure the Upper Bound and Lower Bound are calculated in the Flux query itself, not only in the legend or panel name.';
+
+    it('parses the Alert Test Own History titled prompt as own-history (not generic panel create)', () => {
+        expect(messageMentionsOwnHistoryPanel(alertTestPrompt)).toBe(true);
+        expect(messageDescribesPanelCreate(alertTestPrompt)).toBe(false);
+        expect(parsePanelCreateRequest(alertTestPrompt)).toBeNull();
+        const req = parseAddOwnHistoryPanelRequest(alertTestPrompt);
+        expect(req?.dashboardUid).toBe('afq7tc6hl1m9sb');
+        expect(req?.moduleNumber).toBe(1);
+        expect(req?.panelTitle).toBe('Module 1 Current — Alert Test Own History ±2σ');
         expect(req?.metricLabel).toBeUndefined();
     });
 });

@@ -21,7 +21,11 @@ export function isPeerRandomForestPanel(title: string): boolean {
 
 /** Statistical own-series mean ± 2σ (not ML, not peer band). */
 export function isOwnHistoryPanel(title: string): boolean {
-    return /vs\.\s*Own\s+History/i.test(title) || /\bOwn\s+History\s*\(\s*±\s*2σ\s*\)/i.test(title);
+    return (
+        /vs\.\s*Own\s+History/i.test(title) ||
+        /\bOwn\s+History\b/i.test(title) ||
+        /\bAlert\s+Test\s+Own\s+History\b/i.test(title)
+    );
 }
 
 /** Own-history title for an arbitrary signal label (e.g. "Pressure", "Module 3 Current"). */

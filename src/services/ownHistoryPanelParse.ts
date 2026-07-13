@@ -11,6 +11,8 @@ export interface AddOwnHistoryPanelRequest {
     moduleNumber?: number;
     /** Set when the target is a non-module signal (e.g. "Pressure"); resolved against the dashboard. */
     metricLabel?: string;
+    /** Explicit quoted/titled panel name from the prompt (overrides canonical title). */
+    panelTitle?: string;
 }
 
 export interface BulkOwnHistoryPanelCopyRequest {
@@ -29,11 +31,47 @@ export function messageMentionsOwnHistoryPanel(message: string): boolean {
     if (!text) {
         return false;
     }
+    if (/\brandomforest\s+vs\s+peers\b/i.test(text) || /\bpeer\s*rf\b/i.test(text)) {
+        return false;
+    }
+    if (/\bvs\.?\s*peer\s*band\b/i.test(text) && !/\bown\s+history\b/i.test(text)) {
+        return false;
+    }
+    const hasTwoSigma =
+        /\b2\s*σ\b/i.test(text) ||
+        /\b±\s*2\s*σ\b/i.test(text) ||
+        /\b2\s*sigma\b/i.test(text) ||
+        /\b2\s*[×x*]\s*standard\s+dev/i.test(text) ||
+        /\bstd(?:ard)?\s*dev(?:iation)?\b/i.test(text);
     return (
         /\bown\s+history\b/i.test(text) ||
-        (/\bvs\.?\s*own\b/i.test(text) && /\b2\s*σ|2\s*sigma|std\s*dev/i.test(text)) ||
-        (/\bstatistical\b/i.test(text) && /\b2\s*σ|std\s*dev/i.test(text) && !/\bpeer\b/i.test(text))
+        (/\bvs\.?\s*own\b/i.test(text) && hasTwoSigma) ||
+        (/\bhistorical\s+mean\b/i.test(text) && hasTwoSigma && !/\bpeer\b/i.test(text)) ||
+        (/\bstatistical\b/i.test(text) && hasTwoSigma && !/\bpeer\b/i.test(text)) ||
+        (/\bupper\s+bound\b/i.test(text) &&
+            /\blower\s+bound\b/i.test(text) &&
+            hasTwoSigma &&
+            !/\bpeer\b/i.test(text) &&
+            !/\brandomforest\b/i.test(text))
     );
+}
+
+/** Quoted / titled panel name from create prompts (smart quotes already normalized). */
+export function extractOwnHistoryPanelTitle(message: string): string | undefined {
+    const text = normalizeMessageQuotes(message.trim());
+    const patterns = [
+        /\b(?:titled|called|named)\s+"([^"]+)"/i,
+        /\b(?:titled|called|named)\s+'([^']+)'/i,
+        /\bpanel\s+(?:titled|called|named)\s+"([^"]+)"/i,
+        /\bpanel\s+(?:titled|called|named)\s+'([^']+)'/i,
+    ];
+    for (const re of patterns) {
+        const m = text.match(re);
+        if (m?.[1]?.trim()) {
+            return m[1].trim();
+        }
+    }
+    return undefined;
 }
 
 /**
@@ -100,10 +138,22 @@ export function parseAddOwnHistoryPanelRequest(message: string): AddOwnHistoryPa
             moduleNumber = 5;
         }
     }
+    // Prefer module number embedded in an explicit panel title (e.g. "Module 1 Current — …").
+    const panelTitle = extractOwnHistoryPanelTitle(text);
+    if (panelTitle) {
+        const titleMod = panelTitle.match(/\bmodule\s*(\d+)\b/i);
+        if (titleMod?.[1]) {
+            const n = parseInt(titleMod[1], 10);
+            if (Number.isFinite(n) && n >= 1 && n <= 8) {
+                moduleNumber = n;
+                metricLabel = undefined;
+            }
+        }
+    }
     if (!dashboardUid && !dashboardTitle && !machineId) {
         return null;
     }
-    return { dashboardUid, dashboardTitle, machineId, moduleNumber, metricLabel };
+    return { dashboardUid, dashboardTitle, machineId, moduleNumber, metricLabel, panelTitle };
 }
 
 export function userWantsBulkOwnHistoryPanelCopy(message: string): boolean {

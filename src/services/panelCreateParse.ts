@@ -1,6 +1,9 @@
 import { extractAllDashboardUids } from './dashboardMentionParse';
 import { findMachineIdsInText, isMachineId, MACHINE_ID_PATTERN } from './dashboardCloneParse';
 import { userWantsDashboardMetricPanels } from './dashboardMetricPanelsParse';
+import { messageMentionsOwnHistoryPanel } from './ownHistoryPanelParse';
+import { messageMentionsAddPeerRfPanel } from './peerRfPanelAddParse';
+import { messageMentionsPredictiveAnalyticsPanel } from './historyComparisonPanelAddParse';
 
 export type PanelCreateType = 'barchart' | 'gauge' | 'stat' | 'timeseries' | 'table';
 
@@ -105,6 +108,15 @@ function extractMachineId(text: string): string | undefined {
 export function messageDescribesPanelCreate(message: string): boolean {
     const text = normalizeMessageQuotes(message.trim());
     if (!text || userWantsDashboardMetricPanels(text)) {
+        return false;
+    }
+    // Own-history / peer-RF / History Comparison need specialized Flux/PromQL builders —
+    // never the generic titled-panel create path (that only builds a single Actual series).
+    if (
+        messageMentionsOwnHistoryPanel(text) ||
+        messageMentionsAddPeerRfPanel(text) ||
+        messageMentionsPredictiveAnalyticsPanel(text)
+    ) {
         return false;
     }
     if (!/\b(create|add|make)\b/i.test(text)) {

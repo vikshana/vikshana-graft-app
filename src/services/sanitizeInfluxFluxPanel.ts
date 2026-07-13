@@ -32,11 +32,20 @@ export function stripFluxLegendSuffix(query: string): string {
     let lines = query.trimEnd().split('\n');
     while (lines.length > 0) {
         const line = lines[lines.length - 1].trim();
-        if (
-            /^\|>\s*keep\s*\(\s*columns:\s*\[[^\]]*"_field"/i.test(line) ||
-            /^\|>\s*map\s*\(/i.test(line) ||
-            /^\|>\s*set\s*\(\s*key:\s*"_field"/i.test(line)
-        ) {
+        if (/^\|>\s*keep\s*\(\s*columns:\s*\[[^\]]*"_field"/i.test(line)) {
+            lines.pop();
+            continue;
+        }
+        if (/^\|>\s*set\s*\(\s*key:\s*"_field"/i.test(line)) {
+            lines.pop();
+            continue;
+        }
+        if (/^\|>\s*map\s*\(/i.test(line)) {
+            // Never strip maps that compute mean ± σ bands — legend repair previously
+            // replaced `r.mean ± (2.0 * r.std)` with passthrough `r._value` and wiped bounds.
+            if (/\br\.mean\b|\br\.std\b|2\.0\s*\*|stddev/i.test(line)) {
+                break;
+            }
             lines.pop();
             continue;
         }

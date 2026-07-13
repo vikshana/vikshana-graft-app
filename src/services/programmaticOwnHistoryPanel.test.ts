@@ -90,4 +90,28 @@ describe('runProgrammaticAddOwnHistoryPanel — target metric', () => {
         const added = capture.saved?.panels?.find((p) => p.title === 'Module 3 Current — vs. Own History (± 2σ)');
         expect(JSON.stringify(added)).toContain('Module3_Current_A');
     });
+
+    it('Alert Test custom title builds four Flux targets with mean ± 2σ in the query', async () => {
+        const capture: { saved?: { panels?: SavedPanel[] } } = {};
+        const customTitle = 'Module 1 Current — Alert Test Own History ±2σ';
+        const result = await runProgrammaticAddOwnHistoryPanel(client(capture), {
+            dashboardUid: 'afq7tc6hl1m9sb',
+            moduleNumber: 1,
+            panelTitle: customTitle,
+        });
+        expect(result.ok).toBe(true);
+        expect(result.panelTitle).toBe(customTitle);
+        const added = capture.saved?.panels?.find((p) => p.title === customTitle);
+        expect(added?.targets).toHaveLength(4);
+        const blob = JSON.stringify(added);
+        expect(blob).toContain('Module1_Current_A');
+        expect(blob).toContain('2505-200033');
+        expect(blob).toContain('stddev');
+        expect(blob).toContain('(2.0 * r.std)');
+        expect(blob).toContain('Upper Bound (±2σ)');
+        expect(blob).toContain('Lower Bound (±2σ)');
+        expect(blob).toContain('Historical Mean');
+        expect(blob).toContain('Module 1 (Actual)');
+        expect(blob).not.toContain('Module5_Current_A');
+    });
 });

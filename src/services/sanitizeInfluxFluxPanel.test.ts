@@ -5,6 +5,7 @@ import {
     hasFrameRefIdLegendOverrides,
     repairInfluxFluxPanel,
     sanitizeInfluxFluxPanel,
+    stripFluxLegendSuffix,
 } from './sanitizeInfluxFluxPanel';
 
 describe('sanitizeInfluxFluxPanel', () => {
@@ -149,5 +150,34 @@ describe('sanitizeInfluxFluxPanel', () => {
         expect(overrides.some((o) => o.matcher.id === 'byFrameRefID' && o.properties.some((p) => p.id === 'displayName'))).toBe(
             true
         );
+    });
+
+    it('does not strip mean ± 2σ map when normalizing legend suffix', () => {
+        const bound =
+            'union(tables: [meanTable, stdTable])\n' +
+            '  |> pivot(rowKey: ["_time"], columnKey: ["stat"], valueColumn: "_value")\n' +
+            '  |> map(fn: (r) => ({ _time: r._time, _value: r.mean + (2.0 * r.std), _field: "Upper Bound (±2σ)" }))\n' +
+            '  |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: "Upper Bound (±2σ)" }))\n' +
+            '  |> keep(columns: ["_time", "_value", "_field"])';
+        const stripped = stripFluxLegendSuffix(bound);
+        expect(stripped).toContain('r.mean + (2.0 * r.std)');
+        expect(stripped).not.toContain('keep(columns');
+
+        const panel = {
+            title: 'Module 1 Current — vs. Own History (± 2σ)',
+            targets: [
+                {
+                    refId: 'C',
+                    legendFormat: 'Upper Bound (±2σ)',
+                    rawQuery: true,
+                    query: bound,
+                },
+            ],
+        };
+        const repaired = repairInfluxFluxPanel(panel);
+        const q = String((repaired.panel.targets as { query: string }[])[0].query);
+        expect(q).toContain('r.mean + (2.0 * r.std)');
+        // Legend remaps may still append, but they must not replace the band math.
+        expect(q.indexOf('r.mean + (2.0 * r.std)')).toBeLessThan(q.lastIndexOf('_field'));
     });
 });
