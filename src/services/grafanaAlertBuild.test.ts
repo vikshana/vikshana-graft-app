@@ -130,12 +130,12 @@ describe('grafanaAlertBuild', () => {
             expect(fluxQueryEmitsFieldLabel(flux)).toBe(false);
             expect(q.model.legendFormat).toBeUndefined();
         }
-        expect(built.data[3].model.type).toBe('reduce');
-        expect(built.data[3].model.expression).toBe('A');
-        expect(built.data[3].model.reducer).toBe('last');
+        expect(built.data[0].relativeTimeRange.from).toBe(86400);
+        expect(built.data[3].datasourceUid).toBe('__expr__');
+        expect(built.data[3].relativeTimeRange.from).toBe(86400);
+        expect(built.data[3].model.settings).toEqual({ mode: '' });
         expect(built.data[6].model.type).toBe('math');
         expect(built.data[0].datasourceUid).toBe('influx-uid');
-        expect(built.data[3].datasourceUid).toBe('-100');
     });
 
     it('matches contact point names case-insensitively', () => {
@@ -170,6 +170,8 @@ describe('grafanaAlertBuild', () => {
             contactPointName: 'Alex Test Email',
         });
         expect(body.for).toBe('1m');
+        expect(body.noDataState).toBe('NoData');
+        expect(body.execErrState).toBe('Alerting');
         expect(body.notification_settings).toEqual({ receiver: 'Alex Test Email' });
         expect((body.annotations as Record<string, string>).__dashboardUid__).toBe('afq7tc6hl1m9sb');
         expect((body.annotations as Record<string, string>).__panelId__).toBe('42');

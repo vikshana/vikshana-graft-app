@@ -26,8 +26,9 @@ export interface ClassifiedBoundTargets {
     lowerRefId: string;
 }
 
-const EXPR_DS_UID = '-100';
-const DEFAULT_LOOKBACK_SEC = 600;
+const EXPR_DS_UID = '__expr__';
+/** Match working Keysight Module 1 alert — ±2σ bands use 1h windows and need ≥24h range. */
+const DEFAULT_LOOKBACK_SEC = 86400;
 
 /**
  * Rewrite panel Flux so Grafana Alerting gets a numeric time series frame.
@@ -57,13 +58,6 @@ export function makeFluxQueryAlertCompatible(query: string): string {
 
     if (!/\|>\s*keep\s*\(\s*columns:\s*\[\s*"_time"\s*,\s*"_value"\s*\]\s*\)\s*$/i.test(q.trimEnd())) {
         q = `${q.trimEnd()}\n  |> keep(columns: ["_time", "_value"])`;
-    }
-    // Single-table series so Reduce(Last) sees one numeric stream.
-    if (!/\|>\s*group\s*\(\s*\)\s*$/im.test(q) && !/\|>\s*group\s*\(\s*\)\s*\n/im.test(q)) {
-        q = q.replace(
-            /\|>\s*keep\s*\(\s*columns:\s*\[\s*"_time"\s*,\s*"_value"\s*\]\s*\)\s*$/i,
-            '|> group()\n  |> keep(columns: ["_time", "_value"])'
-        );
     }
     return q.trimEnd();
 }
@@ -220,11 +214,12 @@ function cloneTargetAsAlertQuery(
     };
 }
 
-function reduceQuery(refId: string, expression: string): ProvisionedAlertQuery {
+function reduceQuery(refId: string, expression: string, lookbackSec: number): ProvisionedAlertQuery {
     return {
         refId,
         queryType: '',
-        relativeTimeRange: { from: 0, to: 0 },
+        // Working Module 1 alert keeps the same lookback on Reduce as the data queries.
+        relativeTimeRange: { from: lookbackSec, to: 0 },
         datasourceUid: EXPR_DS_UID,
         model: {
             refId,
@@ -232,9 +227,9 @@ function reduceQuery(refId: string, expression: string): ProvisionedAlertQuery {
             datasource: { type: '__expr__', uid: EXPR_DS_UID },
             expression,
             reducer: 'last',
+            // Do NOT replace missing with 0 — that falsifies Actual vs band comparisons.
             settings: {
                 mode: '',
-                replaceWithValue: 0,
             },
             hide: false,
             intervalMs: 1000,
@@ -247,7 +242,7 @@ function mathQuery(refId: string, expression: string): ProvisionedAlertQuery {
     return {
         refId,
         queryType: '',
-        relativeTimeRange: { from: 0, to: 0 },
+        relativeTimeRange: { from: 600, to: 0 },
         datasourceUid: EXPR_DS_UID,
         model: {
             refId,
@@ -312,9 +307,9 @@ export function buildBandBreachAlertQueries(
             qA,
             qC,
             qD,
-            reduceQuery('E', 'A'),
-            reduceQuery('F', 'C'),
-            reduceQuery('G', 'D'),
+            reduceQuery('E', 'A', lookback),
+            reduceQuery('F', 'C', lookback),
+            reduceQuery('G', 'D', lookback),
             mathQuery('H', mathExpression),
         ],
     };
@@ -406,8 +401,10 @@ export function buildProvisionedAlertRuleBody(args: {
         uid: args.uid ?? '',
         condition: args.condition,
         data: args.data,
-        noDataState: 'OK',
-        execErrState: 'Error',
+        noDataState: 'NoData',
+        // Match working Module 1 alert — evaluation errors should surface as Alerting so
+        // operators still get notified rather than a silent Error state.
+        execErrState: 'Alerting',
         for: pending,
         annotations: {
             summary: `${args.title}: Actual outside Own History ±2σ band`,

@@ -369,8 +369,8 @@ export function formatGrafanaAlertCreateReply(
             : `- **Contact point:** _(not set — routed by default notification policy)_\n`) +
         `- **Rule group:** \`${result.ruleGroup}\` · folder \`${result.folderUID}\`\n` +
         (result.alertCompatibleQueries
-            ? `- **Alert queries:** rewritten to numeric \`_time\`/\`_value\` series (no output \`_field\` labels)\n`
+            ? `- **Alert queries:** rewritten to numeric \`_time\`/\`_value\` series (24h lookback for ±2σ hourly bands)\n`
             : '') +
-        `\nOpen **Alerts & IRM → Alert rules** → Preview to confirm Reduce/Math evaluate without long-series errors.`
+        `\nOpen **Alerts & IRM → Alert rules** → Preview. Confirm Math \`H\` is \`1\` when Actual is outside the band, then wait ≥ pending period for email.`
     );
 }
