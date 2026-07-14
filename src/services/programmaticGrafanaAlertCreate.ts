@@ -23,6 +23,7 @@ export interface ProgrammaticGrafanaAlertCreateResult {
     /** When create fails, UI steps for manual setup. */
     guidance?: string;
     alreadyExists?: boolean;
+    updated?: boolean;
     ruleUid?: string;
     ruleTitle?: string;
     ruleGroup?: string;
@@ -35,6 +36,8 @@ export interface ProgrammaticGrafanaAlertCreateResult {
     mathExpression?: string;
     evalIntervalSeconds?: number;
     pendingFor?: string;
+    /** True when Flux was rewritten to `_time`/`_value` (no output `_field` labels). */
+    alertCompatibleQueries?: boolean;
 }
 
 function extractErrorMessage(err: unknown): string {
@@ -116,7 +119,30 @@ interface ProvisionedRuleRow {
     title?: string;
     folderUID?: string;
     ruleGroup?: string;
+    annotations?: Record<string, string>;
 }
+
+function findExistingPanelAlertRule(
+    existing: ProvisionedRuleRow[],
+    opts: { ruleTitle: string; ruleGroup: string; folderUID: string; dashboardUid: string; panelId: number }
+): ProvisionedRuleRow | undefined {
+    const byGroup = existing.find(
+        (r) =>
+            (r.title ?? '') === opts.ruleTitle &&
+            (r.folderUID ?? '') === opts.folderUID &&
+            (r.ruleGroup ?? '') === opts.ruleGroup
+    );
+    if (byGroup) {
+        return byGroup;
+    }
+    // Match linked panel even if title/group drifted from an earlier Graft create.
+    return existing.find(
+        (r) =>
+            (r.annotations?.__dashboardUid__ ?? '') === opts.dashboardUid &&
+            (r.annotations?.__panelId__ ?? '') === String(opts.panelId)
+    );
+}
+
 
 /**
  * Create a Grafana-managed alert from an Own History ±2σ panel via the provisioning API.
@@ -219,38 +245,23 @@ export async function runProgrammaticGrafanaAlertCreate(
     const ruleTitle = defaultAlertRuleTitle(hit.title);
     const ruleGroup = defaultAlertRuleGroup(dashboardUid, hit.panelId);
     const evalIntervalSeconds = parseEvalIntervalSeconds(request.every);
+    const orgId = Number(config.bootData?.user?.orgId ?? 1);
 
+    let priorUid: string | undefined;
     try {
         const existing = await grafanaGet<ProvisionedRuleRow[]>('/api/v1/provisioning/alert-rules');
-        const prior = existing.find(
-            (r) =>
-                (r.title ?? '') === ruleTitle &&
-                (r.folderUID ?? '') === resolvedFolder &&
-                (r.ruleGroup ?? '') === ruleGroup
-        );
-        if (prior?.uid) {
-            return {
-                ok: true,
-                alreadyExists: true,
-                ruleUid: prior.uid,
-                ruleTitle,
-                ruleGroup,
-                folderUID: resolvedFolder,
-                contactPoint: contactPointName,
-                dashboardUid,
-                dashboardTitle,
-                panelTitle: hit.title,
-                panelId: hit.panelId,
-                mathExpression: built.mathExpression,
-                evalIntervalSeconds,
-                pendingFor: request.pendingFor ?? '1m',
-            };
-        }
+        const prior = findExistingPanelAlertRule(existing, {
+            ruleTitle,
+            ruleGroup,
+            folderUID: resolvedFolder,
+            dashboardUid,
+            panelId: hit.panelId,
+        });
+        priorUid = prior?.uid;
     } catch {
         // Listing may fail without full read ACL — still try create.
     }
 
-    const orgId = Number(config.bootData?.user?.orgId ?? 1);
     const body = buildProvisionedAlertRuleBody({
         request,
         title: ruleTitle,
@@ -262,16 +273,28 @@ export async function runProgrammaticGrafanaAlertCreate(
         data: built.data,
         condition: built.condition,
         contactPointName,
+        uid: priorUid,
     });
 
-    let created: ProvisionedRuleRow;
+    let saved: ProvisionedRuleRow;
+    let updated = false;
     try {
-        created = await grafanaPost<ProvisionedRuleRow>('/api/v1/provisioning/alert-rules', body);
+        if (priorUid) {
+            saved = await grafanaPut<ProvisionedRuleRow>(
+                `/api/v1/provisioning/alert-rules/${encodeURIComponent(priorUid)}`,
+                body
+            );
+            updated = true;
+        } else {
+            saved = await grafanaPost<ProvisionedRuleRow>('/api/v1/provisioning/alert-rules', body);
+        }
     } catch (err) {
-        return guidanceBase(`Alert rule create failed: ${extractErrorMessage(err)}`);
+        return guidanceBase(
+            `Alert rule ${priorUid ? 'update' : 'create'} failed: ${extractErrorMessage(err)}`
+        );
     }
 
-    // Ensure the new rule group evaluates at the requested interval (default new groups are often 60s).
+    // Ensure the rule group evaluates at the requested interval (default new groups are often 60s).
     try {
         const groupUrl = `/api/v1/provisioning/folder/${encodeURIComponent(resolvedFolder)}/rule-groups/${encodeURIComponent(ruleGroup)}`;
         const group = await grafanaGet<{
@@ -289,12 +312,14 @@ export async function runProgrammaticGrafanaAlertCreate(
             });
         }
     } catch {
-        // Interval update is best-effort; rule create already succeeded.
+        // Interval update is best-effort; rule create/update already succeeded.
     }
 
     return {
         ok: true,
-        ruleUid: created.uid,
+        updated,
+        alreadyExists: updated,
+        ruleUid: saved.uid ?? priorUid,
         ruleTitle,
         ruleGroup,
         folderUID: resolvedFolder,
@@ -306,6 +331,7 @@ export async function runProgrammaticGrafanaAlertCreate(
         mathExpression: built.mathExpression,
         evalIntervalSeconds,
         pendingFor: request.pendingFor ?? '1m',
+        alertCompatibleQueries: true,
     };
 }
 
@@ -320,13 +346,12 @@ export function formatGrafanaAlertCreateReply(
         );
     }
 
-    const existsNote = result.alreadyExists
-        ? `\n\nThis rule already existed — no duplicate was created.`
-        : '';
+    const headline = result.updated
+        ? `### Grafana alert updated (build ${buildNumber})\n\n**Updated** — `
+        : `### Grafana alert created (build ${buildNumber})\n\n**Saved** — `;
 
     return (
-        `### Grafana alert created (build ${buildNumber})\n\n` +
-        (result.alreadyExists ? `**Already present** — ` : `**Saved** — `) +
+        headline +
         `rule **${result.ruleTitle}**` +
         (result.ruleUid ? ` (\`${result.ruleUid}\`)` : '') +
         `.\n\n` +
@@ -343,8 +368,9 @@ export function formatGrafanaAlertCreateReply(
             ? `- **Contact point:** **${result.contactPoint}**\n`
             : `- **Contact point:** _(not set — routed by default notification policy)_\n`) +
         `- **Rule group:** \`${result.ruleGroup}\` · folder \`${result.folderUID}\`\n` +
-        existsNote +
-        `\n\nOpen **Alerts & IRM → Alert rules** to preview/edit. ` +
-        `Hard-refresh the dashboard to see the panel’s linked alert badge.`
+        (result.alertCompatibleQueries
+            ? `- **Alert queries:** rewritten to numeric \`_time\`/\`_value\` series (no output \`_field\` labels)\n`
+            : '') +
+        `\nOpen **Alerts & IRM → Alert rules** → Preview to confirm Reduce/Math evaluate without long-series errors.`
     );
 }

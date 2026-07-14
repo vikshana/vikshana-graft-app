@@ -1,5 +1,6 @@
 import type { GrafanaAlertCreateRequest } from './grafanaAlertParse';
-import { getPanelTargetList } from './fluxPeerBandFix';
+import { getPanelTargetList, targetQueryText } from './fluxPeerBandFix';
+import { stripFluxLegendSuffix } from './sanitizeInfluxFluxPanel';
 
 type PanelRecord = Record<string, unknown>;
 
@@ -27,6 +28,62 @@ export interface ClassifiedBoundTargets {
 
 const EXPR_DS_UID = '-100';
 const DEFAULT_LOOKBACK_SEC = 600;
+
+/**
+ * Rewrite panel Flux so Grafana Alerting gets a numeric time series frame.
+ * Panel legends intentionally emit `_field` labels (long format); Reduce/Math then fail.
+ * Keep Influx selection filters like `r._field == "Module2_Current_A"`, but never yield
+ * `_field` as an output column — only `_time` + `_value`.
+ */
+export function makeFluxQueryAlertCompatible(query: string): string {
+    let q = stripFluxLegendSuffix(query.trim());
+    if (!q) {
+        return q;
+    }
+
+    // Drop legend/label `_field` from object-literal maps (incl. mean±2σ band maps).
+    q = q.replace(
+        /map\s*\(\s*fn:\s*\(\s*r\s*\)\s*=>\s*\(\s*\{\s*_time:\s*r\._time\s*,\s*_value:\s*([^,}]+?)\s*,\s*_field:\s*"[^"]*"\s*\}\s*\)\s*\)/gi,
+        (_m, valueExpr: string) => `map(fn: (r) => ({ _time: r._time, _value: ${valueExpr.trim()} }))`
+    );
+    // Drop `r with _field: "..."` style maps.
+    q = q.replace(/\n?\s*\|>\s*map\s*\(\s*fn:\s*\(\s*r\s*\)\s*=>\s*\(\s*\{\s*r\s+with\s+_field:\s*"[^"]*"\s*\}\s*\)\s*\)/gi, '');
+    q = q.replace(/\n?\s*\|>\s*set\s*\(\s*key:\s*"_field"\s*,\s*value:\s*"[^"]*"\s*\)/gi, '');
+    // Any keep that still retains `_field` → time/value only.
+    q = q.replace(
+        /\|>\s*keep\s*\(\s*columns:\s*\[[^\]]*"_field"[^\]]*\]\s*\)/gi,
+        '|> keep(columns: ["_time", "_value"])'
+    );
+
+    if (!/\|>\s*keep\s*\(\s*columns:\s*\[\s*"_time"\s*,\s*"_value"\s*\]\s*\)\s*$/i.test(q.trimEnd())) {
+        q = `${q.trimEnd()}\n  |> keep(columns: ["_time", "_value"])`;
+    }
+    // Single-table series so Reduce(Last) sees one numeric stream.
+    if (!/\|>\s*group\s*\(\s*\)\s*$/im.test(q) && !/\|>\s*group\s*\(\s*\)\s*\n/im.test(q)) {
+        q = q.replace(
+            /\|>\s*keep\s*\(\s*columns:\s*\[\s*"_time"\s*,\s*"_value"\s*\]\s*\)\s*$/i,
+            '|> group()\n  |> keep(columns: ["_time", "_value"])'
+        );
+    }
+    return q.trimEnd();
+}
+
+/** True when a Flux string still yields `_field` as an output/legend column (bad for alerts). */
+export function fluxQueryEmitsFieldLabel(query: string): boolean {
+    if (/\|>\s*keep\s*\(\s*columns:\s*\[[^\]]*"_field"/i.test(query)) {
+        return true;
+    }
+    if (/map\s*\([^)]*_field:\s*"/i.test(query)) {
+        return true;
+    }
+    if (/\|>\s*set\s*\(\s*key:\s*"_field"/i.test(query)) {
+        return true;
+    }
+    if (/\{\s*r\s+with\s+_field:/i.test(query)) {
+        return true;
+    }
+    return false;
+}
 
 function datasourceUidOf(value: unknown): string | undefined {
     if (value && typeof value === 'object' && 'uid' in (value as Record<string, unknown>)) {
@@ -131,8 +188,18 @@ function cloneTargetAsAlertQuery(
     }
 
     const model: Record<string, unknown> = { ...target, refId };
-    // Alert engine wants flat model fields; keep rawQuery as boolean for Influx.
-    if (typeof model.rawQuery !== 'boolean' && typeof model.query === 'string') {
+    const originalQuery = targetQueryText(target);
+    if (/\bfrom\s*\(\s*bucket:/i.test(originalQuery)) {
+        const alertQuery = makeFluxQueryAlertCompatible(originalQuery);
+        model.query = alertQuery;
+        model.rawQuery = true;
+        model.editorMode = 'code';
+        // Panel legendFormat is useless once `_field` labels are stripped for alerting.
+        delete model.legendFormat;
+        if ('expr' in model) {
+            delete model.expr;
+        }
+    } else if (typeof model.rawQuery !== 'boolean' && typeof model.query === 'string') {
         model.rawQuery = true;
     }
     delete model.datasource;
@@ -226,6 +293,17 @@ export function buildBandBreachAlertQueries(
         return { error: 'Panel queries are missing a datasource uid (Influx/Prometheus).' };
     }
 
+    for (const q of [qA, qC, qD]) {
+        const flux = typeof q.model.query === 'string' ? q.model.query : '';
+        if (flux && fluxQueryEmitsFieldLabel(flux)) {
+            return {
+                error:
+                    'Alert Flux still emits `_field` labels after rewrite. ' +
+                    'Expected keep(columns: ["_time", "_value"]) only — please report this panel query to Graft.',
+            };
+        }
+    }
+
     const mathExpression = '$E > $F || $E < $G';
     return {
         condition: 'H',
@@ -316,6 +394,8 @@ export function buildProvisionedAlertRuleBody(args: {
     data: ProvisionedAlertQuery[];
     condition: string;
     contactPointName?: string;
+    /** When set, this body is for PUT update of an existing rule. */
+    uid?: string;
 }): Record<string, unknown> {
     const pending = normalizePendingFor(args.request.pendingFor);
     const body: Record<string, unknown> = {
@@ -323,7 +403,7 @@ export function buildProvisionedAlertRuleBody(args: {
         ruleGroup: args.ruleGroup,
         folderUID: args.folderUID,
         orgId: args.orgId,
-        uid: '',
+        uid: args.uid ?? '',
         condition: args.condition,
         data: args.data,
         noDataState: 'OK',
@@ -333,6 +413,7 @@ export function buildProvisionedAlertRuleBody(args: {
             summary: `${args.title}: Actual outside Own History ±2σ band`,
             __dashboardUid__: args.dashboardUid,
             __panelId__: String(args.panelId),
+            graft_alert_format: 'numeric-time-value',
         },
         labels: {
             graft: 'true',
