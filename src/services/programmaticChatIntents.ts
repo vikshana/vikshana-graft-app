@@ -44,6 +44,8 @@ import {
     userWantsDashboardMetricPanels,
 } from './dashboardMetricPanelsParse';
 import { userWantsDashboardReviewOnly } from './dashboardReviewParse';
+import { messageMentionsGrafanaAlertCreate } from './grafanaAlertParse';
+import { messageMentionsGrafanaAlertCreate } from './grafanaAlertParse';
 import {
     messageDescribesBulkGaugePanelRename,
     parseBulkGaugePanelRenameRequest,
@@ -106,6 +108,7 @@ export function messageHasProgrammaticHandler(message: string, contextDashboardU
         userWantsDashboardMetricPanels(text) ||
         parseDashboardMetricPanelsRequest(text) != null ||
         userWantsDashboardReviewOnly(text) ||
+        messageMentionsGrafanaAlertCreate(text) ||
         userWantsDashboardRebuild(text) ||
         parseDashboardRebuildRequest(text) != null ||
         parseAddPeerRfPanelRequest(text) != null ||

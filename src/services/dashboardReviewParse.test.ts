@@ -24,11 +24,11 @@ describe('dashboardReviewParse', () => {
         ).toBe(false);
     });
 
-    it('parses numeric suggestion counts', () => {
-        const req = parseDashboardReviewRequest(
-            'Review dashboard uid=cfo0wckufbdhce and suggest 5 improvements for readability'
-        );
-        expect(req?.suggestionCount).toBe(5);
+    it('does not match alert create prompts that only say Evaluate every minute', () => {
+        const alertRule =
+            'Create a Grafana-managed alert rule for the panel titled "Module 2 Current — Alert Test Own History ±2σ" on the dashboard with UID = afq7tc6hl1m9sb. Evaluate every minute. Require the condition to be true for one minute. Send notifications to Alex Test Email.';
+        expect(userWantsDashboardReviewOnly(alertRule)).toBe(false);
+        expect(parseDashboardReviewRequest(alertRule)).toBeNull();
     });
 });
 

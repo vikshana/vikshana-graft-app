@@ -117,6 +117,14 @@ import {
   parseModuleMlGuidanceContext,
 } from '../../../services/moduleMlPanelGuidance';
 import {
+  formatGrafanaAlertGuidanceReply,
+  parseGrafanaAlertCreateRequest,
+} from '../../../services/grafanaAlertParse';
+import {
+  formatGrafanaAlertGuidanceReply,
+  parseGrafanaAlertCreateRequest,
+} from '../../../services/grafanaAlertParse';
+import {
   formatAddPeerRfPanelReply,
   runProgrammaticAddPeerRfPanel,
 } from '../../../services/programmaticAddPeerRfPanel';
@@ -1614,6 +1622,61 @@ export const ChatInterface = () => {
           setCurrentSessionId(savedSession.id);
           currentSessionIdRef.current = savedSession.id;
           replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      // Grafana alert create — MCP allowlist excludes alerting tools, so return UI steps
+      // before own-history / dashboard-review can mis-route (panel title "Own History", "evaluate every").
+      const grafanaAlertRequest = parseGrafanaAlertCreateRequest(content);
+      if (grafanaAlertRequest) {
+        errorPathTag = 'grafana-alert-guidance';
+        finalContent = formatGrafanaAlertGuidanceReply(grafanaAlertRequest, GRAFT_BUILD_NUMBER);
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const alertGuidanceMessage: Message = { role: 'assistant', content: finalContent };
+        const alertGuidanceSession = chatHistoryService.saveSession(
+          [...newMessages, alertGuidanceMessage],
+          currentSessionId
+        );
+        if (alertGuidanceSession) {
+          setCurrentSessionId(alertGuidanceSession.id);
+          currentSessionIdRef.current = alertGuidanceSession.id;
+          replaceChatSessionInUrl(alertGuidanceSession.id);
+        }
+        return;
+      }
+
+      // Grafana Alerting is not in Graft's MCP allowlist — reply with UI steps before
+      // own-history / dashboard-review can misroute prompts that mention "Own History"
+      // or "Evaluate every minute".
+      const grafanaAlertCreateRequest = parseGrafanaAlertCreateRequest(content);
+      if (grafanaAlertCreateRequest) {
+        errorPathTag = 'grafana-alert-guidance';
+        finalContent = formatGrafanaAlertGuidanceReply(grafanaAlertCreateRequest, GRAFT_BUILD_NUMBER);
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const alertGuidanceMessage: Message = { role: 'assistant', content: finalContent };
+        const alertGuidanceSession = chatHistoryService.saveSession(
+          [...newMessages, alertGuidanceMessage],
+          currentSessionId
+        );
+        if (alertGuidanceSession) {
+          setCurrentSessionId(alertGuidanceSession.id);
+          currentSessionIdRef.current = alertGuidanceSession.id;
+          replaceChatSessionInUrl(alertGuidanceSession.id);
         }
         return;
       }

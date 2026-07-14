@@ -2,6 +2,7 @@ import { extractAllDashboardUids, extractDashboardUidFromMessage } from './dashb
 import { extractRequestedDashboardTitle, findMachineIdsInText } from './dashboardCloneParse';
 import { extractOnDashboardMachineTitle } from './modulePanelReorderParse';
 import { canonicalOwnHistoryTitle } from './modulePanelTitles';
+import { messageMentionsGrafanaAlertCreate } from './grafanaAlertParse';
 
 export interface AddOwnHistoryPanelRequest {
     dashboardUid?: string;
@@ -96,6 +97,9 @@ export function extractOwnHistoryMetricLabel(message: string): string | undefine
 
 export function parseAddOwnHistoryPanelRequest(message: string): AddOwnHistoryPanelRequest | null {
     const text = normalizeMessageQuotes(message.trim());
+    if (messageMentionsGrafanaAlertCreate(text)) {
+        return null;
+    }
     if (!messageMentionsOwnHistoryPanel(text)) {
         return null;
     }

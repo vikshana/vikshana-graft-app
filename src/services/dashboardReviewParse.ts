@@ -1,4 +1,5 @@
 import { extractDashboardUidFromMessage, mentionsDashboard } from './dashboardMentionParse';
+import { messageMentionsGrafanaAlertCreate } from './grafanaAlertParse';
 
 export interface DashboardReviewRequest {
     dashboardUid: string;
@@ -36,8 +37,14 @@ export function userWantsDashboardReviewOnly(message: string): boolean {
     if (!text || userWantsDashboardReviewApply(text)) {
         return false;
     }
+    if (messageMentionsGrafanaAlertCreate(text)) {
+        return false;
+    }
 
-    const reviewVerb = /\b(review|analyze|analyse|audit|assess|inspect|evaluate)\b/i.test(text);
+    // Do not treat alert "evaluate every minute" as a dashboard review/audit.
+    const reviewVerb =
+        /\b(review|analyze|analyse|audit|assess|inspect)\b/i.test(text) ||
+        (/\bevaluate\b/i.test(text) && !/\bevaluate\s+every\b/i.test(text));
     const suggestVerb =
         /\b(suggest|recommend|propose|ideas?)\b/i.test(text) &&
         /\b(improvement|readability|layout|organiz|organis|hierarchy|clean\s*up)\b/i.test(text);
