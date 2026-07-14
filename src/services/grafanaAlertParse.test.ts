@@ -54,14 +54,16 @@ describe('grafanaAlertParse', () => {
     it('formats guidance that names the contact point and Reduce/Math steps', () => {
         const reply = formatGrafanaAlertGuidanceReply(
             parseGrafanaAlertCreateRequest(MANAGED_RULE_PROMPT)!,
-            186
+            186,
+            'contact point missing'
         );
         expect(reply).toContain('Grafana alerts — how to create this (build 186)');
+        expect(reply).toContain('Automatic create failed');
         expect(reply).toContain('Alex Test Email');
         expect(reply).toContain('Module 2 Current — Alert Test Own History ±2σ');
         expect(reply).toContain('afq7tc6hl1m9sb');
         expect(reply).toContain('Reduce');
-        expect(reply).toContain('$B > $E || $B < $F');
+        expect(reply).toContain('$E > $F || $E < $G');
         expect(reply).toContain('1m');
     });
 });

@@ -116,14 +116,11 @@ import {
   messageRequestsMlPanelGuidance,
   parseModuleMlGuidanceContext,
 } from '../../../services/moduleMlPanelGuidance';
+import { parseGrafanaAlertCreateRequest } from '../../../services/grafanaAlertParse';
 import {
-  formatGrafanaAlertGuidanceReply,
-  parseGrafanaAlertCreateRequest,
-} from '../../../services/grafanaAlertParse';
-import {
-  formatGrafanaAlertGuidanceReply,
-  parseGrafanaAlertCreateRequest,
-} from '../../../services/grafanaAlertParse';
+  formatGrafanaAlertCreateReply,
+  runProgrammaticGrafanaAlertCreate,
+} from '../../../services/programmaticGrafanaAlertCreate';
 import {
   formatAddPeerRfPanelReply,
   runProgrammaticAddPeerRfPanel,
@@ -1626,40 +1623,25 @@ export const ChatInterface = () => {
         return;
       }
 
-      // Grafana alert create — MCP allowlist excludes alerting tools, so return UI steps
-      // before own-history / dashboard-review can mis-route (panel title "Own History", "evaluate every").
-      const grafanaAlertRequest = parseGrafanaAlertCreateRequest(content);
-      if (grafanaAlertRequest) {
-        errorPathTag = 'grafana-alert-guidance';
-        finalContent = formatGrafanaAlertGuidanceReply(grafanaAlertRequest, GRAFT_BUILD_NUMBER);
-        setMessages((prev) => {
-          const updated = [...prev];
-          const last = updated[updated.length - 1];
-          if (last?.role === 'assistant') {
-            updated[updated.length - 1] = { ...last, content: finalContent };
-          }
-          return updated;
-        });
-        const alertGuidanceMessage: Message = { role: 'assistant', content: finalContent };
-        const alertGuidanceSession = chatHistoryService.saveSession(
-          [...newMessages, alertGuidanceMessage],
-          currentSessionId
-        );
-        if (alertGuidanceSession) {
-          setCurrentSessionId(alertGuidanceSession.id);
-          currentSessionIdRef.current = alertGuidanceSession.id;
-          replaceChatSessionInUrl(alertGuidanceSession.id);
-        }
-        return;
-      }
-
-      // Grafana Alerting is not in Graft's MCP allowlist — reply with UI steps before
-      // own-history / dashboard-review can misroute prompts that mention "Own History"
-      // or "Evaluate every minute".
+      // Grafana-managed alert create via provisioning API (getBackendSrv), before
+      // own-history / dashboard-review can mis-route ("Own History" title, "evaluate every").
       const grafanaAlertCreateRequest = parseGrafanaAlertCreateRequest(content);
       if (grafanaAlertCreateRequest) {
-        errorPathTag = 'grafana-alert-guidance';
-        finalContent = formatGrafanaAlertGuidanceReply(grafanaAlertCreateRequest, GRAFT_BUILD_NUMBER);
+        errorPathTag = 'grafana-alert-create';
+        const alertResult = await runProgrammaticGrafanaAlertCreate(
+          grafanaAlertCreateRequest,
+          GRAFT_BUILD_NUMBER
+        );
+        finalContent = formatGrafanaAlertCreateReply(alertResult, GRAFT_BUILD_NUMBER);
+        if (!alertResult.ok) {
+          recordGraftFailure({
+            buildNumber: GRAFT_BUILD_NUMBER,
+            intent: 'grafana-alert-create',
+            userMessagePreview: content,
+            error: alertResult.error ?? 'Unknown error',
+            dashboardTitle: alertResult.dashboardTitle,
+          });
+        }
         setMessages((prev) => {
           const updated = [...prev];
           const last = updated[updated.length - 1];
@@ -1668,15 +1650,15 @@ export const ChatInterface = () => {
           }
           return updated;
         });
-        const alertGuidanceMessage: Message = { role: 'assistant', content: finalContent };
-        const alertGuidanceSession = chatHistoryService.saveSession(
-          [...newMessages, alertGuidanceMessage],
+        const alertMessage: Message = { role: 'assistant', content: finalContent };
+        const alertSession = chatHistoryService.saveSession(
+          [...newMessages, alertMessage],
           currentSessionId
         );
-        if (alertGuidanceSession) {
-          setCurrentSessionId(alertGuidanceSession.id);
-          currentSessionIdRef.current = alertGuidanceSession.id;
-          replaceChatSessionInUrl(alertGuidanceSession.id);
+        if (alertSession) {
+          setCurrentSessionId(alertSession.id);
+          currentSessionIdRef.current = alertSession.id;
+          replaceChatSessionInUrl(alertSession.id);
         }
         return;
       }

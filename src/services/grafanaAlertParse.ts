@@ -113,12 +113,13 @@ export function parseGrafanaAlertCreateRequest(message: string): GrafanaAlertCre
 }
 
 /**
- * Graft's MCP allowlist excludes alerting tools (toolFilter.ts), so we cannot create
- * alert rules through MCP yet. Give operators clear Grafana UI steps tailored to the prompt.
+ * Manual UI fallback when provisioning API create fails (permissions, missing
+ * contact point, General folder, etc.).
  */
 export function formatGrafanaAlertGuidanceReply(
     request: GrafanaAlertCreateRequest,
-    buildNumber: number
+    buildNumber: number,
+    apiError?: string
 ): string {
     const panel = request.panelTitle ?? 'your panel';
     const dash = request.dashboardUid
@@ -127,12 +128,13 @@ export function formatGrafanaAlertGuidanceReply(
     const contact = request.contactPoint ?? 'your contact point (e.g. Alex Test Email)';
     const every = request.every ?? '1m';
     const pendingFor = request.pendingFor ?? '1m';
+    const errorBlock = apiError
+        ? `**Automatic create failed:** ${apiError}\n\nUse the steps below in the Grafana UI.\n\n`
+        : `Graft tried the provisioning API and could not finish automatically. Use the steps below.\n\n`;
 
     return (
         `### Grafana alerts — how to create this (build ${buildNumber})\n\n` +
-        `Graft can build and edit **dashboards/panels**, but **Grafana Alerting** is not in Graft's MCP tool allowlist yet ` +
-        `(alerting APIs are filtered out to keep chat focused on Prometheus / Loki / dashboards). ` +
-        `Use the steps below in the Grafana UI — they match your prompt.\n\n` +
+        errorBlock +
         `**Goal:** Alert when **${request.conditionSummary}** on panel **${panel}** (${dash}), ` +
         `notify **${contact}**.\n\n` +
         `#### 1. Open a new Grafana-managed alert rule\n` +
@@ -150,9 +152,9 @@ export function formatGrafanaAlertGuidanceReply(
         `   - **D** — Lower Bound (±2σ)\n` +
         `   (Match by legend if refIds differ; you need Actual, Upper, and Lower.)\n` +
         `2. **Add expression → Reduce** three times — Function **Last** — one for Actual, one for Upper, one for Lower\n` +
-        `3. **Add expression → Math** (use the Reduce refIds Grafana shows, example names \`B\`, \`E\`, \`F\`):\n` +
+        `3. **Add expression → Math** (use the Reduce refIds Grafana shows, example names \`E\`, \`F\`, \`G\`):\n` +
         '   ```\n' +
-        '   $B > $E || $B < $F\n' +
+        '   $E > $F || $E < $G\n' +
         '   ```\n' +
         `   Meaning: last(Actual) > last(Upper) **OR** last(Actual) < last(Lower).\n` +
         `4. Click **Set as alert condition** on that Math expression.\n` +
@@ -168,11 +170,6 @@ export function formatGrafanaAlertGuidanceReply(
         `#### 6. Save\n` +
         `1. Pick a folder (Keysight’s folder is fine)\n` +
         `2. **Save rule** → hard-refresh the dashboard and confirm the panel shows a linked alert\n\n` +
-        `**Permissions:** Editor (or Admin) on the alert folder. Viewers cannot create rules.\n\n` +
-        `**API note (for admins):** rules can also be created with \`POST /api/v1/provisioning/alert-rules\` ` +
-        `and contact points via \`GET/POST /api/v1/provisioning/contact-points\` ` +
-        `(header \`X-Disable-Provenance: true\` keeps them UI-editable). Graft does not call those endpoints yet.\n\n` +
-        `**What Graft can still do:** create/repair the Own History ±2σ **panel** and its Flux bands. ` +
-        `Say if you want help verifying the panel queries before you wire the alert.`
+        `**Permissions:** Editor (or Admin) on the alert folder. Viewers cannot create rules.`
     );
 }
