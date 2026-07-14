@@ -51,6 +51,18 @@ describe('grafanaAlertParse', () => {
         expect(messageHasProgrammaticHandler(MANAGED_RULE_PROMPT)).toBe(true);
     });
 
+    const CREATE_CONTACT_POINT_PROMPT =
+        'Create a Grafana-managed alert for the panel titled "Module 1 Current — Alert Test Own History ±2σ" on the dashboard with UID = idHkqdqnk. Configure the alert to trigger when Module 1 Actual is greater than Upper Bound (±2σ) or less than Lower Bound (±2σ). The condition must remain true for longer than 1 minute before the alert fires. Modify the panel queries as needed so they are compatible with Grafana Alerting. The alert queries must return only _time and _value. Do not include _field in the final alert queries. Use Reduce expressions with the Last function for Actual, Upper Bound, and Lower Bound. Then create a Math expression that evaluates: $Actual > $UpperBound || $Actual < $LowerBound. Create a new email contact point named Alex Test Email using this email address: alex.perry@electramet.com. Configure the alert notification policy so this alert sends notifications to the Alex Test Email contact point.';
+
+    it('parses the create-contact-point alert prompt with email + name', () => {
+        const req = parseGrafanaAlertCreateRequest(CREATE_CONTACT_POINT_PROMPT);
+        expect(req?.dashboardUid).toBe('idHkqdqnk');
+        expect(req?.panelTitle).toBe('Module 1 Current — Alert Test Own History ±2σ');
+        expect(req?.contactPoint).toBe('Alex Test Email');
+        expect(req?.contactPointEmail).toBe('alex.perry@electramet.com');
+        expect(req?.createContactPoint).toBe(true);
+    });
+
     it('formats guidance that names the contact point and Reduce/Math steps', () => {
         const reply = formatGrafanaAlertGuidanceReply(
             parseGrafanaAlertCreateRequest(MANAGED_RULE_PROMPT)!,

@@ -45,7 +45,6 @@ import {
 } from './dashboardMetricPanelsParse';
 import { userWantsDashboardReviewOnly } from './dashboardReviewParse';
 import { messageMentionsGrafanaAlertCreate } from './grafanaAlertParse';
-import { messageMentionsGrafanaAlertCreate } from './grafanaAlertParse';
 import {
     messageDescribesBulkGaugePanelRename,
     parseBulkGaugePanelRenameRequest,

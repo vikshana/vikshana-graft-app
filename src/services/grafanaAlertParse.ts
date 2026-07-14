@@ -4,6 +4,10 @@ export interface GrafanaAlertCreateRequest {
     dashboardUid?: string;
     panelTitle?: string;
     contactPoint?: string;
+    /** Email address for an email contact point Graft should create if missing. */
+    contactPointEmail?: string;
+    /** True when the prompt asks Graft to create/add a (new) contact point. */
+    createContactPoint?: boolean;
     /** Evaluation interval, e.g. "1m". */
     every?: string;
     /** Pending duration before firing, e.g. "1m". */
@@ -61,22 +65,53 @@ function extractQuotedPanelTitle(text: string): string | undefined {
     return undefined;
 }
 
+function stripContactName(raw: string): string {
+    return raw
+        .trim()
+        .replace(/^["']|["']$/g, '')
+        .replace(/[.,;:]+$/, '')
+        .trim();
+}
+
 function extractContactPoint(text: string): string | undefined {
+    // "contact point named/called X" (also covers create phrasing).
+    const namedContact = text.match(
+        /\bcontact\s*point\s+(?:named|called)\s+"([^"]+)"/i
+    ) ?? text.match(/\bcontact\s*point\s+(?:named|called)\s+([A-Za-z0-9 ._-]+?)(?=\s+(?:using|with|and|that|to)\b|[.,;:\n]|$)/i);
+    if (namedContact?.[1]?.trim()) {
+        return stripContactName(namedContact[1]);
+    }
+    // "named/called X ... contact point" (name precedes the noun).
+    const createNamed = text.match(
+        /\b(?:named|called)\s+([A-Za-z0-9 ._-]+?)\s+(?:using|with)\b[^\n]*?\bcontact\s*point\b/i
+    );
+    if (createNamed?.[1]?.trim()) {
+        return stripContactName(createNamed[1]);
+    }
     const named = text.match(
         /\b(?:notify|notifications?\s+to)\s+(?:the\s+)?(.+?)\s+contact\s*point\b/i
     );
     if (named?.[1]?.trim()) {
-        return named[1].trim().replace(/^["']|["']$/g, '');
+        return stripContactName(named[1]);
     }
     const sendTo = text.match(/\bSend\s+notifications\s+to\s+([^.!\n]+)/i);
     if (sendTo?.[1]?.trim()) {
-        return sendTo[1].trim().replace(/^["']|["']$/g, '');
+        return stripContactName(sendTo[1]);
     }
     const quoted = text.match(/\bcontact\s*point\s+["']([^"']+)["']/i);
     if (quoted?.[1]?.trim()) {
         return quoted[1].trim();
     }
     return undefined;
+}
+
+function extractContactPointEmail(text: string): string | undefined {
+    const m = text.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
+    return m?.[0];
+}
+
+function messageWantsNewContactPoint(text: string): boolean {
+    return /\b(create|add|make|set\s*up)\b[^.\n]*\b(new\s+)?(email\s+)?contact\s*point\b/i.test(text);
 }
 
 export function parseGrafanaAlertCreateRequest(message: string): GrafanaAlertCreateRequest | null {
@@ -87,6 +122,8 @@ export function parseGrafanaAlertCreateRequest(message: string): GrafanaAlertCre
     const dashboardUid = extractAllDashboardUids(text)[0] ?? extractDashboardUidFromMessage(text);
     const panelTitle = extractQuotedPanelTitle(text);
     const contactPoint = extractContactPoint(text);
+    const contactPointEmail = extractContactPointEmail(text);
+    const createContactPoint = messageWantsNewContactPoint(text);
     const every = /evaluate\s+every\s+minute\b/i.test(text)
         ? '1m'
         : text.match(/\bevaluate\s+every\s+(\d+\s*[smhd])\b/i)?.[1]?.replace(/\s+/g, '').toLowerCase();
@@ -106,6 +143,8 @@ export function parseGrafanaAlertCreateRequest(message: string): GrafanaAlertCre
         dashboardUid,
         panelTitle,
         contactPoint,
+        contactPointEmail,
+        createContactPoint,
         every,
         pendingFor,
         conditionSummary,

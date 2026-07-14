@@ -282,4 +282,100 @@ describe('runProgrammaticGrafanaAlertCreate', () => {
         expect(result.guidance).toContain('Automatic create failed');
         expect(result.guidance).toContain('Ops Email');
     });
+
+    it('creates a new email contact point when missing and email is provided', async () => {
+        const createContactPrompt =
+            'Create a Grafana-managed alert for the panel titled "Module 1 Current — Alert Test Own History ±2σ" on the dashboard with UID = idHkqdqnk. Configure the alert to trigger when Module 1 Actual is greater than Upper Bound (±2σ) or less than Lower Bound (±2σ). The condition must remain true for longer than 1 minute before the alert fires. Use Reduce expressions with the Last function for Actual, Upper Bound, and Lower Bound. Create a new email contact point named Alex Test Email using this email address: alex.perry@electramet.com. Configure the alert notification policy so this alert sends notifications to the Alex Test Email contact point.';
+
+        let contactPointCreatePayload: unknown;
+        mockFetch.mockImplementation((req: { url: string; method?: string; data?: unknown }) => {
+            if (req.url.includes('/api/dashboards/uid/')) {
+                return of({
+                    data: {
+                        meta: { folderUid: 'folder-keysight' },
+                        dashboard: {
+                            title: 'Keysight',
+                            panels: [
+                                {
+                                    id: 1,
+                                    type: 'timeseries',
+                                    title: 'Module 1 Current — Alert Test Own History ±2σ',
+                                    datasource: { uid: 'inf1', type: 'influxdb' },
+                                    targets: [
+                                        {
+                                            refId: 'A',
+                                            datasource: { uid: 'inf1', type: 'influxdb' },
+                                            legendFormat: 'Module 1 (Actual)',
+                                            query:
+                                                'from(bucket: v.bucket)\n' +
+                                                '  |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: "Module 1 (Actual)" }))\n' +
+                                                '  |> keep(columns: ["_time", "_value", "_field"])',
+                                            rawQuery: true,
+                                        },
+                                        {
+                                            refId: 'C',
+                                            datasource: { uid: 'inf1', type: 'influxdb' },
+                                            legendFormat: 'Upper Bound (±2σ)',
+                                            query:
+                                                'from(bucket: v.bucket)\n' +
+                                                '  |> map(fn: (r) => ({ _time: r._time, _value: r.mean + (2.0 * r.std), _field: "Upper" }))\n' +
+                                                '  |> keep(columns: ["_time", "_value", "_field"])',
+                                            rawQuery: true,
+                                        },
+                                        {
+                                            refId: 'D',
+                                            datasource: { uid: 'inf1', type: 'influxdb' },
+                                            legendFormat: 'Lower Bound (±2σ)',
+                                            query:
+                                                'from(bucket: v.bucket)\n' +
+                                                '  |> map(fn: (r) => ({ _time: r._time, _value: r.mean - (2.0 * r.std), _field: "Lower" }))\n' +
+                                                '  |> keep(columns: ["_time", "_value", "_field"])',
+                                            rawQuery: true,
+                                        },
+                                    ],
+                                },
+                            ],
+                        },
+                    },
+                });
+            }
+            if (req.url.includes('/contact-points') && (req.method ?? 'GET') === 'GET') {
+                return of({ data: [{ name: 'Ops Email', type: 'email' }] });
+            }
+            if (req.url.includes('/contact-points') && req.method === 'POST') {
+                contactPointCreatePayload = req.data;
+                return of({ data: { uid: 'cp-new', name: 'Alex Test Email' } });
+            }
+            if (req.url.includes('/alert-rules') && (req.method ?? 'GET') === 'GET') {
+                return of({ data: [] });
+            }
+            if (req.url.includes('/alert-rules') && req.method === 'POST') {
+                const body = req.data as { notification_settings?: { receiver?: string } };
+                expect(body.notification_settings?.receiver).toBe('Alex Test Email');
+                return of({ data: { uid: 'rule-uid-2', title: 'created' } });
+            }
+            if (req.url.includes('/rule-groups/')) {
+                return of({
+                    data: {
+                        title: 'graft-idHkqdqnk-1',
+                        folderUid: 'folder-keysight',
+                        interval: 60,
+                        rules: [],
+                    },
+                });
+            }
+            return throwError(() => new Error(`unexpected url ${req.url} method ${req.method}`));
+        });
+
+        const req = parseGrafanaAlertCreateRequest(createContactPrompt)!;
+        const result = await runProgrammaticGrafanaAlertCreate(req, 190);
+        expect(result.ok).toBe(true);
+        expect(result.contactPoint).toBe('Alex Test Email');
+        expect(result.contactPointCreated).toBe(true);
+        expect(contactPointCreatePayload).toMatchObject({
+            name: 'Alex Test Email',
+            type: 'email',
+            settings: { addresses: 'alex.perry@electramet.com' },
+        });
+    });
 });

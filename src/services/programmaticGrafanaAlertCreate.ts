@@ -29,6 +29,7 @@ export interface ProgrammaticGrafanaAlertCreateResult {
     ruleGroup?: string;
     folderUID?: string;
     contactPoint?: string;
+    contactPointCreated?: boolean;
     dashboardUid?: string;
     dashboardTitle?: string;
     panelTitle?: string;
@@ -120,6 +121,26 @@ interface ProvisionedRuleRow {
     folderUID?: string;
     ruleGroup?: string;
     annotations?: Record<string, string>;
+}
+
+async function createEmailContactPoint(
+    name: string,
+    email: string
+): Promise<{ name: string } | { error: string }> {
+    const body = {
+        name,
+        type: 'email',
+        settings: { addresses: email },
+        disableResolveMessage: false,
+    };
+    try {
+        await grafanaPost('/api/v1/provisioning/contact-points', body);
+        return { name };
+    } catch (err) {
+        return {
+            error: `Could not create email contact point **${name}** (${email}): ${extractErrorMessage(err)}`,
+        };
+    }
 }
 
 function findExistingPanelAlertRule(
@@ -218,11 +239,25 @@ export async function runProgrammaticGrafanaAlertCreate(
     }
 
     let contactPointName: string | undefined;
+    let contactPointCreated = false;
     if (request.contactPoint?.trim()) {
         try {
             const points = await grafanaGet<ContactPointRow[]>('/api/v1/provisioning/contact-points');
             const matched = matchContactPointName(points, request.contactPoint);
-            if (!matched) {
+            if (matched) {
+                contactPointName = matched;
+            } else if (request.contactPointEmail?.trim()) {
+                // Prompt asked to create a new email contact point — provision it now.
+                const created = await createEmailContactPoint(
+                    request.contactPoint.trim(),
+                    request.contactPointEmail.trim()
+                );
+                if ('error' in created) {
+                    return guidanceBase(created.error);
+                }
+                contactPointName = created.name;
+                contactPointCreated = true;
+            } else {
                 const names = points
                     .map((p) => p.name)
                     .filter((n): n is string => Boolean(n))
@@ -230,14 +265,14 @@ export async function runProgrammaticGrafanaAlertCreate(
                 return guidanceBase(
                     `Contact point **${request.contactPoint}** was not found. ` +
                         (names.length
-                            ? `Available: ${names.map((n) => `\`${n}\``).join(', ')}.`
-                            : 'No contact points are configured in this org.')
+                            ? `Available: ${names.map((n) => `\`${n}\``).join(', ')}. `
+                            : 'No contact points are configured in this org. ') +
+                        'Add an email address to the prompt (e.g. `using alex@example.com`) and Graft will create it.'
                 );
             }
-            contactPointName = matched;
         } catch (err) {
             return guidanceBase(
-                `Could not list contact points (need Alerting permissions): ${extractErrorMessage(err)}`
+                `Could not list/create contact points (need Alerting permissions): ${extractErrorMessage(err)}`
             );
         }
     }
@@ -324,6 +359,7 @@ export async function runProgrammaticGrafanaAlertCreate(
         ruleGroup,
         folderUID: resolvedFolder,
         contactPoint: contactPointName,
+        contactPointCreated,
         dashboardUid,
         dashboardTitle,
         panelTitle: hit.title,
@@ -365,7 +401,7 @@ export function formatGrafanaAlertCreateReply(
         `(Last Actual vs Upper/Lower)\n` +
         `- **Evaluate:** every **${result.evalIntervalSeconds ?? 60}s** · pending **${result.pendingFor ?? '1m'}**\n` +
         (result.contactPoint
-            ? `- **Contact point:** **${result.contactPoint}**\n`
+            ? `- **Contact point:** **${result.contactPoint}**${result.contactPointCreated ? ' _(newly created email contact point)_' : ''}\n`
             : `- **Contact point:** _(not set — routed by default notification policy)_\n`) +
         `- **Rule group:** \`${result.ruleGroup}\` · folder \`${result.folderUID}\`\n` +
         (result.alertCompatibleQueries
