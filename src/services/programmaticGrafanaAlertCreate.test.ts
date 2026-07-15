@@ -79,6 +79,10 @@ describe('runProgrammaticGrafanaAlertCreate', () => {
             if (req.url.includes('/contact-points')) {
                 return of({ data: [{ name: 'Alex Test Email', type: 'email', uid: 'cp1' }] });
             }
+            if (/\/alert-rules\/[\w-]+$/.test(req.url) && (req.method ?? 'GET') === 'GET') {
+                const uid = req.url.split('/alert-rules/')[1];
+                return of({ data: { uid, title: 'created', folderUID: 'folder-keysight' } });
+            }
             if (req.url.includes('/alert-rules') && (req.method ?? 'GET') === 'GET') {
                 return of({ data: [] });
             }
@@ -192,6 +196,15 @@ describe('runProgrammaticGrafanaAlertCreate', () => {
                             },
                         },
                     ],
+                });
+            }
+            if (req.url.includes('/alert-rules/efs38ookomvb4b') && (req.method ?? 'GET') === 'GET') {
+                return of({
+                    data: {
+                        uid: 'efs38ookomvb4b',
+                        title: 'Module 2 Current — Alert Test Own History ±2σ — outside ±2σ',
+                        folderUID: 'folder-keysight',
+                    },
                 });
             }
             if (req.url.includes('/alert-rules/efs38ookomvb4b') && req.method === 'PUT') {
@@ -346,6 +359,10 @@ describe('runProgrammaticGrafanaAlertCreate', () => {
                 contactPointCreatePayload = req.data;
                 return of({ data: { uid: 'cp-new', name: 'Alex Test Email' } });
             }
+            if (/\/alert-rules\/[\w-]+$/.test(req.url) && (req.method ?? 'GET') === 'GET') {
+                const uid = req.url.split('/alert-rules/')[1];
+                return of({ data: { uid, title: 'created', folderUID: 'folder-keysight' } });
+            }
             if (req.url.includes('/alert-rules') && (req.method ?? 'GET') === 'GET') {
                 return of({ data: [] });
             }
@@ -459,6 +476,10 @@ describe('runProgrammaticGrafanaAlertCreate', () => {
             if (req.url.includes('/contact-points') && req.method === 'POST') {
                 return of({ data: { uid: 'cp-new', name: 'Alex Test Email' } });
             }
+            if (/\/alert-rules\/[\w-]+$/.test(req.url) && (req.method ?? 'GET') === 'GET') {
+                const uid = req.url.split('/alert-rules/')[1];
+                return of({ data: { uid, title: 'GraftAI Rule', folderUID: 'folder-graftai' } });
+            }
             if (req.url.includes('/alert-rules') && (req.method ?? 'GET') === 'GET') {
                 return of({ data: [] });
             }
@@ -511,5 +532,166 @@ describe('runProgrammaticGrafanaAlertCreate', () => {
             'Custom Annotation Content'
         );
         expect(groupPutPayload?.interval).toBe(300);
+    });
+
+    const skywaterPanelDashboard = {
+        meta: { folderUid: 'folder-skywater', folderTitle: 'Skywater' },
+        dashboard: {
+            title: '2103-176030 / Skywater-MN',
+            panels: [
+                {
+                    id: 105,
+                    type: 'timeseries',
+                    title: 'Module 1 Current — Alert Test Own History ±2σ',
+                    datasource: { uid: 'inf1', type: 'influxdb' },
+                    targets: [
+                        {
+                            refId: 'A',
+                            datasource: { uid: 'inf1', type: 'influxdb' },
+                            legendFormat: 'Module 1 (Actual)',
+                            query:
+                                'from(bucket: v.bucket)\n' +
+                                '  |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: "Module 1 (Actual)" }))\n' +
+                                '  |> keep(columns: ["_time", "_value", "_field"])',
+                            rawQuery: true,
+                        },
+                        {
+                            refId: 'C',
+                            datasource: { uid: 'inf1', type: 'influxdb' },
+                            legendFormat: 'Upper Bound (±2σ)',
+                            query:
+                                'from(bucket: v.bucket)\n' +
+                                '  |> map(fn: (r) => ({ _time: r._time, _value: r.mean + (2.0 * r.std), _field: "Upper" }))\n' +
+                                '  |> keep(columns: ["_time", "_value", "_field"])',
+                            rawQuery: true,
+                        },
+                        {
+                            refId: 'D',
+                            datasource: { uid: 'inf1', type: 'influxdb' },
+                            legendFormat: 'Lower Bound (±2σ)',
+                            query:
+                                'from(bucket: v.bucket)\n' +
+                                '  |> map(fn: (r) => ({ _time: r._time, _value: r.mean - (2.0 * r.std), _field: "Lower" }))\n' +
+                                '  |> keep(columns: ["_time", "_value", "_field"])',
+                            rawQuery: true,
+                        },
+                    ],
+                },
+            ],
+        },
+    };
+
+    const namedRulePrompt =
+        'Create a Grafana-managed alert named GraftAI Rule for the panel titled "Module 1 Current — Alert Test Own History ±2σ" on the dashboard with UID = idHkqdqnk. Trigger when Actual > Upper Bound OR Actual < Lower Bound. Send notifications to Lucas email. Store the rule in a new folder called GraftAI Alert Tests. Create an Evaluation Group named GraftAI Alert Groups that evaluates every five minutes.';
+
+    it('does not grab a same-panel rule in a different folder (creates in target folder)', async () => {
+        let ruleWriteMethod: string | undefined;
+        let ruleWriteUrl: string | undefined;
+        mockFetch.mockImplementation((req: { url: string; method?: string; data?: unknown }) => {
+            if (req.url.includes('/api/dashboards/uid/')) {
+                return of({ data: skywaterPanelDashboard });
+            }
+            if (req.url === '/api/folders' && (req.method ?? 'GET') === 'GET') {
+                return of({ data: [{ uid: 'folder-graftai', title: 'GraftAI Alert Tests' }] });
+            }
+            if (req.url.includes('/contact-points') && (req.method ?? 'GET') === 'GET') {
+                return of({ data: [{ name: 'Lucas email', type: 'email' }] });
+            }
+            if (/\/alert-rules\/[\w-]+$/.test(req.url) && (req.method ?? 'GET') === 'GET') {
+                const uid = req.url.split('/alert-rules/')[1];
+                return of({ data: { uid, title: 'GraftAI Rule', folderUID: 'folder-graftai' } });
+            }
+            if (req.url.includes('/alert-rules') && (req.method ?? 'GET') === 'GET') {
+                // A leftover rule for the SAME panel but in a DIFFERENT folder/group.
+                return of({
+                    data: [
+                        {
+                            uid: 'stale-other-folder',
+                            title: 'Old Module 1 Rule',
+                            folderUID: 'folder-keysight',
+                            ruleGroup: 'graft-idHkqdqnk-105',
+                            annotations: {
+                                __dashboardUid__: 'idHkqdqnk',
+                                __panelId__: '105',
+                            },
+                        },
+                    ],
+                });
+            }
+            if (req.url.includes('/alert-rules') && req.method === 'POST') {
+                ruleWriteMethod = 'POST';
+                ruleWriteUrl = req.url;
+                return of({ data: { uid: 'rule-fresh', title: 'GraftAI Rule' } });
+            }
+            if (req.url.includes('/alert-rules/') && req.method === 'PUT') {
+                ruleWriteMethod = 'PUT';
+                ruleWriteUrl = req.url;
+                return of({ data: { uid: req.url.split('/alert-rules/')[1], title: 'GraftAI Rule' } });
+            }
+            if (req.url.includes('/rule-groups/') && (req.method ?? 'GET') === 'GET') {
+                return of({
+                    data: {
+                        title: 'GraftAI Alert Groups',
+                        folderUid: 'folder-graftai',
+                        interval: 60,
+                        rules: [],
+                    },
+                });
+            }
+            if (req.url.includes('/rule-groups/') && req.method === 'PUT') {
+                return of({ data: {} });
+            }
+            return throwError(() => new Error(`unexpected url ${req.url} method ${req.method}`));
+        });
+
+        const req = parseGrafanaAlertCreateRequest(namedRulePrompt)!;
+        const result = await runProgrammaticGrafanaAlertCreate(req, 194);
+        expect(result.ok).toBe(true);
+        expect(result.updated).toBe(false);
+        expect(ruleWriteMethod).toBe('POST');
+        expect(ruleWriteUrl).not.toContain('stale-other-folder');
+        expect(result.ruleUid).toBe('rule-fresh');
+        expect(result.folderUID).toBe('folder-graftai');
+    });
+
+    it('returns honest guidance when the saved rule cannot be verified', async () => {
+        mockFetch.mockImplementation((req: { url: string; method?: string; data?: unknown }) => {
+            if (req.url.includes('/api/dashboards/uid/')) {
+                return of({ data: skywaterPanelDashboard });
+            }
+            if (req.url === '/api/folders' && (req.method ?? 'GET') === 'GET') {
+                return of({ data: [{ uid: 'folder-graftai', title: 'GraftAI Alert Tests' }] });
+            }
+            if (req.url.includes('/contact-points') && (req.method ?? 'GET') === 'GET') {
+                return of({ data: [{ name: 'Lucas email', type: 'email' }] });
+            }
+            if (/\/alert-rules\/[\w-]+$/.test(req.url) && (req.method ?? 'GET') === 'GET') {
+                // Verification read-back fails: rule is not retrievable.
+                return throwError(() => ({ status: 404, statusText: 'Not Found' }));
+            }
+            if (req.url.includes('/alert-rules') && (req.method ?? 'GET') === 'GET') {
+                return of({ data: [] });
+            }
+            if (req.url.includes('/alert-rules') && req.method === 'POST') {
+                return of({ data: { uid: 'rule-ghost', title: 'GraftAI Rule' } });
+            }
+            if (req.url.includes('/rule-groups/') && (req.method ?? 'GET') === 'GET') {
+                return of({
+                    data: {
+                        title: 'GraftAI Alert Groups',
+                        folderUid: 'folder-graftai',
+                        interval: 300,
+                        rules: [],
+                    },
+                });
+            }
+            return throwError(() => new Error(`unexpected url ${req.url} method ${req.method}`));
+        });
+
+        const req = parseGrafanaAlertCreateRequest(namedRulePrompt)!;
+        const result = await runProgrammaticGrafanaAlertCreate(req, 194);
+        expect(result.ok).toBe(false);
+        expect(result.error).toMatch(/could not be verified/i);
+        expect(result.guidance).toContain('Grafana alerts — how to create this');
     });
 });

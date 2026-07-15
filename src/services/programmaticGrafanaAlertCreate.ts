@@ -184,6 +184,33 @@ async function resolveOrCreateFolderByTitle(
     }
 }
 
+async function verifyRuleSaved(
+    savedUid: string | undefined,
+    ruleTitle: string,
+    folderUID: string
+): Promise<ProvisionedRuleRow | undefined> {
+    if (savedUid) {
+        try {
+            const rule = await grafanaGet<ProvisionedRuleRow>(
+                `/api/v1/provisioning/alert-rules/${encodeURIComponent(savedUid)}`
+            );
+            if (rule?.uid) {
+                return rule;
+            }
+        } catch {
+            // Fall through to a list-based lookup below.
+        }
+    }
+    try {
+        const all = await grafanaGet<ProvisionedRuleRow[]>('/api/v1/provisioning/alert-rules');
+        return all.find(
+            (r) => (r.title ?? '') === ruleTitle && (r.folderUID ?? '') === folderUID
+        );
+    } catch {
+        return undefined;
+    }
+}
+
 function findExistingPanelAlertRule(
     existing: ProvisionedRuleRow[],
     opts: { ruleTitle: string; ruleGroup: string; folderUID: string; dashboardUid: string; panelId: number }
@@ -197,9 +224,19 @@ function findExistingPanelAlertRule(
     if (byGroup) {
         return byGroup;
     }
-    // Match linked panel even if title/group drifted from an earlier Graft create.
+    // Same title in the target folder (evaluation group may have changed).
+    const byTitleFolder = existing.find(
+        (r) => (r.title ?? '') === opts.ruleTitle && (r.folderUID ?? '') === opts.folderUID
+    );
+    if (byTitleFolder) {
+        return byTitleFolder;
+    }
+    // Panel-linked rule, but ONLY within the target folder — never reach across folders
+    // and mangle an unrelated rule for the same panel (that produced "updated" on a rule
+    // the operator never asked about, so the intended rule was never created here).
     return existing.find(
         (r) =>
+            (r.folderUID ?? '') === opts.folderUID &&
             (r.annotations?.__dashboardUid__ ?? '') === opts.dashboardUid &&
             (r.annotations?.__panelId__ ?? '') === String(opts.panelId)
     );
@@ -412,11 +449,27 @@ export async function runProgrammaticGrafanaAlertCreate(
         // Interval update is best-effort; rule create/update already succeeded.
     }
 
+    // Post-save verification: confirm the rule is actually readable in the target folder.
+    // Grafana can return 2xx yet leave no usable rule (e.g. rejected metadata, group churn),
+    // which previously surfaced as a false "created/updated" reply.
+    const savedUid = saved.uid ?? priorUid;
+    const verified = await verifyRuleSaved(savedUid, ruleTitle, resolvedFolder);
+    if (!verified?.uid) {
+        return guidanceBase(
+            `Grafana accepted the ${updated ? 'update' : 'create'} request but the rule ` +
+                `**${ruleTitle}** could not be verified in folder ` +
+                `**${resolvedFolderTitle ?? resolvedFolder}**` +
+                (savedUid ? ` (expected uid \`${savedUid}\`)` : '') +
+                `. It may have been rejected or removed during group setup — check ` +
+                `**Alerts & IRM → Alert rules**.`
+        );
+    }
+
     return {
         ok: true,
         updated,
         alreadyExists: updated,
-        ruleUid: saved.uid ?? priorUid,
+        ruleUid: verified.uid ?? savedUid,
         ruleTitle,
         ruleGroup,
         folderUID: resolvedFolder,
