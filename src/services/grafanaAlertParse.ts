@@ -20,6 +20,8 @@ export interface GrafanaAlertCreateRequest {
     pendingFor?: string;
     /** Extra labels merged onto the rule (in addition to graft defaults). */
     labels?: Record<string, string>;
+    /** When true, emit only explicitly requested labels/annotations (no graft defaults). */
+    restrictMetadata?: boolean;
     /** Alert summary annotation. */
     summary?: string;
     /** Alert description annotation. */
@@ -306,6 +308,17 @@ function extractCustomAnnotation(text: string): Record<string, string> | undefin
     return undefined;
 }
 
+function messageRestrictsExtraMetadata(text: string): boolean {
+    return (
+        /\bmake\s+no\s+other\s+(labels?|custom\s+annotations?|annotations?)\b/i.test(text) ||
+        /\bno\s+(other|additional)\s+(labels?|custom\s+annotations?|annotations?)\b/i.test(text) ||
+        /\bdo\s+not\s+add\s+(any\s+)?(other|additional)\s+(labels?|annotations?)\b/i.test(text) ||
+        /\bonly\s+(the\s+)?(labels?|annotations?)\s+(?:i|we|you)\s+(?:asked|requested|specified)\b/i.test(
+            text
+        )
+    );
+}
+
 export function parseGrafanaAlertCreateRequest(message: string): GrafanaAlertCreateRequest | null {
     const text = normalizeMessageQuotes(message.trim());
     if (!messageMentionsGrafanaAlertCreate(text)) {
@@ -325,6 +338,7 @@ export function parseGrafanaAlertCreateRequest(message: string): GrafanaAlertCre
     const description = extractQuotedField(text, 'description');
     const labels = extractLabel(text);
     const customAnnotations = extractCustomAnnotation(text);
+    const restrictMetadata = messageRestrictsExtraMetadata(text);
 
     let conditionSummary = 'Actual value breaches its Upper or Lower Bound (±2σ)';
     if (/\bactual\b/i.test(text) && /\bupper\b/i.test(text) && /\blower\b/i.test(text)) {
@@ -344,6 +358,7 @@ export function parseGrafanaAlertCreateRequest(message: string): GrafanaAlertCre
         every,
         pendingFor,
         labels,
+        restrictMetadata,
         summary,
         description,
         customAnnotations,

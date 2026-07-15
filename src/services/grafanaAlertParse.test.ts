@@ -84,6 +84,16 @@ describe('grafanaAlertParse', () => {
         expect(req?.contactPointEmail).toBe('alex.perry@electramet.com');
     });
 
+    it('parses the "make no other labels or custom annotations" restriction', () => {
+        const restricted = `${FULL_CUSTOM_METADATA_PROMPT} Make no other labels or custom annotations.`;
+        const req = parseGrafanaAlertCreateRequest(restricted);
+        expect(req?.restrictMetadata).toBe(true);
+        expect(req?.labels).toEqual({ 'GraftAI Labels': 'Alex' });
+        expect(parseGrafanaAlertCreateRequest(FULL_CUSTOM_METADATA_PROMPT)?.restrictMetadata).toBe(
+            false
+        );
+    });
+
     it('formats guidance that names the contact point and Reduce/Math steps', () => {
         const reply = formatGrafanaAlertGuidanceReply(
             parseGrafanaAlertCreateRequest(MANAGED_RULE_PROMPT)!,

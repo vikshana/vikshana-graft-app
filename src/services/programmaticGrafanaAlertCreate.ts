@@ -34,6 +34,7 @@ export interface ProgrammaticGrafanaAlertCreateResult {
     contactPoint?: string;
     contactPointCreated?: boolean;
     labels?: Record<string, string>;
+    restrictMetadata?: boolean;
     summary?: string;
     description?: string;
     customAnnotations?: Record<string, string>;
@@ -424,6 +425,7 @@ export async function runProgrammaticGrafanaAlertCreate(
         contactPoint: contactPointName,
         contactPointCreated,
         labels: request.labels,
+        restrictMetadata: request.restrictMetadata,
         summary: request.summary,
         description: request.description,
         customAnnotations: request.customAnnotations,
@@ -459,8 +461,10 @@ export function formatGrafanaAlertCreateReply(
         result.labels && Object.keys(result.labels).length > 0
             ? `- **Labels:** ${Object.entries(result.labels)
                   .map(([k, v]) => `\`${k}=${v}\``)
-                  .join(', ')}\n`
-            : '';
+                  .join(', ')}${result.restrictMetadata ? ' _(only requested labels — no graft defaults)_' : ''}\n`
+            : result.restrictMetadata
+              ? `- **Labels:** _(none — only requested labels)_\n`
+              : '';
     const summaryLine = result.summary ? `- **Summary:** ${result.summary}\n` : '';
     const descriptionLine = result.description ? `- **Description:** ${result.description}\n` : '';
     const customAnnLine =

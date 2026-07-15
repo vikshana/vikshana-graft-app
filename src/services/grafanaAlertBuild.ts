@@ -434,16 +434,22 @@ export function buildProvisionedAlertRuleBody(args: {
         evalIntervalSeconds
     );
     const pending = reconciled.pendingFor;
-    const annotations: Record<string, string> = {
-        summary:
-            args.request.summary?.trim() ||
-            `${args.title}: Actual outside Own History ±2σ band`,
-        __dashboardUid__: args.dashboardUid,
-        __panelId__: String(args.panelId),
-        graft_alert_format: 'numeric-time-value',
-    };
+    const restrict = args.request.restrictMetadata === true;
+    const annotations: Record<string, string> = {};
+    if (args.request.summary?.trim()) {
+        annotations.summary = args.request.summary.trim();
+    } else if (!restrict) {
+        annotations.summary = `${args.title}: Actual outside Own History ±2σ band`;
+    }
     if (args.request.description?.trim()) {
         annotations.description = args.request.description.trim();
+    }
+    // Panel-link / bookkeeping annotations are omitted in strict mode because the
+    // operator asked for no annotations beyond the ones they named.
+    if (!restrict) {
+        annotations.__dashboardUid__ = args.dashboardUid;
+        annotations.__panelId__ = String(args.panelId);
+        annotations.graft_alert_format = 'numeric-time-value';
     }
     if (args.request.customAnnotations) {
         for (const [k, v] of Object.entries(args.request.customAnnotations)) {
@@ -452,11 +458,13 @@ export function buildProvisionedAlertRuleBody(args: {
             }
         }
     }
-    const labels: Record<string, string> = {
-        graft: 'true',
-        graft_source: 'panel-alert-create',
-        ...(args.request.labels ?? {}),
-    };
+    const labels: Record<string, string> = restrict
+        ? { ...(args.request.labels ?? {}) }
+        : {
+              graft: 'true',
+              graft_source: 'panel-alert-create',
+              ...(args.request.labels ?? {}),
+          };
     const body: Record<string, unknown> = {
         title: args.title,
         ruleGroup: args.ruleGroup,

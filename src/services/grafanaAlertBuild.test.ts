@@ -226,4 +226,38 @@ describe('grafanaAlertBuild', () => {
         expect(labels['GraftAI Labels']).toBe('Alex');
         expect(labels.graft).toBe('true');
     });
+
+    it('strict mode emits only requested labels/annotations (no graft defaults)', () => {
+        const req = parseGrafanaAlertCreateRequest(
+            'Create a Grafana-managed alert named GraftAI Rule for the panel titled "Module 1 Current — Alert Test Own History ±2σ" on the dashboard with UID = idHkqdqnk. Trigger when Actual > Upper Bound OR Actual < Lower Bound. Add a label with a key of GraftAI Labels and a value of Alex. Make no other labels or custom annotations. Make the summary "Module 1 Current Out of Bounds" and the description "Module 1 Actual Value is Outside the Own History". Add a custom annotation name of "Custom Annotation Name" and content of "Custom Annotation Content".'
+        )!;
+        expect(req.restrictMetadata).toBe(true);
+        const built = buildBandBreachAlertQueries(ownHistoryPanel);
+        if ('error' in built) {
+            throw new Error(built.error);
+        }
+        const body = buildProvisionedAlertRuleBody({
+            request: req,
+            title: req.ruleTitle!,
+            ruleGroup: 'GraftAI Alert Groups',
+            folderUID: 'folder-graft',
+            orgId: 1,
+            panelId: 105,
+            dashboardUid: 'idHkqdqnk',
+            data: built.data,
+            condition: built.condition,
+        });
+        const labels = body.labels as Record<string, string>;
+        expect(labels).toEqual({ 'GraftAI Labels': 'Alex' });
+        expect(labels.graft).toBeUndefined();
+        expect(labels.graft_source).toBeUndefined();
+        const annotations = body.annotations as Record<string, string>;
+        expect(annotations).toEqual({
+            summary: 'Module 1 Current Out of Bounds',
+            description: 'Module 1 Actual Value is Outside the Own History',
+            'Custom Annotation Name': 'Custom Annotation Content',
+        });
+        expect(annotations.__dashboardUid__).toBeUndefined();
+        expect(annotations.graft_alert_format).toBeUndefined();
+    });
 });
