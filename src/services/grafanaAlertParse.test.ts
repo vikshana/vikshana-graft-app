@@ -54,6 +54,9 @@ describe('grafanaAlertParse', () => {
     const CREATE_CONTACT_POINT_PROMPT =
         'Create a Grafana-managed alert for the panel titled "Module 1 Current — Alert Test Own History ±2σ" on the dashboard with UID = idHkqdqnk. Configure the alert to trigger when Module 1 Actual is greater than Upper Bound (±2σ) or less than Lower Bound (±2σ). The condition must remain true for longer than 1 minute before the alert fires. Modify the panel queries as needed so they are compatible with Grafana Alerting. The alert queries must return only _time and _value. Do not include _field in the final alert queries. Use Reduce expressions with the Last function for Actual, Upper Bound, and Lower Bound. Then create a Math expression that evaluates: $Actual > $UpperBound || $Actual < $LowerBound. Create a new email contact point named Alex Test Email using this email address: alex.perry@electramet.com. Configure the alert notification policy so this alert sends notifications to the Alex Test Email contact point.';
 
+    const FULL_CUSTOM_METADATA_PROMPT =
+        'Create a Grafana-managed alert named GraftAI Rule for the panel titled "Module 1 Current — Alert Test Own History ±2σ" on the dashboard with UID = idHkqdqnk. Configure the alert to trigger when Module 1 Actual is greater than Upper Bound (±2σ) or less than Lower Bound (±2σ). The condition must remain true for longer than 1 minute before the alert fires. Modify the panel queries as needed so they are compatible with Grafana Alerting. The alert queries must return only _time and _value. Do not include _field in the final alert queries. Use Reduce expressions with the Last function for Actual, Upper Bound, and Lower Bound. Then create a Math expression that evaluates: $Actual > $UpperBound || $Actual < $LowerBound. Create a new email contact point named Alex Test Email using this email address: alex.perry@electramet.com. Configure the alert notification policy so this alert sends notifications to the Alex Test Email contact point. Create an Evaluation Group named GraftAI Alert Groups that evaluates every five minutes. Store the rule in a new folder called GraftAI Alert Tests. Add a label with a key of GraftAI Labels and a value of Alex. Make the summary "Module 1 Current Out of Bounds" and the description "Module 1 Actual Value is Outside the Own History". Add a custom annotation name of "Custom Annotation Name" and content of "Custom Annotation Content".';
+
     it('parses the create-contact-point alert prompt with email + name', () => {
         const req = parseGrafanaAlertCreateRequest(CREATE_CONTACT_POINT_PROMPT);
         expect(req?.dashboardUid).toBe('idHkqdqnk');
@@ -61,6 +64,24 @@ describe('grafanaAlertParse', () => {
         expect(req?.contactPoint).toBe('Alex Test Email');
         expect(req?.contactPointEmail).toBe('alex.perry@electramet.com');
         expect(req?.createContactPoint).toBe(true);
+        expect(req?.pendingFor).toBe('1m');
+    });
+
+    it('parses custom rule name, folder, eval group, labels, and annotations', () => {
+        const req = parseGrafanaAlertCreateRequest(FULL_CUSTOM_METADATA_PROMPT);
+        expect(req?.ruleTitle).toBe('GraftAI Rule');
+        expect(req?.folderTitle).toBe('GraftAI Alert Tests');
+        expect(req?.ruleGroup).toBe('GraftAI Alert Groups');
+        expect(req?.every).toBe('5m');
+        expect(req?.pendingFor).toBe('1m');
+        expect(req?.labels).toEqual({ 'GraftAI Labels': 'Alex' });
+        expect(req?.summary).toBe('Module 1 Current Out of Bounds');
+        expect(req?.description).toBe('Module 1 Actual Value is Outside the Own History');
+        expect(req?.customAnnotations).toEqual({
+            'Custom Annotation Name': 'Custom Annotation Content',
+        });
+        expect(req?.contactPoint).toBe('Alex Test Email');
+        expect(req?.contactPointEmail).toBe('alex.perry@electramet.com');
     });
 
     it('formats guidance that names the contact point and Reduce/Math steps', () => {

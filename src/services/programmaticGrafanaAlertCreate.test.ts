@@ -378,4 +378,135 @@ describe('runProgrammaticGrafanaAlertCreate', () => {
             settings: { addresses: 'alex.perry@electramet.com' },
         });
     });
+
+    it('creates folder + uses custom rule name, group, labels, and annotations', async () => {
+        const fullPrompt =
+            'Create a Grafana-managed alert named GraftAI Rule for the panel titled "Module 1 Current — Alert Test Own History ±2σ" on the dashboard with UID = idHkqdqnk. Configure the alert to trigger when Module 1 Actual is greater than Upper Bound (±2σ) or less than Lower Bound (±2σ). The condition must remain true for longer than 1 minute before the alert fires. Create a new email contact point named Alex Test Email using this email address: alex.perry@electramet.com. Configure the alert notification policy so this alert sends notifications to the Alex Test Email contact point. Create an Evaluation Group named GraftAI Alert Groups that evaluates every five minutes. Store the rule in a new folder called GraftAI Alert Tests. Add a label with a key of GraftAI Labels and a value of Alex. Make the summary "Module 1 Current Out of Bounds" and the description "Module 1 Actual Value is Outside the Own History". Add a custom annotation name of "Custom Annotation Name" and content of "Custom Annotation Content".';
+
+        let folderCreatePayload: unknown;
+        let ruleCreatePayload: {
+            title?: string;
+            ruleGroup?: string;
+            folderUID?: string;
+            for?: string;
+            labels?: Record<string, string>;
+            annotations?: Record<string, string>;
+            notification_settings?: { receiver?: string };
+        } | undefined;
+        let groupPutPayload: { interval?: number; title?: string } | undefined;
+
+        mockFetch.mockImplementation((req: { url: string; method?: string; data?: unknown }) => {
+            if (req.url.includes('/api/dashboards/uid/')) {
+                return of({
+                    data: {
+                        meta: { folderUid: 'folder-skywater', folderTitle: 'Skywater' },
+                        dashboard: {
+                            title: '2103-176030 / Skywater-MN',
+                            panels: [
+                                {
+                                    id: 105,
+                                    type: 'timeseries',
+                                    title: 'Module 1 Current — Alert Test Own History ±2σ',
+                                    datasource: { uid: 'inf1', type: 'influxdb' },
+                                    targets: [
+                                        {
+                                            refId: 'A',
+                                            datasource: { uid: 'inf1', type: 'influxdb' },
+                                            legendFormat: 'Module 1 (Actual)',
+                                            query:
+                                                'from(bucket: v.bucket)\n' +
+                                                '  |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: "Module 1 (Actual)" }))\n' +
+                                                '  |> keep(columns: ["_time", "_value", "_field"])',
+                                            rawQuery: true,
+                                        },
+                                        {
+                                            refId: 'C',
+                                            datasource: { uid: 'inf1', type: 'influxdb' },
+                                            legendFormat: 'Upper Bound (±2σ)',
+                                            query:
+                                                'from(bucket: v.bucket)\n' +
+                                                '  |> map(fn: (r) => ({ _time: r._time, _value: r.mean + (2.0 * r.std), _field: "Upper" }))\n' +
+                                                '  |> keep(columns: ["_time", "_value", "_field"])',
+                                            rawQuery: true,
+                                        },
+                                        {
+                                            refId: 'D',
+                                            datasource: { uid: 'inf1', type: 'influxdb' },
+                                            legendFormat: 'Lower Bound (±2σ)',
+                                            query:
+                                                'from(bucket: v.bucket)\n' +
+                                                '  |> map(fn: (r) => ({ _time: r._time, _value: r.mean - (2.0 * r.std), _field: "Lower" }))\n' +
+                                                '  |> keep(columns: ["_time", "_value", "_field"])',
+                                            rawQuery: true,
+                                        },
+                                    ],
+                                },
+                            ],
+                        },
+                    },
+                });
+            }
+            if (req.url === '/api/folders' && (req.method ?? 'GET') === 'GET') {
+                return of({ data: [{ uid: 'folder-skywater', title: 'Skywater' }] });
+            }
+            if (req.url === '/api/folders' && req.method === 'POST') {
+                folderCreatePayload = req.data;
+                return of({ data: { uid: 'folder-graftai', title: 'GraftAI Alert Tests' } });
+            }
+            if (req.url.includes('/contact-points') && (req.method ?? 'GET') === 'GET') {
+                return of({ data: [] });
+            }
+            if (req.url.includes('/contact-points') && req.method === 'POST') {
+                return of({ data: { uid: 'cp-new', name: 'Alex Test Email' } });
+            }
+            if (req.url.includes('/alert-rules') && (req.method ?? 'GET') === 'GET') {
+                return of({ data: [] });
+            }
+            if (req.url.includes('/alert-rules') && req.method === 'POST') {
+                ruleCreatePayload = req.data as typeof ruleCreatePayload;
+                return of({ data: { uid: 'rule-graftai', title: 'GraftAI Rule' } });
+            }
+            if (req.url.includes('/rule-groups/') && (req.method ?? 'GET') === 'GET') {
+                return of({
+                    data: {
+                        title: 'GraftAI Alert Groups',
+                        folderUid: 'folder-graftai',
+                        interval: 60,
+                        rules: [],
+                    },
+                });
+            }
+            if (req.url.includes('/rule-groups/') && req.method === 'PUT') {
+                groupPutPayload = req.data as { interval?: number; title?: string };
+                return of({ data: groupPutPayload });
+            }
+            return throwError(() => new Error(`unexpected url ${req.url} method ${req.method}`));
+        });
+
+        const req = parseGrafanaAlertCreateRequest(fullPrompt)!;
+        const result = await runProgrammaticGrafanaAlertCreate(req, 191);
+        expect(result.ok).toBe(true);
+        expect(result.ruleTitle).toBe('GraftAI Rule');
+        expect(result.ruleGroup).toBe('GraftAI Alert Groups');
+        expect(result.folderUID).toBe('folder-graftai');
+        expect(result.folderTitle).toBe('GraftAI Alert Tests');
+        expect(result.folderCreated).toBe(true);
+        expect(result.evalIntervalSeconds).toBe(300);
+        expect(result.summary).toBe('Module 1 Current Out of Bounds');
+        expect(folderCreatePayload).toEqual({ title: 'GraftAI Alert Tests' });
+        expect(ruleCreatePayload?.title).toBe('GraftAI Rule');
+        expect(ruleCreatePayload?.ruleGroup).toBe('GraftAI Alert Groups');
+        expect(ruleCreatePayload?.folderUID).toBe('folder-graftai');
+        expect(ruleCreatePayload?.for).toBe('1m');
+        expect(ruleCreatePayload?.notification_settings?.receiver).toBe('Alex Test Email');
+        expect(ruleCreatePayload?.labels?.['GraftAI Labels']).toBe('Alex');
+        expect(ruleCreatePayload?.annotations?.summary).toBe('Module 1 Current Out of Bounds');
+        expect(ruleCreatePayload?.annotations?.description).toBe(
+            'Module 1 Actual Value is Outside the Own History'
+        );
+        expect(ruleCreatePayload?.annotations?.['Custom Annotation Name']).toBe(
+            'Custom Annotation Content'
+        );
+        expect(groupPutPayload?.interval).toBe(300);
+    });
 });

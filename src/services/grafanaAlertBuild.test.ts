@@ -176,4 +176,33 @@ describe('grafanaAlertBuild', () => {
         expect((body.annotations as Record<string, string>).__dashboardUid__).toBe('afq7tc6hl1m9sb');
         expect((body.annotations as Record<string, string>).__panelId__).toBe('42');
     });
+
+    it('applies custom summary, description, labels, and annotations', () => {
+        const req = parseGrafanaAlertCreateRequest(
+            'Create a Grafana-managed alert named GraftAI Rule for the panel titled "Module 1 Current — Alert Test Own History ±2σ" on the dashboard with UID = idHkqdqnk. Trigger when Actual > Upper Bound OR Actual < Lower Bound. Make the summary "Module 1 Current Out of Bounds" and the description "Module 1 Actual Value is Outside the Own History". Add a label with a key of GraftAI Labels and a value of Alex. Add a custom annotation name of "Custom Annotation Name" and content of "Custom Annotation Content".'
+        )!;
+        const built = buildBandBreachAlertQueries(ownHistoryPanel);
+        if ('error' in built) {
+            throw new Error(built.error);
+        }
+        const body = buildProvisionedAlertRuleBody({
+            request: req,
+            title: req.ruleTitle!,
+            ruleGroup: 'GraftAI Alert Groups',
+            folderUID: 'folder-graft',
+            orgId: 1,
+            panelId: 105,
+            dashboardUid: 'idHkqdqnk',
+            data: built.data,
+            condition: built.condition,
+        });
+        expect(body.title).toBe('GraftAI Rule');
+        const annotations = body.annotations as Record<string, string>;
+        expect(annotations.summary).toBe('Module 1 Current Out of Bounds');
+        expect(annotations.description).toBe('Module 1 Actual Value is Outside the Own History');
+        expect(annotations['Custom Annotation Name']).toBe('Custom Annotation Content');
+        const labels = body.labels as Record<string, string>;
+        expect(labels['GraftAI Labels']).toBe('Alex');
+        expect(labels.graft).toBe('true');
+    });
 });

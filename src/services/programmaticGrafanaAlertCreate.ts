@@ -28,8 +28,14 @@ export interface ProgrammaticGrafanaAlertCreateResult {
     ruleTitle?: string;
     ruleGroup?: string;
     folderUID?: string;
+    folderTitle?: string;
+    folderCreated?: boolean;
     contactPoint?: string;
     contactPointCreated?: boolean;
+    labels?: Record<string, string>;
+    summary?: string;
+    description?: string;
+    customAnnotations?: Record<string, string>;
     dashboardUid?: string;
     dashboardTitle?: string;
     panelTitle?: string;
@@ -143,6 +149,36 @@ async function createEmailContactPoint(
     }
 }
 
+async function resolveOrCreateFolderByTitle(
+    title: string
+): Promise<{ uid: string; title: string; created: boolean } | { error: string }> {
+    const want = title.trim();
+    if (!want) {
+        return { error: 'Folder title is empty.' };
+    }
+    try {
+        const folders = await grafanaGet<Array<{ uid?: string; title?: string }>>('/api/folders');
+        const existing = folders.find((f) => (f.title ?? '').trim().toLowerCase() === want.toLowerCase());
+        if (existing?.uid?.trim()) {
+            return { uid: existing.uid.trim(), title: existing.title ?? want, created: false };
+        }
+    } catch (err) {
+        return { error: `Could not list folders: ${extractErrorMessage(err)}` };
+    }
+    try {
+        const created = await grafanaPost<{ uid?: string; title?: string }>('/api/folders', {
+            title: want,
+        });
+        const uid = created.uid?.trim();
+        if (!uid) {
+            return { error: `Created folder **${want}** but Grafana returned no UID.` };
+        }
+        return { uid, title: created.title ?? want, created: true };
+    } catch (err) {
+        return { error: `Could not create folder **${want}**: ${extractErrorMessage(err)}` };
+    }
+}
+
 function findExistingPanelAlertRule(
     existing: ProvisionedRuleRow[],
     opts: { ruleTitle: string; ruleGroup: string; folderUID: string; dashboardUid: string; panelId: number }
@@ -202,15 +238,26 @@ export async function runProgrammaticGrafanaAlertCreate(
     const dashboardTitle =
         typeof dashboard.title === 'string' ? dashboard.title : undefined;
     const folderUID = (dashResp.meta?.folderUid ?? '').trim();
-    // General folder is empty string in some versions; provisioning wants a real folder UID.
-    // Fall back to searching alert folders if missing.
     let resolvedFolder = folderUID;
-    if (!resolvedFolder) {
+    let resolvedFolderTitle: string | undefined = dashResp.meta?.folderTitle;
+    let folderCreated = false;
+
+    if (request.folderTitle?.trim()) {
+        const folderResult = await resolveOrCreateFolderByTitle(request.folderTitle.trim());
+        if ('error' in folderResult) {
+            return guidanceBase(folderResult.error);
+        }
+        resolvedFolder = folderResult.uid;
+        resolvedFolderTitle = folderResult.title;
+        folderCreated = folderResult.created;
+    } else if (!resolvedFolder) {
+        // General folder is empty string in some versions; provisioning wants a real folder UID.
         try {
             const folders = await grafanaGet<Array<{ uid?: string; title?: string }>>('/api/folders');
             const preferred =
                 folders.find((f) => /keysight|alerting|alerts/i.test(f.title ?? '')) ?? folders[0];
             resolvedFolder = preferred?.uid?.trim() ?? '';
+            resolvedFolderTitle = preferred?.title;
         } catch {
             // leave empty
         }
@@ -277,8 +324,10 @@ export async function runProgrammaticGrafanaAlertCreate(
         }
     }
 
-    const ruleTitle = defaultAlertRuleTitle(hit.title);
-    const ruleGroup = defaultAlertRuleGroup(dashboardUid, hit.panelId);
+    const ruleTitle = (request.ruleTitle?.trim() || defaultAlertRuleTitle(hit.title)).slice(0, 190);
+    const ruleGroup = (
+        request.ruleGroup?.trim() || defaultAlertRuleGroup(dashboardUid, hit.panelId)
+    ).slice(0, 190);
     const evalIntervalSeconds = parseEvalIntervalSeconds(request.every);
     const orgId = Number(config.bootData?.user?.orgId ?? 1);
 
@@ -358,8 +407,14 @@ export async function runProgrammaticGrafanaAlertCreate(
         ruleTitle,
         ruleGroup,
         folderUID: resolvedFolder,
+        folderTitle: resolvedFolderTitle,
+        folderCreated,
         contactPoint: contactPointName,
         contactPointCreated,
+        labels: request.labels,
+        summary: request.summary,
+        description: request.description,
+        customAnnotations: request.customAnnotations,
         dashboardUid,
         dashboardTitle,
         panelTitle: hit.title,
@@ -386,6 +441,26 @@ export function formatGrafanaAlertCreateReply(
         ? `### Grafana alert updated (build ${buildNumber})\n\n**Updated** — `
         : `### Grafana alert created (build ${buildNumber})\n\n**Saved** — `;
 
+    const labelLine =
+        result.labels && Object.keys(result.labels).length > 0
+            ? `- **Labels:** ${Object.entries(result.labels)
+                  .map(([k, v]) => `\`${k}=${v}\``)
+                  .join(', ')}\n`
+            : '';
+    const summaryLine = result.summary ? `- **Summary:** ${result.summary}\n` : '';
+    const descriptionLine = result.description ? `- **Description:** ${result.description}\n` : '';
+    const customAnnLine =
+        result.customAnnotations && Object.keys(result.customAnnotations).length > 0
+            ? `- **Custom annotations:** ${Object.entries(result.customAnnotations)
+                  .map(([k, v]) => `\`${k}\` = ${v}`)
+                  .join('; ')}\n`
+            : '';
+    const folderDisplay = result.folderTitle
+        ? `**${result.folderTitle}**` +
+          (result.folderUID ? ` (\`${result.folderUID}\`)` : '') +
+          (result.folderCreated ? ' _(newly created)_' : '')
+        : `\`${result.folderUID}\``;
+
     return (
         headline +
         `rule **${result.ruleTitle}**` +
@@ -403,7 +478,11 @@ export function formatGrafanaAlertCreateReply(
         (result.contactPoint
             ? `- **Contact point:** **${result.contactPoint}**${result.contactPointCreated ? ' _(newly created email contact point)_' : ''}\n`
             : `- **Contact point:** _(not set — routed by default notification policy)_\n`) +
-        `- **Rule group:** \`${result.ruleGroup}\` · folder \`${result.folderUID}\`\n` +
+        `- **Rule group:** \`${result.ruleGroup}\` · folder ${folderDisplay}\n` +
+        labelLine +
+        summaryLine +
+        descriptionLine +
+        customAnnLine +
         (result.alertCompatibleQueries
             ? `- **Alert queries:** rewritten to numeric \`_time\`/\`_value\` series (24h lookback for ±2σ hourly bands)\n`
             : '') +

@@ -8,10 +8,24 @@ export interface GrafanaAlertCreateRequest {
     contactPointEmail?: string;
     /** True when the prompt asks Graft to create/add a (new) contact point. */
     createContactPoint?: boolean;
-    /** Evaluation interval, e.g. "1m". */
+    /** Explicit alert rule title, e.g. "GraftAI Rule". */
+    ruleTitle?: string;
+    /** Alert folder title to store the rule in (created if missing). */
+    folderTitle?: string;
+    /** Evaluation / rule group name, e.g. "GraftAI Alert Groups". */
+    ruleGroup?: string;
+    /** Evaluation interval, e.g. "1m" / "5m". */
     every?: string;
     /** Pending duration before firing, e.g. "1m". */
     pendingFor?: string;
+    /** Extra labels merged onto the rule (in addition to graft defaults). */
+    labels?: Record<string, string>;
+    /** Alert summary annotation. */
+    summary?: string;
+    /** Alert description annotation. */
+    description?: string;
+    /** Extra custom annotations (keys other than summary/description). */
+    customAnnotations?: Record<string, string>;
     /** Human description of the breach condition. */
     conditionSummary: string;
 }
@@ -114,6 +128,184 @@ function messageWantsNewContactPoint(text: string): boolean {
     return /\b(create|add|make|set\s*up)\b[^.\n]*\b(new\s+)?(email\s+)?contact\s*point\b/i.test(text);
 }
 
+const WORD_NUMBERS: Record<string, number> = {
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+    fifteen: 15,
+    thirty: 30,
+};
+
+/** Convert "5 minutes" / "five minutes" / "1m" → Grafana duration like "5m". */
+function toGrafanaDuration(amountRaw: string, unitRaw: string): string | undefined {
+    const amountLower = amountRaw.trim().toLowerCase();
+    const n = /^\d+$/.test(amountLower) ? Number(amountLower) : WORD_NUMBERS[amountLower];
+    if (n == null || !Number.isFinite(n) || n <= 0) {
+        return undefined;
+    }
+    const u = unitRaw.trim().toLowerCase();
+    if (/^s(ec(ond)?s?)?$/.test(u)) {
+        return `${n}s`;
+    }
+    if (/^m(in(ute)?s?)?$/.test(u)) {
+        return `${n}m`;
+    }
+    if (/^h(our)?s?$/.test(u)) {
+        return `${n}h`;
+    }
+    if (/^d(ay)?s?$/.test(u)) {
+        return `${n}d`;
+    }
+    return undefined;
+}
+
+function extractRuleTitle(text: string): string | undefined {
+    // Prefer "alert named X" / "alert rule named X" before contact-point "named".
+    const patterns = [
+        /\b(?:grafana[- ]?managed\s+)?alert(?:\s+rule)?\s+named\s+"([^"]+)"/i,
+        /\b(?:grafana[- ]?managed\s+)?alert(?:\s+rule)?\s+named\s+'([^']+)'/i,
+        /\b(?:grafana[- ]?managed\s+)?alert(?:\s+rule)?\s+named\s+([A-Za-z0-9][A-Za-z0-9 ._-]*?)(?=\s+for\s+(?:the\s+)?panel\b|\s+on\s+the\s+dashboard\b|[.,;\n]|$)/i,
+        /\balert\s+rule\s+(?:titled|called)\s+"([^"]+)"/i,
+        /\balert\s+rule\s+(?:titled|called)\s+'([^']+)'/i,
+    ];
+    for (const re of patterns) {
+        const m = text.match(re);
+        if (m?.[1]?.trim()) {
+            return m[1].trim().replace(/[.,;:]+$/, '');
+        }
+    }
+    return undefined;
+}
+
+function extractFolderTitle(text: string): string | undefined {
+    const patterns = [
+        /\b(?:new\s+)?folder\s+called\s+"([^"]+)"/i,
+        /\b(?:new\s+)?folder\s+called\s+'([^']+)'/i,
+        /\b(?:new\s+)?folder\s+called\s+([A-Za-z0-9][A-Za-z0-9 ._-]*?)(?=[.,;\n]|$)/i,
+        /\b(?:new\s+)?folder\s+named\s+"([^"]+)"/i,
+        /\b(?:new\s+)?folder\s+named\s+'([^']+)'/i,
+        /\bstore\s+(?:the\s+)?rule\s+in\s+(?:a\s+)?(?:new\s+)?folder\s+(?:called|named)\s+"([^"]+)"/i,
+        /\bstore\s+(?:the\s+)?rule\s+in\s+(?:a\s+)?(?:new\s+)?folder\s+(?:called|named)\s+([A-Za-z0-9][A-Za-z0-9 ._-]*?)(?=[.,;\n]|$)/i,
+    ];
+    for (const re of patterns) {
+        const m = text.match(re);
+        if (m?.[1]?.trim()) {
+            return m[1].trim().replace(/[.,;:]+$/, '');
+        }
+    }
+    return undefined;
+}
+
+function extractRuleGroup(text: string): string | undefined {
+    const patterns = [
+        /\bevaluation\s+group\s+named\s+"([^"]+)"/i,
+        /\bevaluation\s+group\s+named\s+'([^']+)'/i,
+        /\bevaluation\s+group\s+named\s+([A-Za-z0-9][A-Za-z0-9 ._-]*?)(?=\s+that\b|\s+evaluat|\s+with\b|[.,;\n]|$)/i,
+        /\brule\s+group\s+named\s+"([^"]+)"/i,
+        /\brule\s+group\s+named\s+([A-Za-z0-9][A-Za-z0-9 ._-]*?)(?=\s+that\b|\s+evaluat|[.,;\n]|$)/i,
+    ];
+    for (const re of patterns) {
+        const m = text.match(re);
+        if (m?.[1]?.trim()) {
+            return m[1].trim().replace(/[.,;:]+$/, '');
+        }
+    }
+    return undefined;
+}
+
+function extractEvalInterval(text: string): string | undefined {
+    if (/\bevaluate[sd]?\s+every\s+minute\b/i.test(text)) {
+        return '1m';
+    }
+    // "evaluates every five minutes" / "evaluate every 5 minutes" / "every 5m"
+    const wordOrNum = text.match(
+        /\bevaluate[sd]?\s+every\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|thirty)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hour|hours|d|day|days)\b/i
+    );
+    if (wordOrNum) {
+        return toGrafanaDuration(wordOrNum[1], wordOrNum[2]);
+    }
+    const compact = text.match(/\bevaluate[sd]?\s+every\s+(\d+\s*[smhd])\b/i);
+    if (compact?.[1]) {
+        return compact[1].replace(/\s+/g, '').toLowerCase();
+    }
+    return undefined;
+}
+
+function extractPendingFor(text: string): string | undefined {
+    if (/\b(?:true\s+for|remain(?:s|ed)?\s+true\s+for)\s+one\s+minute\b/i.test(text)) {
+        return '1m';
+    }
+    // "remain true for longer than 1 minute" / "true for longer than five minutes"
+    const longer = text.match(
+        /\b(?:remain(?:s|ed)?\s+true\s+for|true\s+for|pending(?:\s+period)?)\s+(?:longer\s+than\s+)?(\d+|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|thirty)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hour|hours|d|day|days)\b/i
+    );
+    if (longer) {
+        return toGrafanaDuration(longer[1], longer[2]);
+    }
+    const compact = text.match(/\b(?:true\s+for|pending(?:\s+period)?)\s+(\d+\s*[smhd])\b/i);
+    if (compact?.[1]) {
+        return compact[1].replace(/\s+/g, '').toLowerCase();
+    }
+    return undefined;
+}
+
+function extractQuotedField(text: string, field: 'summary' | 'description'): string | undefined {
+    const re = new RegExp(
+        `\\b(?:make\\s+the\\s+|the\\s+|set\\s+(?:the\\s+)?)?${field}\\s+"([^"]+)"`,
+        'i'
+    );
+    const m = text.match(re);
+    if (m?.[1]?.trim()) {
+        return m[1].trim();
+    }
+    const single = new RegExp(
+        `\\b(?:make\\s+the\\s+|the\\s+|set\\s+(?:the\\s+)?)?${field}\\s+'([^']+)'`,
+        'i'
+    );
+    const m2 = text.match(single);
+    return m2?.[1]?.trim();
+}
+
+function extractLabel(text: string): Record<string, string> | undefined {
+    // "label with a key of X and a value of Y"
+    const keyed = text.match(
+        /\blabel\s+with\s+(?:a\s+)?key\s+of\s+([A-Za-z0-9 ._-]+?)\s+and\s+(?:a\s+)?value\s+of\s+([A-Za-z0-9 ._-]+?)(?=[.,;\n]|$)/i
+    );
+    if (keyed?.[1]?.trim() && keyed[2]?.trim()) {
+        return { [keyed[1].trim()]: keyed[2].trim().replace(/[.,;:]+$/, '') };
+    }
+    // label "key"="value" / label key=value
+    const eq = text.match(/\blabel\s+"([^"]+)"\s*=\s*"([^"]+)"/i) ?? text.match(/\blabel\s+(\S+)\s*=\s*(\S+)/i);
+    if (eq?.[1]?.trim() && eq[2]?.trim()) {
+        return { [eq[1].trim()]: eq[2].trim().replace(/[.,;:]+$/, '') };
+    }
+    return undefined;
+}
+
+function extractCustomAnnotation(text: string): Record<string, string> | undefined {
+    // 'custom annotation name of "X" and content of "Y"'
+    const named = text.match(
+        /\bcustom\s+annotation\s+name\s+of\s+"([^"]+)"\s+and\s+content\s+of\s+"([^"]+)"/i
+    );
+    if (named?.[1]?.trim() && named[2]?.trim()) {
+        return { [named[1].trim()]: named[2].trim() };
+    }
+    const namedSingle = text.match(
+        /\bcustom\s+annotation\s+name\s+of\s+'([^']+)'\s+and\s+content\s+of\s+'([^']+)'/i
+    );
+    if (namedSingle?.[1]?.trim() && namedSingle[2]?.trim()) {
+        return { [namedSingle[1].trim()]: namedSingle[2].trim() };
+    }
+    return undefined;
+}
+
 export function parseGrafanaAlertCreateRequest(message: string): GrafanaAlertCreateRequest | null {
     const text = normalizeMessageQuotes(message.trim());
     if (!messageMentionsGrafanaAlertCreate(text)) {
@@ -124,14 +316,15 @@ export function parseGrafanaAlertCreateRequest(message: string): GrafanaAlertCre
     const contactPoint = extractContactPoint(text);
     const contactPointEmail = extractContactPointEmail(text);
     const createContactPoint = messageWantsNewContactPoint(text);
-    const every = /evaluate\s+every\s+minute\b/i.test(text)
-        ? '1m'
-        : text.match(/\bevaluate\s+every\s+(\d+\s*[smhd])\b/i)?.[1]?.replace(/\s+/g, '').toLowerCase();
-    const pendingFor = /true\s+for\s+one\s+minute\b/i.test(text)
-        ? '1m'
-        : text.match(/\b(?:true\s+for|pending(?:\s+period)?)\s+(\d+\s*[smhd])\b/i)?.[1]
-              ?.replace(/\s+/g, '')
-              .toLowerCase();
+    const ruleTitle = extractRuleTitle(text);
+    const folderTitle = extractFolderTitle(text);
+    const ruleGroup = extractRuleGroup(text);
+    const every = extractEvalInterval(text);
+    const pendingFor = extractPendingFor(text);
+    const summary = extractQuotedField(text, 'summary');
+    const description = extractQuotedField(text, 'description');
+    const labels = extractLabel(text);
+    const customAnnotations = extractCustomAnnotation(text);
 
     let conditionSummary = 'Actual value breaches its Upper or Lower Bound (±2σ)';
     if (/\bactual\b/i.test(text) && /\bupper\b/i.test(text) && /\blower\b/i.test(text)) {
@@ -145,8 +338,15 @@ export function parseGrafanaAlertCreateRequest(message: string): GrafanaAlertCre
         contactPoint,
         contactPointEmail,
         createContactPoint,
+        ruleTitle,
+        folderTitle,
+        ruleGroup,
         every,
         pendingFor,
+        labels,
+        summary,
+        description,
+        customAnnotations,
         conditionSummary,
     };
 }
