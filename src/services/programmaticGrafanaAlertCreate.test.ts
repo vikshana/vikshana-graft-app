@@ -492,12 +492,15 @@ describe('runProgrammaticGrafanaAlertCreate', () => {
         expect(result.folderTitle).toBe('GraftAI Alert Tests');
         expect(result.folderCreated).toBe(true);
         expect(result.evalIntervalSeconds).toBe(300);
+        expect(result.pendingFor).toBe('5m');
+        expect(result.pendingAdjusted).toBe(true);
+        expect(result.requestedPendingFor).toBe('1m');
         expect(result.summary).toBe('Module 1 Current Out of Bounds');
         expect(folderCreatePayload).toEqual({ title: 'GraftAI Alert Tests' });
         expect(ruleCreatePayload?.title).toBe('GraftAI Rule');
         expect(ruleCreatePayload?.ruleGroup).toBe('GraftAI Alert Groups');
         expect(ruleCreatePayload?.folderUID).toBe('folder-graftai');
-        expect(ruleCreatePayload?.for).toBe('1m');
+        expect(ruleCreatePayload?.for).toBe('5m');
         expect(ruleCreatePayload?.notification_settings?.receiver).toBe('Alex Test Email');
         expect(ruleCreatePayload?.labels?.['GraftAI Labels']).toBe('Alex');
         expect(ruleCreatePayload?.annotations?.summary).toBe('Module 1 Current Out of Bounds');

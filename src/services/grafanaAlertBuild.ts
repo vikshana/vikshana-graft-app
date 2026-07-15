@@ -359,6 +359,42 @@ export function normalizePendingFor(pendingFor?: string): string {
     return /^\d+[smhd]$/.test(cleaned) ? cleaned : '1m';
 }
 
+/** Prefer compact Grafana durations (5m over 300s) when converting seconds. */
+export function secondsToGrafanaDuration(seconds: number): string {
+    const s = Math.max(0, Math.floor(seconds));
+    if (s % 86400 === 0 && s >= 86400) {
+        return `${s / 86400}d`;
+    }
+    if (s % 3600 === 0 && s >= 3600) {
+        return `${s / 3600}h`;
+    }
+    if (s % 60 === 0 && s >= 60) {
+        return `${s / 60}m`;
+    }
+    return `${Math.max(10, s)}s`;
+}
+
+/**
+ * Grafana requires pending (`for`) ≥ evaluation interval. When the prompt asks for
+ * a shorter pending (e.g. 1m) than the group interval (e.g. 5m), raise pending to match.
+ */
+export function reconcilePendingWithEvalInterval(
+    pendingFor: string | undefined,
+    evalIntervalSeconds: number
+): { pendingFor: string; adjusted: boolean; requestedPendingFor: string } {
+    const requested = normalizePendingFor(pendingFor);
+    const pendingSec = parseEvalIntervalSeconds(requested);
+    const evalSec = Math.max(10, evalIntervalSeconds || 60);
+    if (pendingSec >= evalSec) {
+        return { pendingFor: requested, adjusted: false, requestedPendingFor: requested };
+    }
+    return {
+        pendingFor: secondsToGrafanaDuration(evalSec),
+        adjusted: true,
+        requestedPendingFor: requested,
+    };
+}
+
 export function matchContactPointName(
     available: Array<{ name?: string }>,
     wanted: string
@@ -392,7 +428,12 @@ export function buildProvisionedAlertRuleBody(args: {
     /** When set, this body is for PUT update of an existing rule. */
     uid?: string;
 }): Record<string, unknown> {
-    const pending = normalizePendingFor(args.request.pendingFor);
+    const evalIntervalSeconds = parseEvalIntervalSeconds(args.request.every);
+    const reconciled = reconcilePendingWithEvalInterval(
+        args.request.pendingFor,
+        evalIntervalSeconds
+    );
+    const pending = reconciled.pendingFor;
     const annotations: Record<string, string> = {
         summary:
             args.request.summary?.trim() ||

@@ -3,6 +3,8 @@ import {
     classifyActualUpperLowerTargets,
     matchContactPointName,
     parseEvalIntervalSeconds,
+    reconcilePendingWithEvalInterval,
+    secondsToGrafanaDuration,
     buildProvisionedAlertRuleBody,
     makeFluxQueryAlertCompatible,
     fluxQueryEmitsFieldLabel,
@@ -147,6 +149,25 @@ describe('grafanaAlertBuild', () => {
     it('parses evaluate every minute as 60s', () => {
         expect(parseEvalIntervalSeconds('1m')).toBe(60);
         expect(parseEvalIntervalSeconds(undefined)).toBe(60);
+    });
+
+    it('raises pending when shorter than evaluation interval', () => {
+        expect(secondsToGrafanaDuration(300)).toBe('5m');
+        expect(reconcilePendingWithEvalInterval('1m', 300)).toEqual({
+            pendingFor: '5m',
+            adjusted: true,
+            requestedPendingFor: '1m',
+        });
+        expect(reconcilePendingWithEvalInterval('5m', 300)).toEqual({
+            pendingFor: '5m',
+            adjusted: false,
+            requestedPendingFor: '5m',
+        });
+        expect(reconcilePendingWithEvalInterval('10m', 300)).toEqual({
+            pendingFor: '10m',
+            adjusted: false,
+            requestedPendingFor: '10m',
+        });
     });
 
     it('includes notification_settings.receiver and panel annotations', () => {

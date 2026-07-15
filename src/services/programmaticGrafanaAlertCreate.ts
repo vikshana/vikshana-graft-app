@@ -9,6 +9,7 @@ import {
     defaultAlertRuleTitle,
     matchContactPointName,
     parseEvalIntervalSeconds,
+    reconcilePendingWithEvalInterval,
 } from './grafanaAlertBuild';
 import { findPanelByStrictTitle, listDashboardPanels } from './panelDiscovery';
 
@@ -43,6 +44,9 @@ export interface ProgrammaticGrafanaAlertCreateResult {
     mathExpression?: string;
     evalIntervalSeconds?: number;
     pendingFor?: string;
+    /** True when pending was raised so it is ≥ evaluation interval. */
+    pendingAdjusted?: boolean;
+    requestedPendingFor?: string;
     /** True when Flux was rewritten to `_time`/`_value` (no output `_field` labels). */
     alertCompatibleQueries?: boolean;
 }
@@ -329,6 +333,14 @@ export async function runProgrammaticGrafanaAlertCreate(
         request.ruleGroup?.trim() || defaultAlertRuleGroup(dashboardUid, hit.panelId)
     ).slice(0, 190);
     const evalIntervalSeconds = parseEvalIntervalSeconds(request.every);
+    const pendingReconcile = reconcilePendingWithEvalInterval(
+        request.pendingFor,
+        evalIntervalSeconds
+    );
+    const requestForBody: GrafanaAlertCreateRequest = {
+        ...request,
+        pendingFor: pendingReconcile.pendingFor,
+    };
     const orgId = Number(config.bootData?.user?.orgId ?? 1);
 
     let priorUid: string | undefined;
@@ -347,7 +359,7 @@ export async function runProgrammaticGrafanaAlertCreate(
     }
 
     const body = buildProvisionedAlertRuleBody({
-        request,
+        request: requestForBody,
         title: ruleTitle,
         ruleGroup,
         folderUID: resolvedFolder,
@@ -421,7 +433,9 @@ export async function runProgrammaticGrafanaAlertCreate(
         panelId: hit.panelId,
         mathExpression: built.mathExpression,
         evalIntervalSeconds,
-        pendingFor: request.pendingFor ?? '1m',
+        pendingFor: pendingReconcile.pendingFor,
+        pendingAdjusted: pendingReconcile.adjusted,
+        requestedPendingFor: pendingReconcile.requestedPendingFor,
         alertCompatibleQueries: true,
     };
 }
@@ -474,7 +488,11 @@ export function formatGrafanaAlertCreateReply(
         `\n` +
         `- **Condition:** \`${result.mathExpression ?? '$E > $F || $E < $G'}\` ` +
         `(Last Actual vs Upper/Lower)\n` +
-        `- **Evaluate:** every **${result.evalIntervalSeconds ?? 60}s** · pending **${result.pendingFor ?? '1m'}**\n` +
+        `- **Evaluate:** every **${result.evalIntervalSeconds ?? 60}s** · pending **${result.pendingFor ?? '1m'}**` +
+        (result.pendingAdjusted
+            ? ` _(raised from ${result.requestedPendingFor ?? '1m'} so pending ≥ evaluation interval)_`
+            : '') +
+        `\n` +
         (result.contactPoint
             ? `- **Contact point:** **${result.contactPoint}**${result.contactPointCreated ? ' _(newly created email contact point)_' : ''}\n`
             : `- **Contact point:** _(not set — routed by default notification policy)_\n`) +
