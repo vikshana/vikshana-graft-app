@@ -131,16 +131,35 @@ async function createEmailContactPoint(
     }
 }
 
-function findRuleByTitle(existing: ProvisionedRuleRow[], title: string): ProvisionedRuleRow | undefined {
+function findRuleByTitle(
+    existing: ProvisionedRuleRow[],
+    title: string,
+    opts?: { dashboardUid?: string; panelTitle?: string }
+): ProvisionedRuleRow | undefined {
     const want = title.trim().toLowerCase();
-    const exact = existing.find((r) => (r.title ?? '').trim().toLowerCase() === want);
-    if (exact) {
-        return exact;
-    }
-    return existing.find((r) => {
+    const byTitle = existing.filter((r) => {
         const n = (r.title ?? '').trim().toLowerCase();
-        return n.includes(want) || want.includes(n);
+        return n === want || n.includes(want) || want.includes(n);
     });
+    if (byTitle.length === 0) {
+        return undefined;
+    }
+    if (byTitle.length === 1) {
+        return byTitle[0];
+    }
+    const dash = opts?.dashboardUid?.trim();
+    if (dash) {
+        const onDash = byTitle.filter((r) => (r.annotations?.__dashboardUid__ ?? '') === dash);
+        if (onDash.length === 1) {
+            return onDash[0];
+        }
+        if (onDash.length > 1) {
+            return onDash[0];
+        }
+    }
+    // Prefer exact title match when several partial matches exist.
+    const exact = byTitle.find((r) => (r.title ?? '').trim().toLowerCase() === want);
+    return exact ?? byTitle[0];
 }
 
 /**
@@ -166,7 +185,10 @@ export async function runProgrammaticGrafanaAlertUpdate(
         };
     }
 
-    const prior = findRuleByTitle(existing, ruleTitle);
+    const prior = findRuleByTitle(existing, ruleTitle, {
+        dashboardUid: request.dashboardUid,
+        panelTitle: request.panelTitle,
+    });
     if (!prior?.uid) {
         return {
             ok: false,

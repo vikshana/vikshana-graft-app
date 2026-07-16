@@ -71,6 +71,11 @@ function extractQuotedPanelTitle(text: string): string | undefined {
         /\bpanel\s+titled\s+'([^']+)'/i,
         /\bpanel\s+(?:named|called)\s+"([^"]+)"/i,
         /\bpanel\s+(?:named|called)\s+'([^']+)'/i,
+        // "for the panel of "…" / "panel of "…"" (common in update follow-ups)
+        /\b(?:for\s+(?:the\s+)?)?panel\s+of\s+"([^"]+)"/i,
+        /\b(?:for\s+(?:the\s+)?)?panel\s+of\s+'([^']+)'/i,
+        /\bfor\s+(?:the\s+)?panel\s+"([^"]+)"/i,
+        /\bfor\s+(?:the\s+)?panel\s+'([^']+)'/i,
     ];
     for (const re of patterns) {
         const m = text.match(re);
@@ -343,6 +348,10 @@ function messageRestrictsExtraMetadata(text: string): boolean {
 export interface GrafanaAlertUpdateRequest {
     /** Existing rule title to update (required). */
     ruleTitle: string;
+    /** Optional dashboard UID to disambiguate when several rules share the title. */
+    dashboardUid?: string;
+    /** Optional panel title to disambiguate / verify the linked panel. */
+    panelTitle?: string;
     contactPoint?: string;
     contactPointEmail?: string;
     createContactPoint?: boolean;
@@ -373,19 +382,34 @@ export function messageMentionsGrafanaAlertUpdate(message: string): boolean {
     if (!hasNamedRule) {
         return false;
     }
-    // Full create prompts often say "modify the panel queries" / "change …" — those are not updates.
-    const hasPanelCreate =
-        /\bpanel\s+titled\b/i.test(text) ||
-        /\bdashboard\s+with\s+uid\b/i.test(text) ||
-        (/\bcreate\b/i.test(text) && /\bfor\s+(?:the\s+)?panel\b/i.test(text));
-    if (hasPanelCreate) {
+
+    // "Update the alert rule named…" / "Modify the alert rule…" — NOT "Modify the panel queries".
+    const hasExplicitUpdate =
+        /\b(update|edit|patch|modify|change)\s+(?:the\s+)?(?:grafana[- ]?managed\s+)?alert(?:\s+rule)?\b/i.test(
+            text
+        ) ||
+        (/\b(update|edit|patch)\b/i.test(text) && /\balert(?:\s+rule)?\s+named\b/i.test(text));
+
+    // Full create: "Create a Grafana-managed alert named X for the panel titled…"
+    // Must NOT match when the prompt centers on Update of an existing rule —
+    // operators often include dashboard UID / panel name as disambiguators on updates.
+    const isFullAlertCreateFromPanel =
+        !hasExplicitUpdate &&
+        /\bcreate\b/i.test(text) &&
+        /\b(grafana[- ]?managed\s+)?alert\b/i.test(text) &&
+        (/\bpanel\s+titled\b/i.test(text) ||
+            /\bfor\s+(?:the\s+)?panel\b/i.test(text) ||
+            /\bdashboard\s+with\s+uid\b/i.test(text));
+    if (isFullAlertCreateFromPanel) {
         return false;
     }
-    // Explicit update verbs on a named rule (no panel/dashboard create context).
-    if (/\b(update|edit|modify|patch|change)\b/i.test(text)) {
+
+    // Explicit update of a named rule — dashboard/panel context is optional disambiguation.
+    if (hasExplicitUpdate) {
         return true;
     }
-    // Metadata / evaluation-group follow-up on a named rule.
+
+    // Metadata / evaluation-group follow-up on a named rule (no "Update" verb).
     return (
         /\b(add|set|make|create)\b/i.test(text) &&
         /\b(label|summary|description|annotation|notify|contact\s*point|evaluation\s+group|rule\s+group)\b/i.test(
@@ -403,15 +427,10 @@ export function parseGrafanaAlertUpdateRequest(message: string): GrafanaAlertUpd
     if (!ruleTitle) {
         return null;
     }
-    // Full create prompts that also say "named" should stay on the create path.
-    if (
-        /\bpanel\s+titled\b/i.test(text) &&
-        (/\bdashboard\s+with\s+uid\b/i.test(text) || /\bcreate\b/i.test(text))
-    ) {
-        return null;
-    }
     return {
         ruleTitle,
+        dashboardUid: extractAllDashboardUids(text)[0] ?? extractDashboardUidFromMessage(text),
+        panelTitle: extractQuotedPanelTitle(text),
         contactPoint: extractContactPoint(text),
         contactPointEmail: extractContactPointEmail(text),
         createContactPoint: messageWantsNewContactPoint(text),

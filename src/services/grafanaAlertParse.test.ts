@@ -128,6 +128,21 @@ describe('grafanaAlertParse', () => {
         expect(parseGrafanaAlertCreateRequest(EVAL_GROUP_UPDATE_PROMPT)).toBeNull();
     });
 
+    const EVAL_GROUP_UPDATE_WITH_DASHBOARD_PROMPT =
+        'Update the alert rule named GraftAI Rule on the dashboard with UID = idHkqdqnk for the panel of "Module 1 Current — Alert Test Own History ±2σ". Create a new evaluation group called "Test Eval Group" that evaluates every minute. Add GraftAI Rule to the Test Eval Group.';
+
+    it('keeps update path when dashboard UID + panel of "…" are included as disambiguators', () => {
+        expect(messageMentionsGrafanaAlertUpdate(EVAL_GROUP_UPDATE_WITH_DASHBOARD_PROMPT)).toBe(true);
+        expect(parseGrafanaAlertCreateRequest(EVAL_GROUP_UPDATE_WITH_DASHBOARD_PROMPT)).toBeNull();
+        const req = parseGrafanaAlertUpdateRequest(EVAL_GROUP_UPDATE_WITH_DASHBOARD_PROMPT);
+        expect(req?.ruleTitle).toBe('GraftAI Rule');
+        expect(req?.dashboardUid).toBe('idHkqdqnk');
+        expect(req?.panelTitle).toBe('Module 1 Current — Alert Test Own History ±2σ');
+        expect(req?.ruleGroup).toBe('Test Eval Group');
+        expect(req?.every).toBe('1m');
+        expect(messageHasProgrammaticHandler(EVAL_GROUP_UPDATE_WITH_DASHBOARD_PROMPT)).toBe(true);
+    });
+
     it('does not treat full create prompts as update-only', () => {
         expect(messageMentionsGrafanaAlertUpdate(FULL_CUSTOM_METADATA_PROMPT)).toBe(false);
         expect(parseGrafanaAlertUpdateRequest(FULL_CUSTOM_METADATA_PROMPT)).toBeNull();
