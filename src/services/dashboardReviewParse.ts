@@ -1,5 +1,5 @@
 import { extractDashboardUidFromMessage, mentionsDashboard } from './dashboardMentionParse';
-import { messageMentionsGrafanaAlertCreate } from './grafanaAlertParse';
+import { messageMentionsGrafanaAlertCreate, messageMentionsGrafanaAlertUpdate } from './grafanaAlertParse';
 
 export interface DashboardReviewRequest {
     dashboardUid: string;
@@ -37,7 +37,7 @@ export function userWantsDashboardReviewOnly(message: string): boolean {
     if (!text || userWantsDashboardReviewApply(text)) {
         return false;
     }
-    if (messageMentionsGrafanaAlertCreate(text)) {
+    if (messageMentionsGrafanaAlertCreate(text) || messageMentionsGrafanaAlertUpdate(text)) {
         return false;
     }
 

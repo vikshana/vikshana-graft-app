@@ -1,7 +1,9 @@
 import {
     formatGrafanaAlertGuidanceReply,
     messageMentionsGrafanaAlertCreate,
+    messageMentionsGrafanaAlertUpdate,
     parseGrafanaAlertCreateRequest,
+    parseGrafanaAlertUpdateRequest,
 } from './grafanaAlertParse';
 import { parseAddOwnHistoryPanelRequest } from './ownHistoryPanelParse';
 import { userWantsDashboardReviewOnly } from './dashboardReviewParse';
@@ -92,6 +94,32 @@ describe('grafanaAlertParse', () => {
         expect(parseGrafanaAlertCreateRequest(FULL_CUSTOM_METADATA_PROMPT)?.restrictMetadata).toBe(
             false
         );
+    });
+
+    const METADATA_UPDATE_PROMPT =
+        'Update the alert rule named GraftAI Rule. Add one label: key GraftAI Labels, value Alex. Add summary "Module 1 Current Out of Bounds" and description "Module 1 Actual Value is Outside the Own History". Add custom annotation name "Custom Annotation Name" with content "Custom Annotation Content". Configure the rule to notify the Alex Test Email contact point.';
+
+    it('parses metadata-only update prompts without requiring dashboard UID', () => {
+        expect(messageMentionsGrafanaAlertUpdate(METADATA_UPDATE_PROMPT)).toBe(true);
+        expect(parseGrafanaAlertCreateRequest(METADATA_UPDATE_PROMPT)).toBeNull();
+        const req = parseGrafanaAlertUpdateRequest(METADATA_UPDATE_PROMPT);
+        expect(req?.ruleTitle).toBe('GraftAI Rule');
+        expect(req?.labels).toEqual({ 'GraftAI Labels': 'Alex' });
+        expect(req?.summary).toBe('Module 1 Current Out of Bounds');
+        expect(req?.description).toBe('Module 1 Actual Value is Outside the Own History');
+        expect(req?.customAnnotations).toEqual({
+            'Custom Annotation Name': 'Custom Annotation Content',
+        });
+        expect(req?.contactPoint).toBe('Alex Test Email');
+        expect(messageHasProgrammaticHandler(METADATA_UPDATE_PROMPT)).toBe(true);
+        expect(parseAddOwnHistoryPanelRequest(METADATA_UPDATE_PROMPT)).toBeNull();
+        expect(userWantsDashboardReviewOnly(METADATA_UPDATE_PROMPT)).toBe(false);
+    });
+
+    it('does not treat full create prompts as update-only', () => {
+        expect(messageMentionsGrafanaAlertUpdate(FULL_CUSTOM_METADATA_PROMPT)).toBe(false);
+        expect(parseGrafanaAlertUpdateRequest(FULL_CUSTOM_METADATA_PROMPT)).toBeNull();
+        expect(parseGrafanaAlertCreateRequest(FULL_CUSTOM_METADATA_PROMPT)?.panelTitle).toBeTruthy();
     });
 
     it('formats guidance that names the contact point and Reduce/Math steps', () => {

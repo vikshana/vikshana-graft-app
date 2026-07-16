@@ -116,11 +116,15 @@ import {
   messageRequestsMlPanelGuidance,
   parseModuleMlGuidanceContext,
 } from '../../../services/moduleMlPanelGuidance';
-import { parseGrafanaAlertCreateRequest } from '../../../services/grafanaAlertParse';
+import { parseGrafanaAlertCreateRequest, parseGrafanaAlertUpdateRequest } from '../../../services/grafanaAlertParse';
 import {
   formatGrafanaAlertCreateReply,
   runProgrammaticGrafanaAlertCreate,
 } from '../../../services/programmaticGrafanaAlertCreate';
+import {
+  formatGrafanaAlertUpdateReply,
+  runProgrammaticGrafanaAlertUpdate,
+} from '../../../services/programmaticGrafanaAlertUpdate';
 import {
   formatAddPeerRfPanelReply,
   runProgrammaticAddPeerRfPanel,
@@ -1619,6 +1623,45 @@ export const ChatInterface = () => {
           setCurrentSessionId(savedSession.id);
           currentSessionIdRef.current = savedSession.id;
           replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      // Grafana-managed alert UPDATE by name (small follow-up prompts — labels/annotations/contact).
+      // Runs before create so "Update the alert rule named X…" is not mis-routed as a create.
+      const grafanaAlertUpdateRequest = parseGrafanaAlertUpdateRequest(content);
+      if (grafanaAlertUpdateRequest) {
+        errorPathTag = 'grafana-alert-update';
+        const alertUpdateResult = await runProgrammaticGrafanaAlertUpdate(
+          grafanaAlertUpdateRequest,
+          GRAFT_BUILD_NUMBER
+        );
+        finalContent = formatGrafanaAlertUpdateReply(alertUpdateResult, GRAFT_BUILD_NUMBER);
+        if (!alertUpdateResult.ok) {
+          recordGraftFailure({
+            buildNumber: GRAFT_BUILD_NUMBER,
+            intent: 'grafana-alert-update',
+            userMessagePreview: content,
+            error: alertUpdateResult.error ?? 'Unknown error',
+          });
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const alertUpdateMessage: Message = { role: 'assistant', content: finalContent };
+        const alertUpdateSession = chatHistoryService.saveSession(
+          [...newMessages, alertUpdateMessage],
+          currentSessionId
+        );
+        if (alertUpdateSession) {
+          setCurrentSessionId(alertUpdateSession.id);
+          currentSessionIdRef.current = alertUpdateSession.id;
+          replaceChatSessionInUrl(alertUpdateSession.id);
         }
         return;
       }

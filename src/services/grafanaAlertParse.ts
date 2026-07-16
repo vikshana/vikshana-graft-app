@@ -110,6 +110,13 @@ function extractContactPoint(text: string): string | undefined {
     if (named?.[1]?.trim()) {
         return stripContactName(named[1]);
     }
+    // "Configure the rule to notify the Alex Test Email contact point"
+    const notifyCp = text.match(
+        /\bnotify\s+(?:the\s+)?([A-Za-z0-9][A-Za-z0-9 ._-]*?)\s+contact\s*point\b/i
+    );
+    if (notifyCp?.[1]?.trim()) {
+        return stripContactName(notifyCp[1]);
+    }
     const sendTo = text.match(/\bSend\s+notifications\s+to\s+([^.!\n]+)/i);
     if (sendTo?.[1]?.trim()) {
         return stripContactName(sendTo[1]);
@@ -283,6 +290,13 @@ function extractLabel(text: string): Record<string, string> | undefined {
     if (keyed?.[1]?.trim() && keyed[2]?.trim()) {
         return { [keyed[1].trim()]: keyed[2].trim().replace(/[.,;:]+$/, '') };
     }
+    // "Add one label: key GraftAI Labels, value Alex"
+    const colonKey = text.match(
+        /\blabels?\s*:\s*key\s+([A-Za-z0-9 ._-]+?)\s*,\s*value\s+([A-Za-z0-9 ._-]+?)(?=[.,;\n]|$)/i
+    );
+    if (colonKey?.[1]?.trim() && colonKey[2]?.trim()) {
+        return { [colonKey[1].trim()]: colonKey[2].trim().replace(/[.,;:]+$/, '') };
+    }
     // label "key"="value" / label key=value
     const eq = text.match(/\blabel\s+"([^"]+)"\s*=\s*"([^"]+)"/i) ?? text.match(/\blabel\s+(\S+)\s*=\s*(\S+)/i);
     if (eq?.[1]?.trim() && eq[2]?.trim()) {
@@ -305,6 +319,13 @@ function extractCustomAnnotation(text: string): Record<string, string> | undefin
     if (namedSingle?.[1]?.trim() && namedSingle[2]?.trim()) {
         return { [namedSingle[1].trim()]: namedSingle[2].trim() };
     }
+    // 'custom annotation name "X" with content "Y"'
+    const withContent =
+        text.match(/\bcustom\s+annotation\s+name\s+"([^"]+)"\s+with\s+content\s+"([^"]+)"/i) ??
+        text.match(/\bcustom\s+annotation\s+name\s+'([^']+)'\s+with\s+content\s+'([^']+)'/i);
+    if (withContent?.[1]?.trim() && withContent[2]?.trim()) {
+        return { [withContent[1].trim()]: withContent[2].trim() };
+    }
     return undefined;
 }
 
@@ -319,8 +340,89 @@ function messageRestrictsExtraMetadata(text: string): boolean {
     );
 }
 
+export interface GrafanaAlertUpdateRequest {
+    /** Existing rule title to update (required). */
+    ruleTitle: string;
+    contactPoint?: string;
+    contactPointEmail?: string;
+    createContactPoint?: boolean;
+    labels?: Record<string, string>;
+    /** When true, replace labels/annotations with only the requested set. */
+    restrictMetadata?: boolean;
+    summary?: string;
+    description?: string;
+    customAnnotations?: Record<string, string>;
+}
+
+/**
+ * True when the operator is updating an existing alert rule by name
+ * (typically a small follow-up after a create), not creating from a panel.
+ */
+export function messageMentionsGrafanaAlertUpdate(message: string): boolean {
+    const text = normalizeMessageQuotes(message.trim());
+    if (!text) {
+        return false;
+    }
+    const hasNamedRule =
+        /\balert(?:\s+rule)?\s+named\s+/i.test(text) ||
+        /\balert\s+rule\s+(?:titled|called)\s+/i.test(text);
+    if (!hasNamedRule) {
+        return false;
+    }
+    // Full create prompts often say "modify the panel queries" / "change …" — those are not updates.
+    const hasPanelCreate =
+        /\bpanel\s+titled\b/i.test(text) ||
+        /\bdashboard\s+with\s+uid\b/i.test(text) ||
+        (/\bcreate\b/i.test(text) && /\bfor\s+(?:the\s+)?panel\b/i.test(text));
+    if (hasPanelCreate) {
+        return false;
+    }
+    // Explicit update verbs on a named rule (no panel/dashboard create context).
+    if (/\b(update|edit|modify|patch|change)\b/i.test(text)) {
+        return true;
+    }
+    // Metadata-only follow-up: add label/summary/annotation/notify to a named rule.
+    return (
+        /\b(add|set|make)\b/i.test(text) &&
+        /\b(label|summary|description|annotation|notify|contact\s*point)\b/i.test(text)
+    );
+}
+
+export function parseGrafanaAlertUpdateRequest(message: string): GrafanaAlertUpdateRequest | null {
+    const text = normalizeMessageQuotes(message.trim());
+    if (!messageMentionsGrafanaAlertUpdate(text)) {
+        return null;
+    }
+    const ruleTitle = extractRuleTitle(text);
+    if (!ruleTitle) {
+        return null;
+    }
+    // Full create prompts that also say "named" should stay on the create path.
+    if (
+        /\bpanel\s+titled\b/i.test(text) &&
+        (/\bdashboard\s+with\s+uid\b/i.test(text) || /\bcreate\b/i.test(text))
+    ) {
+        return null;
+    }
+    return {
+        ruleTitle,
+        contactPoint: extractContactPoint(text),
+        contactPointEmail: extractContactPointEmail(text),
+        createContactPoint: messageWantsNewContactPoint(text),
+        labels: extractLabel(text),
+        restrictMetadata: messageRestrictsExtraMetadata(text),
+        summary: extractQuotedField(text, 'summary'),
+        description: extractQuotedField(text, 'description'),
+        customAnnotations: extractCustomAnnotation(text),
+    };
+}
+
 export function parseGrafanaAlertCreateRequest(message: string): GrafanaAlertCreateRequest | null {
     const text = normalizeMessageQuotes(message.trim());
+    // Prefer the update path for small follow-up prompts (no panel/dashboard).
+    if (messageMentionsGrafanaAlertUpdate(text) && parseGrafanaAlertUpdateRequest(text)) {
+        return null;
+    }
     if (!messageMentionsGrafanaAlertCreate(text)) {
         return null;
     }
