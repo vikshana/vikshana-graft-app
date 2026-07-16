@@ -116,6 +116,18 @@ describe('grafanaAlertParse', () => {
         expect(userWantsDashboardReviewOnly(METADATA_UPDATE_PROMPT)).toBe(false);
     });
 
+    const EVAL_GROUP_UPDATE_PROMPT =
+        'Update the alert rule named GraftAI Rule. Create a new evaluation group called "Test Eval Group" that evaluates every minute. Add GraftAI Rule to the Test Eval Group.';
+
+    it('parses evaluation-group move update prompts', () => {
+        expect(messageMentionsGrafanaAlertUpdate(EVAL_GROUP_UPDATE_PROMPT)).toBe(true);
+        const req = parseGrafanaAlertUpdateRequest(EVAL_GROUP_UPDATE_PROMPT);
+        expect(req?.ruleTitle).toBe('GraftAI Rule');
+        expect(req?.ruleGroup).toBe('Test Eval Group');
+        expect(req?.every).toBe('1m');
+        expect(parseGrafanaAlertCreateRequest(EVAL_GROUP_UPDATE_PROMPT)).toBeNull();
+    });
+
     it('does not treat full create prompts as update-only', () => {
         expect(messageMentionsGrafanaAlertUpdate(FULL_CUSTOM_METADATA_PROMPT)).toBe(false);
         expect(parseGrafanaAlertUpdateRequest(FULL_CUSTOM_METADATA_PROMPT)).toBeNull();

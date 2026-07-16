@@ -1,7 +1,11 @@
 import { getBackendSrv } from '@grafana/runtime';
 import { lastValueFrom } from 'rxjs';
 import type { GrafanaAlertUpdateRequest } from './grafanaAlertParse';
-import { matchContactPointName } from './grafanaAlertBuild';
+import {
+    matchContactPointName,
+    parseEvalIntervalSeconds,
+    reconcilePendingWithEvalInterval,
+} from './grafanaAlertBuild';
 
 const PROVISION_HEADERS = {
     'X-Disable-Provenance': 'true',
@@ -14,6 +18,10 @@ export interface ProgrammaticGrafanaAlertUpdateResult {
     ruleUid?: string;
     ruleTitle?: string;
     ruleGroup?: string;
+    ruleGroupMoved?: boolean;
+    evalIntervalSeconds?: number;
+    pendingFor?: string;
+    pendingAdjusted?: boolean;
     folderUID?: string;
     contactPoint?: string;
     contactPointCreated?: boolean;
@@ -28,6 +36,7 @@ interface ProvisionedRuleRow {
     title?: string;
     folderUID?: string;
     ruleGroup?: string;
+    for?: string;
     annotations?: Record<string, string>;
     labels?: Record<string, string>;
     notification_settings?: { receiver?: string };
@@ -135,8 +144,8 @@ function findRuleByTitle(existing: ProvisionedRuleRow[], title: string): Provisi
 }
 
 /**
- * Patch labels / annotations / contact point on an existing Grafana-managed alert by title.
- * Intended for small follow-up prompts after a create (avoids needing dashboard UID + panel).
+ * Patch labels / annotations / contact point / evaluation group on an existing
+ * Grafana-managed alert by title. Intended for small follow-up prompts after a create.
  */
 export async function runProgrammaticGrafanaAlertUpdate(
     request: GrafanaAlertUpdateRequest,
@@ -240,6 +249,26 @@ export async function runProgrammaticGrafanaAlertUpdate(
         }
     }
 
+    const targetGroup = request.ruleGroup?.trim();
+    const previousGroup = (full.ruleGroup ?? prior.ruleGroup ?? '').trim();
+    const nextGroup = targetGroup || previousGroup;
+    const ruleGroupMoved = Boolean(targetGroup && targetGroup !== previousGroup);
+    const folderUID = (full.folderUID ?? prior.folderUID ?? '').trim();
+    const evalIntervalSeconds = request.every
+        ? parseEvalIntervalSeconds(request.every)
+        : undefined;
+
+    // Grafana requires pending (for) ≥ evaluation interval when we change the group interval.
+    let pendingFor: string | undefined;
+    let pendingAdjusted = false;
+    if (evalIntervalSeconds != null) {
+        const currentFor =
+            typeof full.for === 'string' && full.for.trim() ? String(full.for) : '1m';
+        const reconciled = reconcilePendingWithEvalInterval(currentFor, evalIntervalSeconds);
+        pendingFor = reconciled.pendingFor;
+        pendingAdjusted = reconciled.adjusted;
+    }
+
     const body: Record<string, unknown> = {
         ...full,
         uid: full.uid ?? prior.uid,
@@ -247,6 +276,12 @@ export async function runProgrammaticGrafanaAlertUpdate(
         labels: nextLabels,
         annotations: nextAnnotations,
     };
+    if (nextGroup) {
+        body.ruleGroup = nextGroup;
+    }
+    if (pendingFor) {
+        body.for = pendingFor;
+    }
     if (contactPointName) {
         body.notification_settings = {
             ...(typeof full.notification_settings === 'object' && full.notification_settings
@@ -268,15 +303,62 @@ export async function runProgrammaticGrafanaAlertUpdate(
         };
     }
 
-    // Verify the write stuck.
+    // Set/create the evaluation group interval after the rule is in that group.
+    if (nextGroup && folderUID && evalIntervalSeconds != null) {
+        try {
+            const groupUrl = `/api/v1/provisioning/folder/${encodeURIComponent(folderUID)}/rule-groups/${encodeURIComponent(nextGroup)}`;
+            let group: {
+                title?: string;
+                folderUid?: string;
+                interval?: number;
+                rules?: unknown[];
+            };
+            try {
+                group = await grafanaGet(groupUrl);
+            } catch {
+                group = {
+                    title: nextGroup,
+                    folderUid: folderUID,
+                    interval: evalIntervalSeconds,
+                    rules: [],
+                };
+            }
+            if (group.interval !== evalIntervalSeconds || ruleGroupMoved) {
+                await grafanaPut(groupUrl, {
+                    ...group,
+                    title: group.title ?? nextGroup,
+                    folderUid: group.folderUid ?? folderUID,
+                    interval: evalIntervalSeconds,
+                });
+            }
+        } catch (err) {
+            return {
+                ok: false,
+                error:
+                    `Moved rule to group **${nextGroup}** but could not set evaluation interval ` +
+                    `to ${evalIntervalSeconds}s: ${extractErrorMessage(err)}`,
+            };
+        }
+    }
+
+    // Verify the write stuck (and that the rule is in the target group when requested).
+    let verified: ProvisionedRuleRow | undefined;
     try {
-        const verified = await grafanaGet<ProvisionedRuleRow>(
+        verified = await grafanaGet<ProvisionedRuleRow>(
             `/api/v1/provisioning/alert-rules/${encodeURIComponent(prior.uid)}`
         );
         if (!verified?.uid) {
             return {
                 ok: false,
                 error: `Update appeared to succeed but rule **${ruleTitle}** (\`${prior.uid}\`) could not be verified.`,
+            };
+        }
+        if (targetGroup && (verified.ruleGroup ?? '') !== targetGroup) {
+            return {
+                ok: false,
+                error:
+                    `Rule **${ruleTitle}** is still in group \`${verified.ruleGroup ?? '(none)'}\` ` +
+                    `instead of **${targetGroup}**. Try again or move it in the Grafana UI.`,
             };
         }
     } catch (err) {
@@ -290,8 +372,12 @@ export async function runProgrammaticGrafanaAlertUpdate(
         ok: true,
         ruleUid: prior.uid,
         ruleTitle: full.title ?? ruleTitle,
-        ruleGroup: full.ruleGroup ?? prior.ruleGroup,
-        folderUID: full.folderUID ?? prior.folderUID,
+        ruleGroup: verified?.ruleGroup || nextGroup || previousGroup || undefined,
+        ruleGroupMoved,
+        evalIntervalSeconds,
+        pendingFor,
+        pendingAdjusted,
+        folderUID: folderUID || undefined,
         contactPoint: contactPointName,
         contactPointCreated,
         labels: request.labels,
@@ -310,7 +396,7 @@ export function formatGrafanaAlertUpdateReply(
             `### Could not update Grafana alert (build ${buildNumber})\n\n` +
             `${result.error ?? 'Unknown error'}\n\n` +
             `Tip: name the existing rule exactly (\`alert rule named GraftAI Rule\`) and keep this ` +
-            `as a small follow-up — labels / summary / description / annotations / contact point only.`
+            `as a small follow-up — labels / annotations / contact point / evaluation group.`
         );
     }
 
@@ -333,6 +419,25 @@ export function formatGrafanaAlertUpdateReply(
               result.contactPointCreated ? ' _(newly created)_' : ''
           }\n`
         : '';
+    const groupLine = result.ruleGroup
+        ? `- **Rule group:** \`${result.ruleGroup}\`` +
+          (result.ruleGroupMoved ? ' _(moved into this evaluation group)_' : '') +
+          (result.folderUID ? ` · folder \`${result.folderUID}\`` : '') +
+          `\n`
+        : result.folderUID
+          ? `- **Folder:** \`${result.folderUID}\`\n`
+          : '';
+    const evalLine =
+        result.evalIntervalSeconds != null
+            ? `- **Evaluate:** every **${result.evalIntervalSeconds}s**` +
+              (result.pendingFor
+                  ? ` · pending **${result.pendingFor}**` +
+                    (result.pendingAdjusted
+                        ? ' _(raised so pending ≥ evaluation interval)_'
+                        : '')
+                  : '') +
+              `\n`
+            : '';
 
     return (
         `### Grafana alert updated (build ${buildNumber})\n\n` +
@@ -340,13 +445,12 @@ export function formatGrafanaAlertUpdateReply(
         (result.ruleUid ? ` (\`${result.ruleUid}\`)` : '') +
         `.\n\n` +
         contactLine +
-        (result.ruleGroup ? `- **Rule group:** \`${result.ruleGroup}\`` : '') +
-        (result.folderUID ? ` · folder \`${result.folderUID}\`` : '') +
-        (result.ruleGroup || result.folderUID ? `\n` : '') +
+        groupLine +
+        evalLine +
         labelLine +
         summaryLine +
         descriptionLine +
         customAnnLine +
-        `\nOpen **Alerts & IRM → Alert rules** → **${result.ruleTitle}** to confirm labels, annotations, and notifications.`
+        `\nOpen **Alerts & IRM → Alert rules** → **${result.ruleTitle}** to confirm the evaluation group, labels, annotations, and notifications.`
     );
 }

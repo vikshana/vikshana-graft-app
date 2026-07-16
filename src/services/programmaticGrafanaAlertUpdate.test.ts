@@ -77,6 +77,95 @@ describe('runProgrammaticGrafanaAlertUpdate', () => {
         expect(putBody?.notification_settings).toEqual({ receiver: 'Alex Test Email' });
     });
 
+    it('moves the rule into a new evaluation group and sets the interval', async () => {
+        const prompt =
+            'Update the alert rule named GraftAI Rule. Create a new evaluation group called "Test Eval Group" that evaluates every minute. Add GraftAI Rule to the Test Eval Group.';
+        let putBody: Record<string, unknown> | undefined;
+        let groupPut: { interval?: number; title?: string; folderUid?: string } | undefined;
+        let verifiedOnce = false;
+
+        mockFetch.mockImplementation((req: { url: string; method?: string; data?: unknown }) => {
+            if (
+                req.url.includes('/alert-rules') &&
+                (req.method ?? 'GET') === 'GET' &&
+                !/\/alert-rules\/[\w-]+$/.test(req.url)
+            ) {
+                return of({
+                    data: [
+                        {
+                            uid: 'rule-existing',
+                            title: 'GraftAI Rule',
+                            folderUID: 'folder-graftai',
+                            ruleGroup: 'graft-idHkqdqnk-105',
+                        },
+                    ],
+                });
+            }
+            if (/\/alert-rules\/rule-existing$/.test(req.url) && (req.method ?? 'GET') === 'GET') {
+                if (verifiedOnce || putBody) {
+                    // Post-save verification — rule is now in the new group.
+                    return of({
+                        data: {
+                            uid: 'rule-existing',
+                            title: 'GraftAI Rule',
+                            folderUID: 'folder-graftai',
+                            ruleGroup: 'Test Eval Group',
+                            for: '1m',
+                        },
+                    });
+                }
+                return of({
+                    data: {
+                        uid: 'rule-existing',
+                        title: 'GraftAI Rule',
+                        folderUID: 'folder-graftai',
+                        ruleGroup: 'graft-idHkqdqnk-105',
+                        for: '5m',
+                        labels: {},
+                        annotations: {},
+                        condition: 'H',
+                        data: [],
+                        noDataState: 'NoData',
+                        execErrState: 'Alerting',
+                        orgId: 1,
+                    },
+                });
+            }
+            if (/\/alert-rules\/rule-existing$/.test(req.url) && req.method === 'PUT') {
+                putBody = req.data as Record<string, unknown>;
+                verifiedOnce = true;
+                return of({ data: { uid: 'rule-existing', title: 'GraftAI Rule' } });
+            }
+            if (req.url.includes('/rule-groups/') && (req.method ?? 'GET') === 'GET') {
+                // New group may 404 initially — simulate empty/new group.
+                return of({
+                    data: {
+                        title: 'Test Eval Group',
+                        folderUid: 'folder-graftai',
+                        interval: 60,
+                        rules: [],
+                    },
+                });
+            }
+            if (req.url.includes('/rule-groups/') && req.method === 'PUT') {
+                groupPut = req.data as { interval?: number; title?: string; folderUid?: string };
+                return of({ data: groupPut });
+            }
+            return throwError(() => new Error(`unexpected url ${req.url} method ${req.method}`));
+        });
+
+        const req = parseGrafanaAlertUpdateRequest(prompt)!;
+        const result = await runProgrammaticGrafanaAlertUpdate(req, 196);
+        expect(result.ok).toBe(true);
+        expect(result.ruleGroup).toBe('Test Eval Group');
+        expect(result.ruleGroupMoved).toBe(true);
+        expect(result.evalIntervalSeconds).toBe(60);
+        expect(putBody?.ruleGroup).toBe('Test Eval Group');
+        // Pending was already 5m (>= 1m interval), so no raise needed — still may set for.
+        expect(groupPut?.interval).toBe(60);
+        expect(groupPut?.title).toBe('Test Eval Group');
+    });
+
     it('returns an error when the named rule does not exist', async () => {
         mockFetch.mockImplementation((req: { url: string; method?: string }) => {
             if (req.url.includes('/alert-rules') && (req.method ?? 'GET') === 'GET') {

@@ -214,11 +214,11 @@ function extractFolderTitle(text: string): string | undefined {
 
 function extractRuleGroup(text: string): string | undefined {
     const patterns = [
-        /\bevaluation\s+group\s+named\s+"([^"]+)"/i,
-        /\bevaluation\s+group\s+named\s+'([^']+)'/i,
-        /\bevaluation\s+group\s+named\s+([A-Za-z0-9][A-Za-z0-9 ._-]*?)(?=\s+that\b|\s+evaluat|\s+with\b|[.,;\n]|$)/i,
-        /\brule\s+group\s+named\s+"([^"]+)"/i,
-        /\brule\s+group\s+named\s+([A-Za-z0-9][A-Za-z0-9 ._-]*?)(?=\s+that\b|\s+evaluat|[.,;\n]|$)/i,
+        /\bevaluation\s+group\s+(?:named|called)\s+"([^"]+)"/i,
+        /\bevaluation\s+group\s+(?:named|called)\s+'([^']+)'/i,
+        /\bevaluation\s+group\s+(?:named|called)\s+([A-Za-z0-9][A-Za-z0-9 ._-]*?)(?=\s+that\b|\s+evaluat|\s+with\b|[.,;\n]|$)/i,
+        /\brule\s+group\s+(?:named|called)\s+"([^"]+)"/i,
+        /\brule\s+group\s+(?:named|called)\s+([A-Za-z0-9][A-Za-z0-9 ._-]*?)(?=\s+that\b|\s+evaluat|[.,;\n]|$)/i,
     ];
     for (const re of patterns) {
         const m = text.match(re);
@@ -346,6 +346,10 @@ export interface GrafanaAlertUpdateRequest {
     contactPoint?: string;
     contactPointEmail?: string;
     createContactPoint?: boolean;
+    /** Move the rule into this evaluation / rule group (created on save if new). */
+    ruleGroup?: string;
+    /** Evaluation interval for the (new) group, e.g. "1m". */
+    every?: string;
     labels?: Record<string, string>;
     /** When true, replace labels/annotations with only the requested set. */
     restrictMetadata?: boolean;
@@ -381,10 +385,12 @@ export function messageMentionsGrafanaAlertUpdate(message: string): boolean {
     if (/\b(update|edit|modify|patch|change)\b/i.test(text)) {
         return true;
     }
-    // Metadata-only follow-up: add label/summary/annotation/notify to a named rule.
+    // Metadata / evaluation-group follow-up on a named rule.
     return (
-        /\b(add|set|make)\b/i.test(text) &&
-        /\b(label|summary|description|annotation|notify|contact\s*point)\b/i.test(text)
+        /\b(add|set|make|create)\b/i.test(text) &&
+        /\b(label|summary|description|annotation|notify|contact\s*point|evaluation\s+group|rule\s+group)\b/i.test(
+            text
+        )
     );
 }
 
@@ -409,6 +415,8 @@ export function parseGrafanaAlertUpdateRequest(message: string): GrafanaAlertUpd
         contactPoint: extractContactPoint(text),
         contactPointEmail: extractContactPointEmail(text),
         createContactPoint: messageWantsNewContactPoint(text),
+        ruleGroup: extractRuleGroup(text),
+        every: extractEvalInterval(text),
         labels: extractLabel(text),
         restrictMetadata: messageRestrictsExtraMetadata(text),
         summary: extractQuotedField(text, 'summary'),
