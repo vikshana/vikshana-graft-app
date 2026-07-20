@@ -2,12 +2,14 @@ import {
     formatGrafanaAlertGuidanceReply,
     messageMentionsGrafanaAlertCreate,
     messageMentionsGrafanaAlertUpdate,
+    messageMentionsGrafanaEvalGroupIntervalChange,
     parseGrafanaAlertCreateRequest,
     parseGrafanaAlertUpdateRequest,
+    parseGrafanaEvalGroupIntervalRequest,
 } from './grafanaAlertParse';
 import { parseAddOwnHistoryPanelRequest } from './ownHistoryPanelParse';
 import { userWantsDashboardReviewOnly } from './dashboardReviewParse';
-import { messageHasProgrammaticHandler } from './programmaticChatIntents';
+import { isSimpleConversationalMessage, messageHasProgrammaticHandler } from './programmaticChatIntents';
 
 describe('grafanaAlertParse', () => {
     const OWN_HISTORY_ALERT_PROMPT =
@@ -194,5 +196,22 @@ describe('grafanaAlertParse', () => {
         expect(reply).toContain('Reduce');
         expect(reply).toContain('$E > $F || $E < $G');
         expect(reply).toContain('1m');
+    });
+
+    const EVAL_GROUP_INTERVAL_PROMPT =
+        "Change the Evaluation Interval of 'Test Eval Group' to be 2 minutes.";
+
+    it('parses evaluation-group interval change prompts and keeps them off the LLM simple path', () => {
+        expect(messageMentionsGrafanaEvalGroupIntervalChange(EVAL_GROUP_INTERVAL_PROMPT)).toBe(true);
+        expect(parseGrafanaEvalGroupIntervalRequest(EVAL_GROUP_INTERVAL_PROMPT)).toEqual({
+            ruleGroup: 'Test Eval Group',
+            every: '2m',
+        });
+        expect(parseGrafanaAlertCreateRequest(EVAL_GROUP_INTERVAL_PROMPT)).toBeNull();
+        expect(parseGrafanaAlertUpdateRequest(EVAL_GROUP_INTERVAL_PROMPT)).toBeNull();
+        expect(messageHasProgrammaticHandler(EVAL_GROUP_INTERVAL_PROMPT)).toBe(true);
+        expect(isSimpleConversationalMessage(EVAL_GROUP_INTERVAL_PROMPT)).toBe(false);
+        expect(parseAddOwnHistoryPanelRequest(EVAL_GROUP_INTERVAL_PROMPT)).toBeNull();
+        expect(userWantsDashboardReviewOnly(EVAL_GROUP_INTERVAL_PROMPT)).toBe(false);
     });
 });

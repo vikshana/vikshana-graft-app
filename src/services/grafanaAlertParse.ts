@@ -288,6 +288,10 @@ function extractRuleGroup(text: string): string | undefined {
         /\bevaluation\s+group\s+(?:named|called)\s+([A-Za-z0-9][A-Za-z0-9 ._-]*?)(?=\s+that\b|\s+evaluat|\s+with\b|[.,;\n]|$)/i,
         /\brule\s+group\s+(?:named|called)\s+"([^"]+)"/i,
         /\brule\s+group\s+(?:named|called)\s+([A-Za-z0-9][A-Za-z0-9 ._-]*?)(?=\s+that\b|\s+evaluat|[.,;\n]|$)/i,
+        // "Change the Evaluation Interval of 'Test Eval Group' …"
+        /\bevaluation\s+interval\s+of\s+"([^"]+)"/i,
+        /\bevaluation\s+interval\s+of\s+'([^']+)'/i,
+        /\bevaluation\s+interval\s+of\s+([A-Za-z0-9][A-Za-z0-9 ._-]*?)(?=\s+to\b|[.,;\n]|$)/i,
     ];
     for (const re of patterns) {
         const m = text.match(re);
@@ -312,6 +316,23 @@ function extractEvalInterval(text: string): string | undefined {
     const compact = text.match(/\bevaluate[sd]?\s+every\s+(\d+\s*[smhd])\b/i);
     if (compact?.[1]) {
         return compact[1].replace(/\s+/g, '').toLowerCase();
+    }
+    // "to be 2 minutes" / "to 2 minutes" / "to 2m"
+    const toBe = text.match(
+        /\bto\s+be\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|thirty)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hour|hours|d|day|days)\b/i
+    );
+    if (toBe) {
+        return toGrafanaDuration(toBe[1], toBe[2]);
+    }
+    const toDur = text.match(
+        /\bto\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|thirty)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hour|hours|d|day|days)\b/i
+    );
+    if (toDur) {
+        return toGrafanaDuration(toDur[1], toDur[2]);
+    }
+    const toCompact = text.match(/\bto\s+(?:be\s+)?(\d+\s*[smhd])\b/i);
+    if (toCompact?.[1]) {
+        return toCompact[1].replace(/\s+/g, '').toLowerCase();
     }
     return undefined;
 }
@@ -525,8 +546,58 @@ export function parseGrafanaAlertUpdateRequest(message: string): GrafanaAlertUpd
     };
 }
 
+export interface GrafanaEvalGroupIntervalRequest {
+    ruleGroup: string;
+    every: string;
+}
+
+/**
+ * "Change the Evaluation Interval of 'Test Eval Group' to be 2 minutes."
+ * — group-level interval change, not a rule create/update.
+ */
+export function messageMentionsGrafanaEvalGroupIntervalChange(message: string): boolean {
+    const text = normalizeMessageQuotes(message.trim());
+    if (!text) {
+        return false;
+    }
+    if (!/\bevaluation\s+interval\b/i.test(text)) {
+        return false;
+    }
+    if (!/\b(change|set|update|make)\b/i.test(text)) {
+        return false;
+    }
+    // Avoid stealing full alert-rule creates that also mention evaluation interval.
+    if (/\bpanel\s+titled\b/i.test(text) || messageWantsAlertRuleBuiltFromPanel(text)) {
+        return false;
+    }
+    return (
+        /\bof\s+["'][^"']+["']/i.test(text) ||
+        /\b(?:evaluation|rule|eval)\s+group\b/i.test(text) ||
+        /\bevaluation\s+interval\s+of\s+[A-Za-z0-9]/i.test(text)
+    );
+}
+
+export function parseGrafanaEvalGroupIntervalRequest(
+    message: string
+): GrafanaEvalGroupIntervalRequest | null {
+    const text = normalizeMessageQuotes(message.trim());
+    if (!messageMentionsGrafanaEvalGroupIntervalChange(text)) {
+        return null;
+    }
+    const ruleGroup = extractRuleGroup(text);
+    const every = extractEvalInterval(text);
+    if (!ruleGroup || !every) {
+        return null;
+    }
+    return { ruleGroup, every };
+}
+
 export function parseGrafanaAlertCreateRequest(message: string): GrafanaAlertCreateRequest | null {
     const text = normalizeMessageQuotes(message.trim());
+    // Group-level interval changes are not alert-rule creates.
+    if (messageMentionsGrafanaEvalGroupIntervalChange(text) && parseGrafanaEvalGroupIntervalRequest(text)) {
+        return null;
+    }
     const buildFromPanel = messageWantsAlertRuleBuiltFromPanel(text);
     // Prefer the update path for small follow-up prompts (no panel/dashboard),
     // unless this is a hybrid "new rule for panel" create.

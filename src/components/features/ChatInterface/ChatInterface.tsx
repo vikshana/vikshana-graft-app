@@ -116,7 +116,11 @@ import {
   messageRequestsMlPanelGuidance,
   parseModuleMlGuidanceContext,
 } from '../../../services/moduleMlPanelGuidance';
-import { parseGrafanaAlertCreateRequest, parseGrafanaAlertUpdateRequest } from '../../../services/grafanaAlertParse';
+import {
+  parseGrafanaAlertCreateRequest,
+  parseGrafanaAlertUpdateRequest,
+  parseGrafanaEvalGroupIntervalRequest,
+} from '../../../services/grafanaAlertParse';
 import {
   formatGrafanaAlertCreateReply,
   runProgrammaticGrafanaAlertCreate,
@@ -125,6 +129,10 @@ import {
   formatGrafanaAlertUpdateReply,
   runProgrammaticGrafanaAlertUpdate,
 } from '../../../services/programmaticGrafanaAlertUpdate';
+import {
+  formatGrafanaEvalGroupIntervalReply,
+  runProgrammaticGrafanaEvalGroupInterval,
+} from '../../../services/programmaticGrafanaEvalGroupInterval';
 import {
   formatAddPeerRfPanelReply,
   runProgrammaticAddPeerRfPanel,
@@ -1623,6 +1631,45 @@ export const ChatInterface = () => {
           setCurrentSessionId(savedSession.id);
           currentSessionIdRef.current = savedSession.id;
           replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      // Evaluation-group interval change (e.g. "Change the Evaluation Interval of 'Test Eval Group' to be 2 minutes.").
+      // Before alert update/create so group-level prompts are not mis-routed or dropped to the LLM.
+      const grafanaEvalGroupIntervalRequest = parseGrafanaEvalGroupIntervalRequest(content);
+      if (grafanaEvalGroupIntervalRequest) {
+        errorPathTag = 'grafana-eval-group-interval';
+        const evalGroupResult = await runProgrammaticGrafanaEvalGroupInterval(
+          grafanaEvalGroupIntervalRequest,
+          GRAFT_BUILD_NUMBER
+        );
+        finalContent = formatGrafanaEvalGroupIntervalReply(evalGroupResult, GRAFT_BUILD_NUMBER);
+        if (!evalGroupResult.ok) {
+          recordGraftFailure({
+            buildNumber: GRAFT_BUILD_NUMBER,
+            intent: 'grafana-eval-group-interval',
+            userMessagePreview: content,
+            error: evalGroupResult.error ?? 'Unknown error',
+          });
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const evalGroupMessage: Message = { role: 'assistant', content: finalContent };
+        const evalGroupSession = chatHistoryService.saveSession(
+          [...newMessages, evalGroupMessage],
+          currentSessionId
+        );
+        if (evalGroupSession) {
+          setCurrentSessionId(evalGroupSession.id);
+          currentSessionIdRef.current = evalGroupSession.id;
+          replaceChatSessionInUrl(evalGroupSession.id);
         }
         return;
       }
