@@ -159,6 +159,21 @@ describe('grafanaAlertParse', () => {
         expect(messageHasProgrammaticHandler(BUILD_NEW_RULE_FROM_PANEL_PROMPT)).toBe(true);
     });
 
+    const SET_CONTACT_POINT_PROMPT =
+        'Set the contact point as Alex Test Email for the GraftAI Rule on the panel  "Module 1 Current — Alert Test Own History ±2" for the dashboard with the UID = idHkqdqnk';
+
+    it('parses set-contact-point-for-named-rule prompts (no "alert rule named" required)', () => {
+        expect(messageMentionsGrafanaAlertUpdate(SET_CONTACT_POINT_PROMPT)).toBe(true);
+        expect(parseGrafanaAlertCreateRequest(SET_CONTACT_POINT_PROMPT)).toBeNull();
+        const req = parseGrafanaAlertUpdateRequest(SET_CONTACT_POINT_PROMPT);
+        expect(req?.ruleTitle).toBe('GraftAI Rule');
+        expect(req?.contactPoint).toBe('Alex Test Email');
+        expect(req?.createContactPoint).toBe(false);
+        expect(req?.dashboardUid).toBe('idHkqdqnk');
+        expect(req?.panelTitle).toBe('Module 1 Current — Alert Test Own History ±2');
+        expect(messageHasProgrammaticHandler(SET_CONTACT_POINT_PROMPT)).toBe(true);
+    });
+
     it('does not treat full create prompts as update-only', () => {
         expect(messageMentionsGrafanaAlertUpdate(FULL_CUSTOM_METADATA_PROMPT)).toBe(false);
         expect(parseGrafanaAlertUpdateRequest(FULL_CUSTOM_METADATA_PROMPT)).toBeNull();

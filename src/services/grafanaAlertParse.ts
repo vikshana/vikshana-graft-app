@@ -114,6 +114,9 @@ function extractQuotedPanelTitle(text: string): string | undefined {
         /\b(?:for\s+(?:the\s+)?)?panel\s+of\s+'([^']+)'/i,
         /\bfor\s+(?:the\s+)?panel\s+"([^"]+)"/i,
         /\bfor\s+(?:the\s+)?panel\s+'([^']+)'/i,
+        // "on the panel "…""
+        /\bon\s+(?:the\s+)?panel\s+"([^"]+)"/i,
+        /\bon\s+(?:the\s+)?panel\s+'([^']+)'/i,
     ];
     for (const re of patterns) {
         const m = text.match(re);
@@ -133,6 +136,20 @@ function stripContactName(raw: string): string {
 }
 
 function extractContactPoint(text: string): string | undefined {
+    // "Set/assign the contact point as/to Alex Test Email"
+    const setAs =
+        text.match(
+            /\b(?:set|assign|use|configure)\s+(?:the\s+)?contact\s*point\s+(?:as|to)\s+"([^"]+)"/i
+        ) ??
+        text.match(
+            /\b(?:set|assign|use|configure)\s+(?:the\s+)?contact\s*point\s+(?:as|to)\s+'([^']+)'/i
+        ) ??
+        text.match(
+            /\b(?:set|assign|use|configure)\s+(?:the\s+)?contact\s*point\s+(?:as|to)\s+([A-Za-z0-9][A-Za-z0-9 ._-]*?)(?=\s+for\b|\s+on\b|\s+to\b|[.,;\n]|$)/i
+        );
+    if (setAs?.[1]?.trim()) {
+        return stripContactName(setAs[1]);
+    }
     // "contact point named/called X" (also covers create phrasing).
     const namedContact = text.match(
         /\bcontact\s*point\s+(?:named|called)\s+"([^"]+)"/i
@@ -226,11 +243,20 @@ function extractRuleTitle(text: string): string | undefined {
         /\b(?:grafana[- ]?managed\s+)?alert(?:\s+rule)?\s+named\s+([A-Za-z0-9][A-Za-z0-9 ._-]*?)(?=\s+for\s+(?:the\s+)?panel\b|\s+on\s+the\s+dashboard\b|[.,;\n]|$)/i,
         /\balert\s+rule\s+(?:titled|called)\s+"([^"]+)"/i,
         /\balert\s+rule\s+(?:titled|called)\s+'([^']+)'/i,
+        // "for the GraftAI Rule on the panel …"
+        /\bfor\s+(?:the\s+)?([A-Za-z0-9][A-Za-z0-9 ._-]*?)\s+on\s+(?:the\s+)?panel\b/i,
+        // "the GraftAI Rule on the panel …" / "GraftAI Rule on the panel"
+        /\b(?:the\s+)?([A-Za-z0-9][A-Za-z0-9 ._-]*?\s+Rule)\s+on\s+(?:the\s+)?panel\b/i,
     ];
     for (const re of patterns) {
         const m = text.match(re);
         if (m?.[1]?.trim()) {
-            return m[1].trim().replace(/[.,;:]+$/, '');
+            const title = m[1].trim().replace(/[.,;:]+$/, '');
+            // Avoid capturing "contact point as Alex Test Email for the GraftAI Rule"
+            if (/^contact\s*point\b/i.test(title) || /^panel\b/i.test(title)) {
+                continue;
+            }
+            return title;
         }
     }
     return undefined;
@@ -418,6 +444,19 @@ export function messageMentionsGrafanaAlertUpdate(message: string): boolean {
     if (messageWantsAlertRuleBuiltFromPanel(text)) {
         return false;
     }
+
+    // "Set the contact point as Alex Test Email for the GraftAI Rule on the panel …"
+    // — does not require the phrase "alert rule named". Keep this narrow so full
+    // create prompts (create contact point named …) are not stolen.
+    if (
+        /\b(set|assign|use)\s+(?:the\s+)?contact\s*point\s+(?:as|to)\b/i.test(text) &&
+        extractContactPoint(text) &&
+        extractRuleTitle(text) &&
+        !(/\bcreate\b/i.test(text) && /\bpanel\s+titled\b/i.test(text))
+    ) {
+        return true;
+    }
+
     const hasNamedRule =
         /\balert(?:\s+rule)?\s+named\s+/i.test(text) ||
         /\balert\s+rule\s+(?:titled|called)\s+/i.test(text);
