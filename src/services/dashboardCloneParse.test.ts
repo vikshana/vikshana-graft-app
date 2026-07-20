@@ -21,6 +21,13 @@ describe('isMachineId', () => {
         expect(isMachineId('2026-05')).toBe(false);
         expect(findMachineIdsInText('timeFrom": "2026-06-15" machine 2406-176021')).toEqual(['2406-176021']);
     });
+
+    it('accepts ElectraMet SIM-style machine ids', () => {
+        expect(isMachineId('ElectraMetBRC-SIM-177121')).toBe(true);
+        expect(
+            findMachineIdsInText('dashboard for ElectraMetBRC-SIM-177121 copy of 2103-176030')
+        ).toEqual(['ElectraMetBRC-SIM-177121', '2103-176030']);
+    });
 });
 
 describe('extractTargetMachineId', () => {
@@ -31,11 +38,27 @@ describe('extractTargetMachineId', () => {
     it('reads explicit machine phrase', () => {
         expect(extractTargetMachineId(namedUser)).toBe('2505-200033');
     });
+
+    it('reads ElectraMet SIM target from "data for"', () => {
+        expect(
+            extractTargetMachineId(
+                'Create a dashboard for ElectraMetBRC-SIM-177121 that is a copy of 2103-176030 with data for ElectraMetBRC-SIM-177121.'
+            )
+        ).toBe('ElectraMetBRC-SIM-177121');
+    });
 });
 
 describe('extractSourceMachineId', () => {
     it('reads "copy of" template id', () => {
         expect(extractSourceMachineId(keysightUser)).toBe('2103-176030');
+    });
+
+    it('reads PowerTech template when target is ElectraMet SIM', () => {
+        expect(
+            extractSourceMachineId(
+                'Create a dashboard for ElectraMetBRC-SIM-177121 that is a copy of 2103-176030 with data for ElectraMetBRC-SIM-177121.'
+            )
+        ).toBe('2103-176030');
     });
 });
 
@@ -46,6 +69,17 @@ describe('parseCloneIntentMessage', () => {
         expect(p.sourceMachineId).toBe('2103-176030');
         expect(p.targetMachineId).toBe('2505-200033');
         expect(p.requestedTitle).toBe('2505-200033 / Keysight');
+    });
+
+    it('parses ElectraMet SIM clone from PowerTech template (build 200 regression)', () => {
+        const prompt =
+            'Create a dashboard for ElectraMetBRC-SIM-177121 that is a copy of 2103-176030 with data for ElectraMetBRC-SIM-177121.';
+        const p = parseCloneIntentMessage(prompt);
+        expect(p.valid).toBe(true);
+        expect(p.error).toBeUndefined();
+        expect(p.sourceMachineId).toBe('2103-176030');
+        expect(p.targetMachineId).toBe('ElectraMetBRC-SIM-177121');
+        expect(p.requestedTitle).toBe('ElectraMetBRC-SIM-177121');
     });
 
     it('parses shorter Keysight prompt without redundant "data for" clause', () => {

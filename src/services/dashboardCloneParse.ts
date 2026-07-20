@@ -1,8 +1,20 @@
-/** PowerTech-style machine id, e.g. 2103-176030 or 2505-200033 (6+ digits after hyphen — not ISO dates like 2026-05). */
-export const MACHINE_ID_PATTERN = /[0-9]{4}-[0-9]{6,}/;
+/**
+ * Machine ids Graft remaps in clones:
+ * - PowerTech: 2103-176030 / 2505-200033 (4 digits, hyphen, 6+ digits — not ISO dates like 2026-05)
+ * - ElectraMet SIM-style: ElectraMetBRC-SIM-177121
+ */
+export const MACHINE_ID_PATTERN =
+    /(?:[0-9]{4}-[0-9]{6,}|[A-Za-z][A-Za-z0-9]*-SIM-[0-9]{3,}|ElectraMet[A-Za-z0-9]*-[A-Za-z0-9]+-[0-9]{3,})/;
 
 export function isMachineId(value: string | undefined): boolean {
-    return Boolean(value && /^[0-9]{4}-[0-9]{6,}$/.test(value));
+    if (!value) {
+        return false;
+    }
+    // Reject short ISO-like YYYY-MM tokens that appear in panel JSON / time ranges.
+    if (/^[0-9]{4}-[0-9]{1,2}$/.test(value)) {
+        return false;
+    }
+    return new RegExp(`^${MACHINE_ID_PATTERN.source}$`).test(value);
 }
 
 /** All machine ids in message order (deduped). Ignores date-like YYYY-MM tokens from panel JSON. */
@@ -18,31 +30,55 @@ export function findMachineIdsInText(message: string): string[] {
 
 /** Template machine to copy (e.g. 2103-176030 from "copy of 2103-176030"). */
 export function extractSourceMachineId(cloneIntentMessage: string): string | undefined {
-    const visual = cloneIntentMessage.match(/\bvisual copy of\s+([0-9]{4}-[0-9]+)/i);
-    if (visual?.[1]) {
+    const idGroup = MACHINE_ID_PATTERN.source;
+    const visual = cloneIntentMessage.match(new RegExp(`\\bvisual copy of\\s+(${idGroup})`, 'i'));
+    if (visual?.[1] && isMachineId(visual[1])) {
         return visual[1];
     }
-    const copyOf = cloneIntentMessage.match(/\bcopy of\s+([0-9]{4}-[0-9]+)/i);
-    if (copyOf?.[1]) {
+    const copyOf = cloneIntentMessage.match(new RegExp(`\\bcopy of\\s+(${idGroup})`, 'i'));
+    if (copyOf?.[1] && isMachineId(copyOf[1])) {
         return copyOf[1];
     }
     const ids = findMachineIdsInText(cloneIntentMessage);
     if (ids.length >= 2) {
+        // Prefer a PowerTech ####-###### as the template when one ElectraMet target is also present.
+        const powerTech = ids.find((id) => /^[0-9]{4}-[0-9]{6,}$/.test(id));
+        const targetHint = extractTargetMachineIdPreferringPhrases(cloneIntentMessage);
+        if (powerTech && targetHint && powerTech !== targetHint) {
+            return powerTech;
+        }
         return ids[0];
     }
     return ids[0];
 }
 
-/** Target machine for data (e.g. 2505-200033 from "data for 2505-200033"). */
-export function extractTargetMachineId(cloneIntentMessage: string): string | undefined {
-    const dataFor = cloneIntentMessage.match(/\b(?:with\s+)?data\s+for\s+([0-9]{4}-[0-9]+)/i);
-    if (dataFor?.[1]) {
+/** Prefer explicit "data for X" / "for X" phrases before falling back to id list. */
+function extractTargetMachineIdPreferringPhrases(cloneIntentMessage: string): string | undefined {
+    const idGroup = MACHINE_ID_PATTERN.source;
+    const dataFor = cloneIntentMessage.match(
+        new RegExp(`\\b(?:with\\s+)?data\\s+for\\s+(${idGroup})`, 'i')
+    );
+    if (dataFor?.[1] && isMachineId(dataFor[1])) {
         return dataFor[1];
     }
 
-    const forMatches = [...cloneIntentMessage.matchAll(/\bfor\s+([0-9]{4}-[0-9]+)/gi)];
+    const forMatches = [
+        ...cloneIntentMessage.matchAll(new RegExp(`\\bfor\\s+(${idGroup})`, 'gi')),
+    ];
     if (forMatches.length > 0) {
-        return forMatches[forMatches.length - 1][1];
+        const last = forMatches[forMatches.length - 1][1];
+        if (last && isMachineId(last)) {
+            return last;
+        }
+    }
+    return undefined;
+}
+
+/** Target machine for data (e.g. 2505-200033 from "data for 2505-200033"). */
+export function extractTargetMachineId(cloneIntentMessage: string): string | undefined {
+    const fromPhrase = extractTargetMachineIdPreferringPhrases(cloneIntentMessage);
+    if (fromPhrase) {
+        return fromPhrase;
     }
 
     const source = extractSourceMachineId(cloneIntentMessage);
@@ -182,7 +218,8 @@ export function parseCloneIntentMessage(message: string): ParsedCloneIntent {
     if (!sourceMachineId || !isMachineId(sourceMachineId)) {
         return {
             valid: false,
-            error: 'Could not find template machine id (e.g. "copy of 2103-176030").',
+            error:
+                'Could not find template machine id (e.g. "copy of 2103-176030" or "copy of ElectraMetBRC-SIM-177121").',
             sourceMachineId,
             targetMachineId,
         };
@@ -190,7 +227,8 @@ export function parseCloneIntentMessage(message: string): ParsedCloneIntent {
     if (!targetMachineId || !isMachineId(targetMachineId)) {
         return {
             valid: false,
-            error: 'Could not find target machine id (e.g. "data for 2505-200033"). Avoid phrasing like "machine from Vendor" without the id.',
+            error:
+                'Could not find target machine id (e.g. "data for 2505-200033" or "data for ElectraMetBRC-SIM-177121"). Avoid phrasing like "machine from Vendor" without the id.',
             sourceMachineId,
             targetMachineId,
         };
