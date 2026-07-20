@@ -28,6 +28,11 @@ export interface GrafanaAlertCreateRequest {
     description?: string;
     /** Extra custom annotations (keys other than summary/description). */
     customAnnotations?: Record<string, string>;
+    /**
+     * Hybrid follow-up: operator said "Update" but asked to build/assign a *new* rule
+     * for a named panel + dashboard — must use the create-from-panel path, not metadata update.
+     */
+    buildFromPanel?: boolean;
     /** Human description of the breach condition. */
     conditionSummary: string;
 }
@@ -41,6 +46,10 @@ export function messageMentionsGrafanaAlertCreate(message: string): boolean {
     const text = normalizeMessageQuotes(message.trim());
     if (!text) {
         return false;
+    }
+    // Hybrid: "Update … for the panel … assign the new rule" → create-from-panel.
+    if (messageWantsAlertRuleBuiltFromPanel(text)) {
+        return true;
     }
     if (!/\b(create|add|set\s*up|configure|make|build|write)\b/i.test(text)) {
         return false;
@@ -62,6 +71,35 @@ export function messageMentionsGrafanaAlertCreate(message: string): boolean {
     return (
         /\balert\b/i.test(text) &&
         /\b(notify|notifications?|contact\s*point|trigger\s+when|threshold)\b/i.test(text)
+    );
+}
+
+/**
+ * Operator wants a *new* panel-backed alert rule (queries built from the panel),
+ * even if the prompt starts with "Update the alert rule named …".
+ * Signal: dashboard + panel + "new rule" / "assign the new rule".
+ */
+export function messageWantsAlertRuleBuiltFromPanel(message: string): boolean {
+    const text = normalizeMessageQuotes(message.trim());
+    if (!text) {
+        return false;
+    }
+    const hasDashboard =
+        extractAllDashboardUids(text).length > 0 ||
+        Boolean(extractDashboardUidFromMessage(text)) ||
+        /\bdashboard\s+with\s+uid\b/i.test(text);
+    const hasPanel =
+        Boolean(extractQuotedPanelTitle(text)) ||
+        /\bpanel\s+(?:titled|of)\b/i.test(text) ||
+        /\bfor\s+(?:the\s+)?panel\b/i.test(text);
+    if (!hasDashboard || !hasPanel) {
+        return false;
+    }
+    return (
+        /\bassign\s+the\s+new\s+rule\b/i.test(text) ||
+        /\b(?:create|make|build)\s+(?:a\s+)?new\s+(?:alert\s+)?rule\b/i.test(text) ||
+        (/\bnew\s+rule\b/i.test(text) &&
+            /\b(evaluation\s+group|rule\s+group|assign)\b/i.test(text))
     );
 }
 
@@ -376,6 +414,10 @@ export function messageMentionsGrafanaAlertUpdate(message: string): boolean {
     if (!text) {
         return false;
     }
+    // "assign the new rule" + panel + dashboard → create-from-panel, not metadata update.
+    if (messageWantsAlertRuleBuiltFromPanel(text)) {
+        return false;
+    }
     const hasNamedRule =
         /\balert(?:\s+rule)?\s+named\s+/i.test(text) ||
         /\balert\s+rule\s+(?:titled|called)\s+/i.test(text);
@@ -446,8 +488,14 @@ export function parseGrafanaAlertUpdateRequest(message: string): GrafanaAlertUpd
 
 export function parseGrafanaAlertCreateRequest(message: string): GrafanaAlertCreateRequest | null {
     const text = normalizeMessageQuotes(message.trim());
-    // Prefer the update path for small follow-up prompts (no panel/dashboard).
-    if (messageMentionsGrafanaAlertUpdate(text) && parseGrafanaAlertUpdateRequest(text)) {
+    const buildFromPanel = messageWantsAlertRuleBuiltFromPanel(text);
+    // Prefer the update path for small follow-up prompts (no panel/dashboard),
+    // unless this is a hybrid "new rule for panel" create.
+    if (
+        !buildFromPanel &&
+        messageMentionsGrafanaAlertUpdate(text) &&
+        parseGrafanaAlertUpdateRequest(text)
+    ) {
         return null;
     }
     if (!messageMentionsGrafanaAlertCreate(text)) {
@@ -491,6 +539,7 @@ export function parseGrafanaAlertCreateRequest(message: string): GrafanaAlertCre
         summary,
         description,
         customAnnotations,
+        buildFromPanel,
         conditionSummary,
     };
 }

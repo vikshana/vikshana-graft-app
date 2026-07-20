@@ -50,6 +50,8 @@ export interface ProgrammaticGrafanaAlertCreateResult {
     requestedPendingFor?: string;
     /** True when Flux was rewritten to `_time`/`_value` (no output `_field` labels). */
     alertCompatibleQueries?: boolean;
+    /** Hybrid follow-up that built the rule from a named panel (not metadata-only update). */
+    buildFromPanel?: boolean;
 }
 
 function extractErrorMessage(err: unknown): string {
@@ -492,6 +494,7 @@ export async function runProgrammaticGrafanaAlertCreate(
         pendingAdjusted: pendingReconcile.adjusted,
         requestedPendingFor: pendingReconcile.requestedPendingFor,
         alertCompatibleQueries: true,
+        buildFromPanel: request.buildFromPanel,
     };
 }
 
@@ -506,9 +509,11 @@ export function formatGrafanaAlertCreateReply(
         );
     }
 
-    const headline = result.updated
-        ? `### Grafana alert updated (build ${buildNumber})\n\n**Updated** — `
-        : `### Grafana alert created (build ${buildNumber})\n\n**Saved** — `;
+    const headline = result.buildFromPanel
+        ? `### Grafana alert created (build ${buildNumber})\n\n**Saved from panel** — `
+        : result.updated
+          ? `### Grafana alert updated (build ${buildNumber})\n\n**Updated** — `
+          : `### Grafana alert created (build ${buildNumber})\n\n**Saved** — `;
 
     const labelLine =
         result.labels && Object.keys(result.labels).length > 0
