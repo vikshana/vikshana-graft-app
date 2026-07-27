@@ -41,7 +41,14 @@ export function messageMentionsPredictiveAnalyticsPanel(message: string): boolea
     if (/\brandomforest\s+vs\s+peers\b/i.test(text) || /\bpeer\s*rf\b/i.test(text)) {
         return false;
     }
-    if (/\bvs\.?\s*peer\s*band\b/i.test(text)) {
+    // Peer Band ±2σ (Flux peer mean) — not History Comparison / RandomForest.
+    if (
+        /\bpeer\s*band\b/i.test(text) ||
+        /\bpeer\s+mean\b/i.test(text) ||
+        /\bupper\s+peer\s+bound\b/i.test(text) ||
+        /\blower\s+peer\s+bound\b/i.test(text) ||
+        /\baverage\s+of\s+modules?\b/i.test(text)
+    ) {
         return false;
     }
     return (

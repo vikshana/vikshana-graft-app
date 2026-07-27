@@ -35,7 +35,10 @@ export function messageMentionsOwnHistoryPanel(message: string): boolean {
     if (/\brandomforest\s+vs\s+peers\b/i.test(text) || /\bpeer\s*rf\b/i.test(text)) {
         return false;
     }
-    if (/\bvs\.?\s*peer\s*band\b/i.test(text) && !/\bown\s+history\b/i.test(text)) {
+    if (
+        (/\bvs\.?\s*peer\s*band\b/i.test(text) || /\bpeer\s*band\b/i.test(text) || /\bpeer\s+mean\b/i.test(text)) &&
+        !/\bown\s+history\b/i.test(text)
+    ) {
         return false;
     }
     const hasTwoSigma =

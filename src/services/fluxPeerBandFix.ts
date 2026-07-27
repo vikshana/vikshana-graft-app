@@ -380,15 +380,15 @@ function isTargetA(refId: string, legend: string): boolean {
 }
 
 function isPeerAvgTarget(refId: string, legend: string): boolean {
-    return refId === 'B' || /peer avg/i.test(legend);
+    return refId === 'B' || /peer\s*(avg|mean|average)/i.test(legend);
 }
 
 function isUpperBandTarget(refId: string, legend: string): boolean {
-    return refId === 'C' || /upper band/i.test(legend);
+    return refId === 'C' || /upper\s+(?:peer\s+)?bound/i.test(legend) || /upper band/i.test(legend);
 }
 
 function isLowerBandTarget(refId: string, legend: string): boolean {
-    return refId === 'D' || /lower band/i.test(legend);
+    return refId === 'D' || /lower\s+(?:peer\s+)?bound/i.test(legend) || /lower band/i.test(legend);
 }
 
 function collectPeerFieldNamesFromTargets(
@@ -1002,6 +1002,125 @@ function assignTargetQuery(target: PanelRecord, query: string, label?: string): 
             modelRec.legendFormat = label;
         }
     }
+}
+
+export interface BuildPeerBandPanelArgs {
+    machineId: string;
+    moduleNumber: number;
+    influxDatasourceUid: string;
+    /** Explicit panel title (e.g. Alert Test Peer Band). */
+    panelTitle?: string;
+    /** Peer module numbers (defaults to all 1–8 except the target). */
+    peerModules?: number[];
+    labels?: {
+        actual?: string;
+        peerMean?: string;
+        upper?: string;
+        lower?: string;
+    };
+}
+
+/**
+ * Build a new Module N Current vs peer mean ± 2σ time series panel (Influx Flux).
+ * Reuses the same union/mean/±2σ query templates as peer-band repair.
+ */
+export function buildPeerBandPanel(args: BuildPeerBandPanelArgs): PanelRecord {
+    const moduleNumber = args.moduleNumber;
+    const actualField = `Module${moduleNumber}_Current_A`;
+    const peerModules =
+        args.peerModules?.filter((n) => n !== moduleNumber && n >= 1 && n <= 8) ??
+        PEER_MODULE_NUMBERS.filter((n) => n !== moduleNumber);
+    const peerFields = defaultPeerFieldsForActual(actualField, peerModules);
+    const machine = args.machineId.replace(/"/g, '\\"');
+    const ctx: FluxFilterContext = {
+        bucketLine: FLUX_BUCKET_LINE,
+        rangeLine: FLUX_RANGE_LINE,
+        machine,
+        measurement: DEFAULT_MEASUREMENT,
+        useMeasurementFilter: false,
+        peerFields,
+        module5Field: actualField,
+        multilineFilter: true,
+    };
+    const actualLabel = args.labels?.actual?.trim() || `Module ${moduleNumber} (Actual)`;
+    const peerMeanLabel = args.labels?.peerMean?.trim() || 'Peer Mean';
+    const upperLabel = args.labels?.upper?.trim() || 'Upper Peer Bound (±2σ)';
+    const lowerLabel = args.labels?.lower?.trim() || 'Lower Peer Bound (±2σ)';
+    const title =
+        args.panelTitle?.trim() ||
+        `Module ${moduleNumber} Current — vs. Peer Band (Modules ${formatPeerModulesForTitle(peerModules)} Avg ± 2σ)`;
+    const ds = { type: 'influxdb', uid: args.influxDatasourceUid };
+
+    const panel: PanelRecord = {
+        id: null,
+        type: 'timeseries',
+        title,
+        description:
+            `Module ${moduleNumber} actual vs peer modules [${peerModules.join(', ')}] mean ± **2σ** (Influx Flux). ` +
+            'Upper/Lower Peer Bounds computed in Flux (not legend-only). Not RandomForest / not ml_predictions.',
+        timezone: 'browser',
+        datasource: ds,
+        gridPos: { h: 12, w: 24, x: 0, y: 0 },
+        fieldConfig: {
+            defaults: {
+                custom: { drawStyle: 'line', spanNulls: true, showPoints: 'never' },
+                unit: 'amp',
+            },
+            overrides: [],
+        },
+        options: { legend: { displayMode: 'list', placement: 'bottom', showLegend: true } },
+        targets: [
+            {
+                refId: 'A',
+                datasource: ds,
+                legendFormat: actualLabel,
+                query: targetAQuery(ctx, actualLabel),
+                rawQuery: true,
+                editorMode: 'code',
+            },
+            {
+                refId: 'B',
+                datasource: ds,
+                legendFormat: peerMeanLabel,
+                query: peerAvgQuery(ctx, peerMeanLabel),
+                rawQuery: true,
+                editorMode: 'code',
+            },
+            {
+                refId: 'C',
+                datasource: ds,
+                legendFormat: upperLabel,
+                query: peerStatsBandQuery(ctx, '+', upperLabel),
+                rawQuery: true,
+                editorMode: 'code',
+            },
+            {
+                refId: 'D',
+                datasource: ds,
+                legendFormat: lowerLabel,
+                query: peerStatsBandQuery(ctx, '-', lowerLabel),
+                rawQuery: true,
+                editorMode: 'code',
+            },
+        ],
+    };
+    return applyModule5PeerBandFieldOverrides(panel).panel;
+}
+
+function formatPeerModulesForTitle(peerModules: number[]): string {
+    if (
+        peerModules.length === 7 &&
+        peerModules.every((n, i) => n === [1, 2, 3, 4, 6, 7, 8][i])
+    ) {
+        return '1–4,6–8';
+    }
+    if (
+        peerModules.length === 7 &&
+        peerModules.every((n, i) => n === [1, 2, 3, 4, 5, 6, 7][i])
+    ) {
+        return '1–7';
+    }
+    return peerModules.join(',');
 }
 
 export function applyModule5PeerBandFluxFixes(

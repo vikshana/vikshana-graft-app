@@ -1,6 +1,10 @@
 import { userWantsBulkPeerBandFix, messageMentionsPeerBandPanelsButNotBulkFix } from './bulkPeerBandFixParse';
 import { messageDescribesUnsupportedAdminRequest } from './adminCapabilityParse';
 import { messageMentionsAddPeerRfPanel, parseAddPeerRfPanelRequest } from './peerRfPanelAddParse';
+import {
+    messageMentionsPeerBandPanelCreate,
+    parseAddPeerBandPanelRequest,
+} from './peerBandPanelAddParse';
 import { userWantsDashboardClone, userWantsDashboardPanelFix } from './dashboardCloneProgress';
 import {
     messageDescribesDashboardRename,
@@ -118,6 +122,8 @@ export function messageHasProgrammaticHandler(message: string, contextDashboardU
         parseDashboardRebuildRequest(text) != null ||
         parseAddPeerRfPanelRequest(text) != null ||
         messageMentionsAddPeerRfPanel(text) ||
+        parseAddPeerBandPanelRequest(text) != null ||
+        messageMentionsPeerBandPanelCreate(text) ||
         messageMentionsPeerBandPanelsButNotBulkFix(text) ||
         userWantsDashboardClone(text) ||
         userWantsDashboardPanelFix(text) ||

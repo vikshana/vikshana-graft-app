@@ -47,6 +47,13 @@ describe('historyComparisonPanelAddParse', () => {
         ).toBe(false);
     });
 
+    it('does not steal Peer Band ±2σ machine-learning create prompts', () => {
+        const peerBand =
+            'Create a new machine learning time series panel titled "Module 2 Current — Alert Test Peer Band ±2σ" on the dashboard with UID afq7tc6hl1m9sb. Compare Module 2 Current against the average of Modules 1 and 3 through 8. Create four visible lines: Module 2 Actual Peer Mean Upper Peer Bound (Peer Mean + 2 × Standard Deviation) Lower Peer Bound (Peer Mean - 2 × Standard Deviation) Calculate the Upper and Lower Peer Bounds in the Flux query itself.';
+        expect(messageMentionsPredictiveAnalyticsPanel(peerBand)).toBe(false);
+        expect(parseAddHistoryComparisonPanelRequest(peerBand)).toBeNull();
+    });
+
     it('builds canonical live history comparison title', () => {
         expect(canonicalLiveHistoryComparisonTitle(2)).toBe('Module 2 Current — History Comparison');
     });

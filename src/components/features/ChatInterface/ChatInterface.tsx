@@ -273,6 +273,14 @@ import {
   formatBulkOwnHistoryPanelReply,
   formatOwnHistoryNamingReply,
 } from '../../../services/programmaticOwnHistoryPanel';
+import {
+  parseAddPeerBandPanelRequest,
+  messageMentionsPeerBandPanelCreate,
+} from '../../../services/peerBandPanelAddParse';
+import {
+  runProgrammaticAddPeerBandPanel,
+  formatAddPeerBandPanelReply,
+} from '../../../services/programmaticAddPeerBandPanel';
 import { buildPowerTechOperatorGuide } from '../../../services/graftPowerTechGuide';
 import {
   clearPendingDashboardTask,
@@ -1303,6 +1311,86 @@ export const ChatInterface = () => {
           setCurrentSessionId(savedSession.id);
           currentSessionIdRef.current = savedSession.id;
           replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      // Peer Band ±2σ create (Influx Flux) — before generic panel create (PromQL/vector(0) → no data).
+      const addPeerBandRequest = parseAddPeerBandPanelRequest(content);
+      if (messageMentionsPeerBandPanelCreate(content) && !addPeerBandRequest) {
+        errorPathTag = 'add-peer-band-panel';
+        finalContent =
+          '### Could not add Peer Band panel\n\n' +
+          'Need a module number, dashboard UID (or title), and peer-band intent ' +
+          '(e.g. Peer Mean / Upper Peer Bound in Flux).\n\n' +
+          'Example:\n' +
+          '> Create a new machine learning time series panel titled "Module 2 Current — Alert Test Peer Band ±2σ" ' +
+          'on the dashboard with UID idHkqdqnk. Compare Module 2 against Modules 1 and 3 through 8…';
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const clarifyMessage: Message = { role: 'assistant', content: finalContent };
+        const clarifySession = chatHistoryService.saveSession(
+          [...newMessages, clarifyMessage],
+          currentSessionId
+        );
+        if (clarifySession) {
+          setCurrentSessionId(clarifySession.id);
+          currentSessionIdRef.current = clarifySession.id;
+          replaceChatSessionInUrl(clarifySession.id);
+        }
+        return;
+      }
+      if (addPeerBandRequest) {
+        errorPathTag = 'add-peer-band-panel';
+        if (!mcpClient) {
+          finalContent =
+            '### Could not add Peer Band panel\n\nGrafana MCP tools are not connected. Open **Grafana LLM / MCP settings**, enable MCP for Graft, hard-refresh, then try again.';
+        } else {
+          const addResult = await runProgrammaticAddPeerBandPanel(mcpClient, addPeerBandRequest);
+          finalContent = formatAddPeerBandPanelReply(addResult, GRAFT_BUILD_NUMBER);
+          finalToolExecutions = addResult.toolExecutions;
+          clearPendingOnProgrammaticSuccess(addResult.ok);
+          if (!addResult.ok) {
+            recordGraftFailure({
+              buildNumber: GRAFT_BUILD_NUMBER,
+              intent: 'add-peer-band-panel',
+              userMessagePreview: content,
+              error: addResult.error ?? 'Unknown error',
+              dashboardTitle: addResult.dashboardTitle,
+            });
+          }
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = {
+              ...last,
+              content: finalContent,
+              toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+            };
+          }
+          return updated;
+        });
+        const peerBandMessage: Message = {
+          role: 'assistant',
+          content: finalContent,
+          toolExecutions: finalToolExecutions.length > 0 ? finalToolExecutions : undefined,
+        };
+        const peerBandSession = chatHistoryService.saveSession(
+          [...newMessages, peerBandMessage],
+          currentSessionId
+        );
+        if (peerBandSession) {
+          setCurrentSessionId(peerBandSession.id);
+          currentSessionIdRef.current = peerBandSession.id;
+          replaceChatSessionInUrl(peerBandSession.id);
         }
         return;
       }

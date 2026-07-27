@@ -4,6 +4,7 @@ import { userWantsDashboardMetricPanels } from './dashboardMetricPanelsParse';
 import { messageMentionsOwnHistoryPanel } from './ownHistoryPanelParse';
 import { messageMentionsAddPeerRfPanel } from './peerRfPanelAddParse';
 import { messageMentionsPredictiveAnalyticsPanel } from './historyComparisonPanelAddParse';
+import { messageMentionsPeerBandPanelCreate } from './peerBandPanelAddParse';
 
 export type PanelCreateType = 'barchart' | 'gauge' | 'stat' | 'timeseries' | 'table';
 
@@ -110,10 +111,11 @@ export function messageDescribesPanelCreate(message: string): boolean {
     if (!text || userWantsDashboardMetricPanels(text)) {
         return false;
     }
-    // Own-history / peer-RF / History Comparison need specialized Flux/PromQL builders —
-    // never the generic titled-panel create path (that only builds a single Actual series).
+    // Own-history / peer-band / peer-RF / History Comparison need specialized Flux builders —
+    // never the generic titled-panel create path (that only builds PromQL / vector(0)).
     if (
         messageMentionsOwnHistoryPanel(text) ||
+        messageMentionsPeerBandPanelCreate(text) ||
         messageMentionsAddPeerRfPanel(text) ||
         messageMentionsPredictiveAnalyticsPanel(text)
     ) {

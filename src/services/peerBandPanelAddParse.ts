@@ -1,0 +1,198 @@
+import { extractAllDashboardUids, extractDashboardUidFromMessage } from './dashboardMentionParse';
+import { extractRequestedDashboardTitle, findMachineIdsInText } from './dashboardCloneParse';
+import { extractOnDashboardMachineTitle } from './modulePanelReorderParse';
+import { messageMentionsOwnHistoryPanel } from './ownHistoryPanelParse';
+import { messageMentionsAddPeerRfPanel } from './peerRfPanelAddParse';
+import { messageMentionsGrafanaAlertCreate, messageMentionsGrafanaAlertUpdate } from './grafanaAlertParse';
+import { isCrossDashboardPeerBandCopyIntent } from './peerBandShared';
+import { userWantsBulkPeerBandFix } from './bulkPeerBandFixParse';
+
+export interface AddPeerBandPanelRequest {
+    dashboardUid?: string;
+    dashboardTitle?: string;
+    machineId?: string;
+    moduleNumber: number;
+    /** Peer modules to average (excluding the target module). */
+    peerModules?: number[];
+    panelTitle?: string;
+}
+
+function normalizeMessageQuotes(text: string): string {
+    return text.replace(/[\u201C\u201D]/g, '"').replace(/[\u2018\u2019]/g, "'");
+}
+
+/** Quoted / titled panel name from create prompts. */
+export function extractPeerBandPanelTitle(message: string): string | undefined {
+    const text = normalizeMessageQuotes(message.trim());
+    const patterns = [
+        /\b(?:titled|called|named)\s+"([^"]+)"/i,
+        /\b(?:titled|called|named)\s+'([^']+)'/i,
+        /\bpanel\s+(?:titled|called|named)\s+"([^"]+)"/i,
+        /\bpanel\s+(?:titled|called|named)\s+'([^']+)'/i,
+    ];
+    for (const re of patterns) {
+        const m = text.match(re);
+        if (m?.[1]?.trim()) {
+            return m[1].trim();
+        }
+    }
+    return undefined;
+}
+
+/**
+ * "Create … Peer Band ±2σ" / "Peer Mean" / "Upper Peer Bound" panel — not own-history,
+ * peer-RF, bulk fix, or cross-dashboard copy.
+ */
+export function messageMentionsPeerBandPanelCreate(message: string): boolean {
+    const text = normalizeMessageQuotes(message.trim());
+    if (!text) {
+        return false;
+    }
+    if (messageMentionsGrafanaAlertCreate(text) || messageMentionsGrafanaAlertUpdate(text)) {
+        return false;
+    }
+    if (messageMentionsAddPeerRfPanel(text)) {
+        return false;
+    }
+    if (isCrossDashboardPeerBandCopyIntent(text) || userWantsBulkPeerBandFix(text)) {
+        return false;
+    }
+    // Own-history uses Historical Mean / Own History — keep those off this path.
+    if (messageMentionsOwnHistoryPanel(text) && !/\bpeer\b/i.test(text)) {
+        return false;
+    }
+    if (!/\b(add|create|new|make)\b/i.test(text)) {
+        return false;
+    }
+    if (!/\bpanel\b/i.test(text)) {
+        return false;
+    }
+
+    const hasPeerBandTitle =
+        /\bpeer\s*band\b/i.test(text) || /\balert\s+test\s+peer\s*band\b/i.test(text);
+    const hasPeerMeanLines =
+        /\bpeer\s+mean\b/i.test(text) ||
+        (/\bupper\s+peer\s+bound\b/i.test(text) && /\blower\s+peer\s+bound\b/i.test(text));
+    const hasPeerCompare =
+        /\baverage\s+of\s+modules?\b/i.test(text) ||
+        /\bcompare\s+module\s*\d+\b/i.test(text) ||
+        /\bagainst\s+(?:the\s+)?(?:average|avg|mean)\b/i.test(text);
+
+    return hasPeerBandTitle || (hasPeerMeanLines && hasPeerCompare) || (hasPeerMeanLines && hasPeerBandTitle);
+}
+
+/**
+ * Parse "Modules 1 and 3 through 8" / "Modules 1–4, 6–8" into module numbers.
+ */
+export function extractPeerModulesFromMessage(message: string, excludeModule?: number): number[] | undefined {
+    const text = normalizeMessageQuotes(message.trim());
+
+    // "Modules 1 and 3 through 8"
+    const andThrough = text.match(
+        /\bmodules?\s+(\d+)\s+and\s+(\d+)\s+through\s+(\d+)\b/i
+    );
+    if (andThrough) {
+        const a = Number.parseInt(andThrough[1], 10);
+        const b = Number.parseInt(andThrough[2], 10);
+        const c = Number.parseInt(andThrough[3], 10);
+        if ([a, b, c].every((n) => Number.isFinite(n))) {
+            const set = new Set<number>([a]);
+            for (let n = Math.min(b, c); n <= Math.max(b, c); n++) {
+                set.add(n);
+            }
+            return [...set]
+                .filter((n) => n >= 1 && n <= 8 && n !== excludeModule)
+                .sort((x, y) => x - y);
+        }
+    }
+
+    // "Modules 1–4, 6–8" / "Modules 1-4,6-8"
+    const rangeList = text.match(
+        /\bmodules?\s*((?:\d+\s*[–\-—]\s*\d+\s*,?\s*)+)/i
+    );
+    if (rangeList?.[1]) {
+        const set = new Set<number>();
+        for (const part of rangeList[1].split(/[,;]/)) {
+            const m = part.match(/(\d+)\s*[–\-—]\s*(\d+)/);
+            if (!m) {
+                continue;
+            }
+            const lo = Number.parseInt(m[1], 10);
+            const hi = Number.parseInt(m[2], 10);
+            if (!Number.isFinite(lo) || !Number.isFinite(hi)) {
+                continue;
+            }
+            for (let n = Math.min(lo, hi); n <= Math.max(lo, hi); n++) {
+                set.add(n);
+            }
+        }
+        if (set.size > 0) {
+            return [...set]
+                .filter((n) => n >= 1 && n <= 8 && n !== excludeModule)
+                .sort((x, y) => x - y);
+        }
+    }
+
+    return undefined;
+}
+
+export function parseAddPeerBandPanelRequest(message: string): AddPeerBandPanelRequest | null {
+    const text = normalizeMessageQuotes(message.trim());
+    if (!messageMentionsPeerBandPanelCreate(text)) {
+        return null;
+    }
+
+    const uids = extractAllDashboardUids(text);
+    const machines = findMachineIdsInText(text);
+    const machineId = machines[0];
+    const dashboardTitle =
+        extractRequestedDashboardTitle(text, machineId) ?? extractOnDashboardMachineTitle(text);
+    const dashboardUid = uids[0] ?? extractDashboardUidFromMessage(text);
+    const panelTitle = extractPeerBandPanelTitle(text);
+
+    let moduleNumber: number | undefined;
+    if (panelTitle) {
+        const titleMod = panelTitle.match(/\bmodule\s*(\d+)\b/i);
+        if (titleMod?.[1]) {
+            const n = Number.parseInt(titleMod[1], 10);
+            if (Number.isFinite(n) && n >= 1 && n <= 8) {
+                moduleNumber = n;
+            }
+        }
+    }
+    if (moduleNumber == null) {
+        const compareMod = text.match(/\bcompare\s+module\s*(\d+)\b/i);
+        const bareMod = text.match(/\bmodule\s*(\d+)\s+current\b/i);
+        const n = Number.parseInt((compareMod ?? bareMod)?.[1] ?? '', 10);
+        if (Number.isFinite(n) && n >= 1 && n <= 8) {
+            moduleNumber = n;
+        }
+    }
+    if (moduleNumber == null) {
+        return null;
+    }
+
+    if (!dashboardUid && !dashboardTitle && !machineId) {
+        return null;
+    }
+
+    const peerModules = extractPeerModulesFromMessage(text, moduleNumber);
+
+    return {
+        dashboardUid,
+        dashboardTitle,
+        machineId,
+        moduleNumber,
+        peerModules,
+        panelTitle,
+    };
+}
+
+export function formatAddPeerBandPanelExamplePrompt(dashboardUid: string): string {
+    return (
+        `Create a new machine learning time series panel titled "Module 2 Current — Alert Test Peer Band ±2σ" ` +
+        `on the dashboard with UID ${dashboardUid}. Compare Module 2 Current against the average of Modules 1 and 3 through 8. ` +
+        `Create four visible lines: Module 2 Actual, Peer Mean, Upper Peer Bound, Lower Peer Bound. ` +
+        `Calculate the Upper and Lower Peer Bounds in the Flux query itself.`
+    );
+}
