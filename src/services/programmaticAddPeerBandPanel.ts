@@ -8,6 +8,7 @@ import { parseSearchHitsFromMcpText } from './dashboardSearchParse';
 import { isMachineId } from './dashboardCloneParse';
 import { repairInfluxFluxPanel, sanitizeInfluxFluxPanel } from './sanitizeInfluxFluxPanel';
 import type { AddPeerBandPanelRequest } from './peerBandPanelAddParse';
+import { resolvePeerBandMetricFields } from './peerBandPanelAddParse';
 import {
     buildPeerBandPanel,
     findAnyFluxReferencePanel,
@@ -29,6 +30,8 @@ export interface PeerBandPanelResult {
     panelId?: number;
     moduleNumber?: number;
     peerModules?: number[];
+    actualField?: string;
+    updatedExisting?: boolean;
 }
 
 function pendingTool(name: string): ToolExecution {
@@ -132,7 +135,11 @@ async function saveDashboard(
     return { ok: true, version: versionMatch ? parseInt(versionMatch[1], 10) : undefined };
 }
 
-function verifyPeerBandPanel(panel: PanelRecord | undefined, expectedTitle: string): string | undefined {
+function verifyPeerBandPanel(
+    panel: PanelRecord | undefined,
+    expectedTitle: string,
+    expectedActualField?: string
+): string | undefined {
     if (!panel) {
         return `Saved dashboard is missing panel "${expectedTitle}".`;
     }
@@ -150,6 +157,12 @@ function verifyPeerBandPanel(panel: PanelRecord | undefined, expectedTitle: stri
     }
     if (!queries.some((q) => /2\.0\s*\*\s*std|2\s*\*\s*std/i.test(q) || /math\.sqrt/i.test(q))) {
         return `Panel "${expectedTitle}" is missing ±2σ math in Flux (Upper/Lower Peer Bounds).`;
+    }
+    if (expectedActualField && !queries[0]?.includes(expectedActualField)) {
+        return (
+            `Panel "${expectedTitle}" Actual query does not use field \`${expectedActualField}\` ` +
+            `(wrong metric family — e.g. Current instead of Pressure).`
+        );
     }
     return undefined;
 }
@@ -183,22 +196,15 @@ export async function runProgrammaticAddPeerBandPanel(
               : '2406-176021';
     const dashboardTitle = typeof proposed.title === 'string' ? proposed.title : resolved.title;
     const mod = request.moduleNumber;
-    const title =
-        request.panelTitle?.trim() ||
-        `Module ${mod} Current — vs. Peer Band (Modules 1–4,6–8 Avg ± 2σ)`;
-
-    if (entries.some((e) => e.title === title)) {
-        return {
-            ok: false,
-            error: `Panel "${title}" already exists.`,
-            toolExecutions,
-            dashboardUid: resolved.uid,
-            dashboardTitle,
-        };
-    }
-
     const peerModules =
         request.peerModules ?? [1, 2, 3, 4, 5, 6, 7, 8].filter((n) => n !== mod);
+    const metric = resolvePeerBandMetricFields(mod, peerModules, request.metricKind ?? 'current');
+    const title =
+        request.panelTitle?.trim() ||
+        `Module ${mod} ${metric.kind === 'pressure' ? 'Pressure' : metric.kind === 'flow' ? 'Flow' : metric.kind === 'voltage' ? 'Voltage' : 'Current'} — vs. Peer Band (Modules 1–4,6–8 Avg ± 2σ)`;
+
+    const existing = entries.find((e) => e.title === title);
+    const updatedExisting = Boolean(existing);
 
     const raw = buildPeerBandPanel({
         machineId,
@@ -206,8 +212,11 @@ export async function runProgrammaticAddPeerBandPanel(
         influxDatasourceUid: influxUidFromDashboard(proposed.panels),
         panelTitle: title,
         peerModules,
+        actualField: metric.actualField,
+        peerFields: metric.peerFields,
+        unit: metric.unit,
         labels: {
-            actual: `Module ${mod} Actual`,
+            actual: `${metric.signalName} Actual`,
             peerMean: 'Peer Mean',
             upper: 'Upper Peer Bound (±2σ)',
             lower: 'Lower Peer Bound (±2σ)',
@@ -216,11 +225,31 @@ export async function runProgrammaticAddPeerBandPanel(
     const sanitized = sanitizeInfluxFluxPanel(raw) as PanelRecord;
     const repaired = repairInfluxFluxPanel(sanitized, proposed.panels as unknown[] | undefined);
     const newPanel = repaired.panel as PanelRecord;
-    const panelId = maxPanelId(entries) + 1;
+    const panelId =
+        existing?.panelId != null && Number.isFinite(existing.panelId)
+            ? existing.panelId
+            : maxPanelId(entries) + 1;
     newPanel.id = panelId;
+    if (existing?.panel) {
+        const prev = existing.panel as PanelRecord;
+        if (prev.gridPos && typeof prev.gridPos === 'object') {
+            newPanel.gridPos = prev.gridPos;
+        }
+    }
 
     if (!Array.isArray(proposed.panels)) {
         proposed.panels = [newPanel];
+    } else if (existing) {
+        const panels = proposed.panels as PanelRecord[];
+        const idx = panels.findIndex((p) => {
+            const id = typeof p.id === 'number' ? p.id : Number(p.id);
+            return id === panelId || (typeof p.title === 'string' && p.title === title);
+        });
+        if (idx >= 0) {
+            panels[idx] = newPanel;
+        } else {
+            panels.push(newPanel);
+        }
     } else {
         (proposed.panels as PanelRecord[]).push(newPanel);
     }
@@ -249,7 +278,11 @@ export async function runProgrammaticAddPeerBandPanel(
     }
     const verifiedEntries = listDashboardPanels(verifiedLoad.dashboard.panels);
     const verified = verifiedEntries.find((e) => e.title === title);
-    const verifyError = verifyPeerBandPanel(verified?.panel as PanelRecord | undefined, title);
+    const verifyError = verifyPeerBandPanel(
+        verified?.panel as PanelRecord | undefined,
+        title,
+        metric.actualField
+    );
     if (verifyError) {
         return {
             ok: false,
@@ -259,6 +292,7 @@ export async function runProgrammaticAddPeerBandPanel(
             dashboardTitle,
             panelTitle: title,
             panelId,
+            actualField: metric.actualField,
         };
     }
 
@@ -272,6 +306,8 @@ export async function runProgrammaticAddPeerBandPanel(
         panelId: verified?.panelId ?? panelId,
         moduleNumber: mod,
         peerModules,
+        actualField: metric.actualField,
+        updatedExisting,
     };
 }
 
@@ -280,7 +316,7 @@ export function formatAddPeerBandPanelReply(result: PeerBandPanelResult, build: 
         return (
             `### Peer Band panel — failed (build ${build})\n\n` +
             `${result.error ?? 'Unknown error'}\n\n` +
-            `Tip: create with Flux peer mean ± 2σ (not generic PromQL panel create).`
+            `Tip: name the metric in the title (e.g. Module 2 **Pressure** or Module 2 **Current**) so Graft uses the right Influx fields.`
         );
     }
     return (
@@ -288,8 +324,9 @@ export function formatAddPeerBandPanelReply(result: PeerBandPanelResult, build: 
         `- Dashboard: \`${result.dashboardUid}\` v${result.version ?? '?'}\n` +
         `- Panel: **${result.panelTitle}**` +
         (result.panelId != null ? ` (id ${result.panelId})` : '') +
+        (result.updatedExisting ? ` _(updated existing)_` : '') +
         `\n` +
-        `- Module **${result.moduleNumber}** vs peers **[${(result.peerModules ?? []).join(', ')}]**\n` +
+        `- Field: \`${result.actualField ?? '?'}\` · Module **${result.moduleNumber}** vs peers **[${(result.peerModules ?? []).join(', ')}]**\n` +
         `- Series: Actual, Peer Mean, Upper/Lower Peer Bound (±2σ) — **computed in Flux** (union + mean ± 2×stddev)`
     );
 }

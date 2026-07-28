@@ -296,9 +296,20 @@ export function panelFluxOnPrometheusDatasource(panel: PanelRecord): boolean {
 }
 
 export function inferActualFieldFromPanelTitle(title: string): string | undefined {
+    const pressure = title.match(/\bModule\s*(\d+)\s+Pressure\b/i);
+    if (pressure?.[1]) {
+        return `Pressure${pressure[1]}_psi`;
+    }
+    const flow = title.match(/\bModule\s*(\d+)\s+Flow\b/i);
+    if (flow?.[1]) {
+        return `Flow${flow[1]}_gpm`;
+    }
     const m = title.match(/Module\s*(\d+)\s+(Current|Voltage)\b/i);
     if (!m) {
         return undefined;
+    }
+    if (/voltage/i.test(m[2])) {
+        return `Module${m[1]}_Voltage_VDC`;
     }
     return `Module${m[1]}_${m[2]}_A`;
 }
@@ -317,6 +328,18 @@ export function inferActualDisplayLabel(panel: PanelRecord, actualField?: string
 }
 
 export function defaultPeerFieldsForActual(actualField: string, peerModuleNumbers?: number[]): string[] {
+    const pressure = actualField.match(/^Pressure(\d+)_psi$/i);
+    if (pressure) {
+        const own = Number.parseInt(pressure[1], 10);
+        const modules = peerModuleNumbers ?? PEER_MODULE_NUMBERS;
+        return modules.filter((n) => n !== own).map((n) => `Pressure${n}_psi`);
+    }
+    const flow = actualField.match(/^Flow(\d+)_gpm$/i);
+    if (flow) {
+        const own = Number.parseInt(flow[1], 10);
+        const modules = peerModuleNumbers ?? PEER_MODULE_NUMBERS;
+        return modules.filter((n) => n !== own).map((n) => `Flow${n}_gpm`);
+    }
     const parsed = actualField.match(/^Module(\d+)_(.+)$/);
     if (!parsed) {
         return DEFAULT_PEER_MODULE_FIELDS;
@@ -1012,6 +1035,11 @@ export interface BuildPeerBandPanelArgs {
     panelTitle?: string;
     /** Peer module numbers (defaults to all 1–8 except the target). */
     peerModules?: number[];
+    /** Override Influx `_field` for the actual series (e.g. Pressure2_psi). */
+    actualField?: string;
+    /** Override peer `_field` list (must match metric family). */
+    peerFields?: string[];
+    unit?: string;
     labels?: {
         actual?: string;
         peerMean?: string;
@@ -1021,16 +1049,19 @@ export interface BuildPeerBandPanelArgs {
 }
 
 /**
- * Build a new Module N Current vs peer mean ± 2σ time series panel (Influx Flux).
+ * Build a Module N metric vs peer mean ± 2σ time series panel (Influx Flux).
  * Reuses the same union/mean/±2σ query templates as peer-band repair.
  */
 export function buildPeerBandPanel(args: BuildPeerBandPanelArgs): PanelRecord {
     const moduleNumber = args.moduleNumber;
-    const actualField = `Module${moduleNumber}_Current_A`;
+    const actualField = args.actualField?.trim() || `Module${moduleNumber}_Current_A`;
     const peerModules =
         args.peerModules?.filter((n) => n !== moduleNumber && n >= 1 && n <= 8) ??
         PEER_MODULE_NUMBERS.filter((n) => n !== moduleNumber);
-    const peerFields = defaultPeerFieldsForActual(actualField, peerModules);
+    const peerFields =
+        args.peerFields && args.peerFields.length > 0
+            ? args.peerFields
+            : defaultPeerFieldsForActual(actualField, peerModules);
     const machine = args.machineId.replace(/"/g, '\\"');
     const ctx: FluxFilterContext = {
         bucketLine: FLUX_BUCKET_LINE,
@@ -1046,17 +1077,25 @@ export function buildPeerBandPanel(args: BuildPeerBandPanelArgs): PanelRecord {
     const peerMeanLabel = args.labels?.peerMean?.trim() || 'Peer Mean';
     const upperLabel = args.labels?.upper?.trim() || 'Upper Peer Bound (±2σ)';
     const lowerLabel = args.labels?.lower?.trim() || 'Lower Peer Bound (±2σ)';
+    const metricWord = actualField.match(/^Pressure/i)
+        ? 'Pressure'
+        : actualField.match(/^Flow/i)
+          ? 'Flow'
+          : actualField.match(/Voltage/i)
+            ? 'Voltage'
+            : 'Current';
     const title =
         args.panelTitle?.trim() ||
-        `Module ${moduleNumber} Current — vs. Peer Band (Modules ${formatPeerModulesForTitle(peerModules)} Avg ± 2σ)`;
+        `Module ${moduleNumber} ${metricWord} — vs. Peer Band (Modules ${formatPeerModulesForTitle(peerModules)} Avg ± 2σ)`;
     const ds = { type: 'influxdb', uid: args.influxDatasourceUid };
+    const unit = args.unit?.trim() || (metricWord === 'Pressure' ? 'psi' : metricWord === 'Flow' ? 'gpm' : metricWord === 'Voltage' ? 'volt' : 'amp');
 
     const panel: PanelRecord = {
         id: null,
         type: 'timeseries',
         title,
         description:
-            `Module ${moduleNumber} actual vs peer modules [${peerModules.join(', ')}] mean ± **2σ** (Influx Flux). ` +
+            `${actualField} vs peer fields [${peerFields.join(', ')}] mean ± **2σ** (Influx Flux). ` +
             'Upper/Lower Peer Bounds computed in Flux (not legend-only). Not RandomForest / not ml_predictions.',
         timezone: 'browser',
         datasource: ds,
@@ -1064,7 +1103,7 @@ export function buildPeerBandPanel(args: BuildPeerBandPanelArgs): PanelRecord {
         fieldConfig: {
             defaults: {
                 custom: { drawStyle: 'line', spanNulls: true, showPoints: 'never' },
-                unit: 'amp',
+                unit,
             },
             overrides: [],
         },

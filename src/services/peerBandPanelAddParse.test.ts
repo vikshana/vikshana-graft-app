@@ -2,6 +2,7 @@ import {
     extractPeerModulesFromMessage,
     messageMentionsPeerBandPanelCreate,
     parseAddPeerBandPanelRequest,
+    resolvePeerBandMetricFields,
 } from './peerBandPanelAddParse';
 import { messageDescribesPanelCreate, parsePanelCreateRequest } from './panelCreateParse';
 import { parseAddOwnHistoryPanelRequest } from './ownHistoryPanelParse';
@@ -19,6 +20,9 @@ describe('peerBandPanelAddParse', () => {
     const PROMPT_KEYSIGHT =
         'Create a new machine learning time series panel titled "Module 2 Current — Alert Test Peer Band ±2σ" on the dashboard with UID afq7tc6hl1m9sb. Compare Module 2 Current against the average of Modules 1 and 3 through 8. Create four visible lines: Module 2 Actual Peer Mean Upper Peer Bound (Peer Mean + 2 × Standard Deviation) Lower Peer Bound (Peer Mean - 2 × Standard Deviation) Calculate the Upper and Lower Peer Bounds in the Flux query itself.';
 
+    const PROMPT_PRESSURE =
+        'Create a new machine learning time series panel titled "Module 2 Pressure — Alert Test Peer Band ±2σ" on the dashboard with UID afq7tc6hl1m9sb. Compare Module 2 Pressure against the average of Modules 1 and 3 through 8. Create four visible lines: Module 2 Actual Peer Mean Upper Peer Bound (Peer Mean + 2 × Standard Deviation) Lower Peer Bound (Peer Mean - 2 × Standard Deviation) Calculate the Upper and Lower Peer Bounds in the Flux query itself.';
+
     it('parses the Alert Test Peer Band create prompt', () => {
         expect(messageMentionsPeerBandPanelCreate(PROMPT)).toBe(true);
         const req = parseAddPeerBandPanelRequest(PROMPT);
@@ -27,6 +31,28 @@ describe('peerBandPanelAddParse', () => {
         expect(req?.moduleNumber).toBe(2);
         expect(req?.panelTitle).toBe('Module 2 Current — Alert Test Peer Band ±2σ');
         expect(req?.peerModules).toEqual([1, 3, 4, 5, 6, 7, 8]);
+        expect(req?.metricKind).toBe('current');
+    });
+
+    it('parses Pressure peer-band prompts with PressureN_psi fields (not ModuleN_Current_A)', () => {
+        const req = parseAddPeerBandPanelRequest(PROMPT_PRESSURE);
+        expect(req?.metricKind).toBe('pressure');
+        expect(req?.moduleNumber).toBe(2);
+        expect(req?.panelTitle).toBe('Module 2 Pressure — Alert Test Peer Band ±2σ');
+        const fields = resolvePeerBandMetricFields(2, req!.peerModules!, 'pressure');
+        expect(fields.actualField).toBe('Pressure2_psi');
+        expect(fields.peerFields).toEqual([
+            'Pressure1_psi',
+            'Pressure3_psi',
+            'Pressure4_psi',
+            'Pressure5_psi',
+            'Pressure6_psi',
+            'Pressure7_psi',
+            'Pressure8_psi',
+        ]);
+        expect(fields.unit).toBe('psi');
+        expect(messageMentionsPredictiveAnalyticsPanel(PROMPT_PRESSURE)).toBe(false);
+        expect(messageHasProgrammaticHandler(PROMPT_PRESSURE)).toBe(true);
     });
 
     it('does not route to generic panel create, own-history, or History Comparison', () => {
@@ -80,5 +106,26 @@ describe('buildPeerBandPanel', () => {
             'Upper Peer Bound (±2σ)',
             'Lower Peer Bound (±2σ)',
         ]);
+    });
+
+    it('uses PressureN_psi fields for Pressure peer-band panels', () => {
+        const fields = resolvePeerBandMetricFields(2, [1, 3, 4, 5, 6, 7, 8], 'pressure');
+        const panel = buildPeerBandPanel({
+            machineId: '2505-200033',
+            moduleNumber: 2,
+            influxDatasourceUid: 'influx-uid',
+            panelTitle: 'Module 2 Pressure — Alert Test Peer Band ±2σ',
+            peerModules: [1, 3, 4, 5, 6, 7, 8],
+            actualField: fields.actualField,
+            peerFields: fields.peerFields,
+            unit: fields.unit,
+        });
+        const targets = panel.targets as Array<{ query: string }>;
+        expect(targets[0].query).toContain('Pressure2_psi');
+        expect(targets[0].query).not.toContain('Module2_Current_A');
+        expect(targets[1].query).toContain('Pressure1_psi');
+        expect(targets[1].query).toContain('Pressure8_psi');
+        expect(targets[1].query).not.toContain('Pressure2_psi');
+        expect((panel.fieldConfig as { defaults?: { unit?: string } }).defaults?.unit).toBe('psi');
     });
 });

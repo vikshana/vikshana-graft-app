@@ -15,6 +15,85 @@ export interface AddPeerBandPanelRequest {
     /** Peer modules to average (excluding the target module). */
     peerModules?: number[];
     panelTitle?: string;
+    /**
+     * Metric family from the prompt/title (Pressure, Current, …).
+     * Drives Influx `_field` names — PressureN_psi vs ModuleN_Current_A.
+     */
+    metricKind?: PeerBandMetricKind;
+}
+
+/** ElectraMet recorder field families used in peer-band creates. */
+export type PeerBandMetricKind = 'current' | 'voltage' | 'pressure' | 'flow';
+
+export interface PeerBandMetricFields {
+    kind: PeerBandMetricKind;
+    /** Influx `_field` for the target module (e.g. Pressure2_psi, Module2_Current_A). */
+    actualField: string;
+    /** Peer `_field` names for the other modules. */
+    peerFields: string[];
+    unit: string;
+    signalName: string;
+}
+
+/**
+ * Map "Module N &lt;metric&gt;" to ElectraMet Influx field names from the PLC DataRecorder.
+ * Pressure/Flow are PressureN_psi / FlowN_gpm — not ModuleN_*.
+ */
+export function resolvePeerBandMetricFields(
+    moduleNumber: number,
+    peerModules: number[],
+    metricKind: PeerBandMetricKind = 'current'
+): PeerBandMetricFields {
+    const peers = peerModules.filter((n) => n !== moduleNumber && n >= 1 && n <= 8);
+    if (metricKind === 'pressure') {
+        return {
+            kind: 'pressure',
+            actualField: `Pressure${moduleNumber}_psi`,
+            peerFields: peers.map((n) => `Pressure${n}_psi`),
+            unit: 'psi',
+            signalName: `Module ${moduleNumber} Pressure`,
+        };
+    }
+    if (metricKind === 'flow') {
+        return {
+            kind: 'flow',
+            actualField: `Flow${moduleNumber}_gpm`,
+            peerFields: peers.map((n) => `Flow${n}_gpm`),
+            unit: 'gpm',
+            signalName: `Module ${moduleNumber} Flow`,
+        };
+    }
+    if (metricKind === 'voltage') {
+        return {
+            kind: 'voltage',
+            actualField: `Module${moduleNumber}_Voltage_VDC`,
+            peerFields: peers.map((n) => `Module${n}_Voltage_VDC`),
+            unit: 'volt',
+            signalName: `Module ${moduleNumber} Voltage`,
+        };
+    }
+    return {
+        kind: 'current',
+        actualField: `Module${moduleNumber}_Current_A`,
+        peerFields: peers.map((n) => `Module${n}_Current_A`),
+        unit: 'amp',
+        signalName: `Module ${moduleNumber} Current`,
+    };
+}
+
+/** Detect Pressure / Current / Voltage / Flow from title or "Compare Module N …" wording. */
+export function extractPeerBandMetricKind(message: string, panelTitle?: string): PeerBandMetricKind {
+    const blob = `${panelTitle ?? ''} ${normalizeMessageQuotes(message)}`;
+    if (/\bpressure\b/i.test(blob)) {
+        return 'pressure';
+    }
+    if (/\bflow\b/i.test(blob)) {
+        return 'flow';
+    }
+    if (/\bvoltage\b/i.test(blob)) {
+        return 'voltage';
+    }
+    return 'current';
 }
 
 function normalizeMessageQuotes(text: string): string {
@@ -161,8 +240,8 @@ export function parseAddPeerBandPanelRequest(message: string): AddPeerBandPanelR
         }
     }
     if (moduleNumber == null) {
-        const compareMod = text.match(/\bcompare\s+module\s*(\d+)\b/i);
-        const bareMod = text.match(/\bmodule\s*(\d+)\s+current\b/i);
+        const compareMod = text.match(/\bcompare\s+module\s*(\d+)\s+(?:pressure|current|voltage|flow)\b/i);
+        const bareMod = text.match(/\bmodule\s*(\d+)\s+(?:pressure|current|voltage|flow)\b/i);
         const n = Number.parseInt((compareMod ?? bareMod)?.[1] ?? '', 10);
         if (Number.isFinite(n) && n >= 1 && n <= 8) {
             moduleNumber = n;
@@ -177,6 +256,7 @@ export function parseAddPeerBandPanelRequest(message: string): AddPeerBandPanelR
     }
 
     const peerModules = extractPeerModulesFromMessage(text, moduleNumber);
+    const metricKind = extractPeerBandMetricKind(text, panelTitle);
 
     return {
         dashboardUid,
@@ -185,6 +265,7 @@ export function parseAddPeerBandPanelRequest(message: string): AddPeerBandPanelR
         moduleNumber,
         peerModules,
         panelTitle,
+        metricKind,
     };
 }
 
