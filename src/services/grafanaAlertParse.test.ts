@@ -46,6 +46,20 @@ describe('grafanaAlertParse', () => {
         expect(parseAddOwnHistoryPanelRequest(PANEL_CREATE_WITH_ALERT_TEST_TITLE)?.moduleNumber).toBe(1);
     });
 
+    // Production: alert-for-existing Peer Band panel was mis-routed as panel create → "already exists".
+    const PEER_BAND_PRESSURE_ALERT_PROMPT =
+        'Create a Grafana-managed alert for the panel titled "Module 2 Pressure — Alert Test Peer Band ±2σ" on the dashboard with UID = afq7tc6hl1m9sb. Configure the alert to trigger when the Module 1 Actual value is greater than the Upper Bound (±2σ) or less than the Lower Bound (±2σ).  Modify the panel queries as needed so they are compatible with Grafana Alerting. The alert queries should return alert-compatible numeric time series (not long-series data with _field labels).  Use Reduce expressions with the Last function for the Actual, Upper Bound, and Lower Bound queries, then create a Math expression that evaluates: Actual > Upper Bound OR Actual < Lower Bound. Configure the alert to notify the Alex Test Email contact point.';
+
+    it('routes Peer Band panel alert create as alert, not panel create', () => {
+        expect(messageMentionsGrafanaAlertCreate(PEER_BAND_PRESSURE_ALERT_PROMPT)).toBe(true);
+        const req = parseGrafanaAlertCreateRequest(PEER_BAND_PRESSURE_ALERT_PROMPT);
+        expect(req?.dashboardUid).toBe('afq7tc6hl1m9sb');
+        expect(req?.panelTitle).toBe('Module 2 Pressure — Alert Test Peer Band ±2σ');
+        expect(req?.contactPoint).toBe('Alex Test Email');
+        expect(messageHasProgrammaticHandler(PEER_BAND_PRESSURE_ALERT_PROMPT)).toBe(true);
+        expect(parseAddOwnHistoryPanelRequest(PEER_BAND_PRESSURE_ALERT_PROMPT)).toBeNull();
+    });
+
     it('does not misroute either alert prompt to own-history or dashboard review', () => {
         expect(parseAddOwnHistoryPanelRequest(OWN_HISTORY_ALERT_PROMPT)).toBeNull();
         expect(parseAddOwnHistoryPanelRequest(MANAGED_RULE_PROMPT)).toBeNull();

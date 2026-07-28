@@ -54,6 +54,14 @@ describe('panelCreateParse', () => {
         });
     });
 
+    it('does not treat Grafana-managed alert-for-panel prompts as panel create', () => {
+        const alertPrompt =
+            'Create a Grafana-managed alert for the panel titled "Module 2 Pressure — Alert Test Peer Band ±2σ" on the dashboard with UID = afq7tc6hl1m9sb. Configure the alert to trigger when the Module 1 Actual value is greater than the Upper Bound (±2σ) or less than the Lower Bound (±2σ). Use Reduce expressions with the Last function. Configure the alert to notify the Alex Test Email contact point.';
+        expect(messageDescribesPanelCreate(alertPrompt)).toBe(false);
+        expect(parsePanelCreateRequest(alertPrompt)).toBeNull();
+        expect(userWantsPanelCreateProgrammatic(alertPrompt)).toBe(false);
+    });
+
     describe('multi panel create', () => {
         const multiPrompt =
             'Create a gauge panel, time series panel, table panel, and stat panel for dashboard with UID = cfo0wckufbdhce.';

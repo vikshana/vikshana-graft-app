@@ -1315,6 +1315,121 @@ export const ChatInterface = () => {
         return;
       }
 
+      // Grafana alert handlers run BEFORE peer-band / panel create so
+      // "Create a Grafana-managed alert for the panel titled … Peer Band …" is not
+      // mis-routed as "panel already exists".
+      const grafanaEvalGroupIntervalRequest = parseGrafanaEvalGroupIntervalRequest(content);
+      if (grafanaEvalGroupIntervalRequest) {
+        errorPathTag = 'grafana-eval-group-interval';
+        const evalGroupResult = await runProgrammaticGrafanaEvalGroupInterval(
+          grafanaEvalGroupIntervalRequest,
+          GRAFT_BUILD_NUMBER
+        );
+        finalContent = formatGrafanaEvalGroupIntervalReply(evalGroupResult, GRAFT_BUILD_NUMBER);
+        if (!evalGroupResult.ok) {
+          recordGraftFailure({
+            buildNumber: GRAFT_BUILD_NUMBER,
+            intent: 'grafana-eval-group-interval',
+            userMessagePreview: content,
+            error: evalGroupResult.error ?? 'Unknown error',
+          });
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const evalGroupMessage: Message = { role: 'assistant', content: finalContent };
+        const evalGroupSession = chatHistoryService.saveSession(
+          [...newMessages, evalGroupMessage],
+          currentSessionId
+        );
+        if (evalGroupSession) {
+          setCurrentSessionId(evalGroupSession.id);
+          currentSessionIdRef.current = evalGroupSession.id;
+          replaceChatSessionInUrl(evalGroupSession.id);
+        }
+        return;
+      }
+
+      const grafanaAlertUpdateRequest = parseGrafanaAlertUpdateRequest(content);
+      if (grafanaAlertUpdateRequest) {
+        errorPathTag = 'grafana-alert-update';
+        const alertUpdateResult = await runProgrammaticGrafanaAlertUpdate(
+          grafanaAlertUpdateRequest,
+          GRAFT_BUILD_NUMBER
+        );
+        finalContent = formatGrafanaAlertUpdateReply(alertUpdateResult, GRAFT_BUILD_NUMBER);
+        if (!alertUpdateResult.ok) {
+          recordGraftFailure({
+            buildNumber: GRAFT_BUILD_NUMBER,
+            intent: 'grafana-alert-update',
+            userMessagePreview: content,
+            error: alertUpdateResult.error ?? 'Unknown error',
+          });
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const alertUpdateMessage: Message = { role: 'assistant', content: finalContent };
+        const alertUpdateSession = chatHistoryService.saveSession(
+          [...newMessages, alertUpdateMessage],
+          currentSessionId
+        );
+        if (alertUpdateSession) {
+          setCurrentSessionId(alertUpdateSession.id);
+          currentSessionIdRef.current = alertUpdateSession.id;
+          replaceChatSessionInUrl(alertUpdateSession.id);
+        }
+        return;
+      }
+
+      const grafanaAlertCreateRequest = parseGrafanaAlertCreateRequest(content);
+      if (grafanaAlertCreateRequest) {
+        errorPathTag = 'grafana-alert-create';
+        const alertResult = await runProgrammaticGrafanaAlertCreate(
+          grafanaAlertCreateRequest,
+          GRAFT_BUILD_NUMBER
+        );
+        finalContent = formatGrafanaAlertCreateReply(alertResult, GRAFT_BUILD_NUMBER);
+        if (!alertResult.ok) {
+          recordGraftFailure({
+            buildNumber: GRAFT_BUILD_NUMBER,
+            intent: 'grafana-alert-create',
+            userMessagePreview: content,
+            error: alertResult.error ?? 'Unknown error',
+            dashboardTitle: alertResult.dashboardTitle,
+          });
+        }
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const alertMessage: Message = { role: 'assistant', content: finalContent };
+        const alertSession = chatHistoryService.saveSession(
+          [...newMessages, alertMessage],
+          currentSessionId
+        );
+        if (alertSession) {
+          setCurrentSessionId(alertSession.id);
+          currentSessionIdRef.current = alertSession.id;
+          replaceChatSessionInUrl(alertSession.id);
+        }
+        return;
+      }
+
       // Peer Band ±2σ create (Influx Flux) — before generic panel create (PromQL/vector(0) → no data).
       const addPeerBandRequest = parseAddPeerBandPanelRequest(content);
       if (messageMentionsPeerBandPanelCreate(content) && !addPeerBandRequest) {
@@ -1719,124 +1834,6 @@ export const ChatInterface = () => {
           setCurrentSessionId(savedSession.id);
           currentSessionIdRef.current = savedSession.id;
           replaceChatSessionInUrl(savedSession.id);
-        }
-        return;
-      }
-
-      // Evaluation-group interval change (e.g. "Change the Evaluation Interval of 'Test Eval Group' to be 2 minutes.").
-      // Before alert update/create so group-level prompts are not mis-routed or dropped to the LLM.
-      const grafanaEvalGroupIntervalRequest = parseGrafanaEvalGroupIntervalRequest(content);
-      if (grafanaEvalGroupIntervalRequest) {
-        errorPathTag = 'grafana-eval-group-interval';
-        const evalGroupResult = await runProgrammaticGrafanaEvalGroupInterval(
-          grafanaEvalGroupIntervalRequest,
-          GRAFT_BUILD_NUMBER
-        );
-        finalContent = formatGrafanaEvalGroupIntervalReply(evalGroupResult, GRAFT_BUILD_NUMBER);
-        if (!evalGroupResult.ok) {
-          recordGraftFailure({
-            buildNumber: GRAFT_BUILD_NUMBER,
-            intent: 'grafana-eval-group-interval',
-            userMessagePreview: content,
-            error: evalGroupResult.error ?? 'Unknown error',
-          });
-        }
-        setMessages((prev) => {
-          const updated = [...prev];
-          const last = updated[updated.length - 1];
-          if (last?.role === 'assistant') {
-            updated[updated.length - 1] = { ...last, content: finalContent };
-          }
-          return updated;
-        });
-        const evalGroupMessage: Message = { role: 'assistant', content: finalContent };
-        const evalGroupSession = chatHistoryService.saveSession(
-          [...newMessages, evalGroupMessage],
-          currentSessionId
-        );
-        if (evalGroupSession) {
-          setCurrentSessionId(evalGroupSession.id);
-          currentSessionIdRef.current = evalGroupSession.id;
-          replaceChatSessionInUrl(evalGroupSession.id);
-        }
-        return;
-      }
-
-      // Grafana-managed alert UPDATE by name (small follow-up prompts — labels/annotations/contact).
-      // Runs before create so "Update the alert rule named X…" is not mis-routed as a create.
-      const grafanaAlertUpdateRequest = parseGrafanaAlertUpdateRequest(content);
-      if (grafanaAlertUpdateRequest) {
-        errorPathTag = 'grafana-alert-update';
-        const alertUpdateResult = await runProgrammaticGrafanaAlertUpdate(
-          grafanaAlertUpdateRequest,
-          GRAFT_BUILD_NUMBER
-        );
-        finalContent = formatGrafanaAlertUpdateReply(alertUpdateResult, GRAFT_BUILD_NUMBER);
-        if (!alertUpdateResult.ok) {
-          recordGraftFailure({
-            buildNumber: GRAFT_BUILD_NUMBER,
-            intent: 'grafana-alert-update',
-            userMessagePreview: content,
-            error: alertUpdateResult.error ?? 'Unknown error',
-          });
-        }
-        setMessages((prev) => {
-          const updated = [...prev];
-          const last = updated[updated.length - 1];
-          if (last?.role === 'assistant') {
-            updated[updated.length - 1] = { ...last, content: finalContent };
-          }
-          return updated;
-        });
-        const alertUpdateMessage: Message = { role: 'assistant', content: finalContent };
-        const alertUpdateSession = chatHistoryService.saveSession(
-          [...newMessages, alertUpdateMessage],
-          currentSessionId
-        );
-        if (alertUpdateSession) {
-          setCurrentSessionId(alertUpdateSession.id);
-          currentSessionIdRef.current = alertUpdateSession.id;
-          replaceChatSessionInUrl(alertUpdateSession.id);
-        }
-        return;
-      }
-
-      // Grafana-managed alert create via provisioning API (getBackendSrv), before
-      // own-history / dashboard-review can mis-route ("Own History" title, "evaluate every").
-      const grafanaAlertCreateRequest = parseGrafanaAlertCreateRequest(content);
-      if (grafanaAlertCreateRequest) {
-        errorPathTag = 'grafana-alert-create';
-        const alertResult = await runProgrammaticGrafanaAlertCreate(
-          grafanaAlertCreateRequest,
-          GRAFT_BUILD_NUMBER
-        );
-        finalContent = formatGrafanaAlertCreateReply(alertResult, GRAFT_BUILD_NUMBER);
-        if (!alertResult.ok) {
-          recordGraftFailure({
-            buildNumber: GRAFT_BUILD_NUMBER,
-            intent: 'grafana-alert-create',
-            userMessagePreview: content,
-            error: alertResult.error ?? 'Unknown error',
-            dashboardTitle: alertResult.dashboardTitle,
-          });
-        }
-        setMessages((prev) => {
-          const updated = [...prev];
-          const last = updated[updated.length - 1];
-          if (last?.role === 'assistant') {
-            updated[updated.length - 1] = { ...last, content: finalContent };
-          }
-          return updated;
-        });
-        const alertMessage: Message = { role: 'assistant', content: finalContent };
-        const alertSession = chatHistoryService.saveSession(
-          [...newMessages, alertMessage],
-          currentSessionId
-        );
-        if (alertSession) {
-          setCurrentSessionId(alertSession.id);
-          currentSessionIdRef.current = alertSession.id;
-          replaceChatSessionInUrl(alertSession.id);
         }
         return;
       }

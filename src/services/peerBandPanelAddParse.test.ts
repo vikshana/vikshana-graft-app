@@ -68,6 +68,15 @@ describe('peerBandPanelAddParse', () => {
         expect(parseAddPeerBandPanelRequest(PROMPT_KEYSIGHT)?.dashboardUid).toBe('afq7tc6hl1m9sb');
     });
 
+    it('does not steal Grafana-managed alert prompts that mention an existing Peer Band panel', () => {
+        const alertPrompt =
+            'Create a Grafana-managed alert for the panel titled "Module 2 Pressure — Alert Test Peer Band ±2σ" on the dashboard with UID = afq7tc6hl1m9sb. Configure the alert to trigger when the Module 1 Actual value is greater than the Upper Bound (±2σ) or less than the Lower Bound (±2σ). Modify the panel queries as needed so they are compatible with Grafana Alerting. Use Reduce expressions with the Last function for the Actual, Upper Bound, and Lower Bound queries, then create a Math expression that evaluates: Actual > Upper Bound OR Actual < Lower Bound. Configure the alert to notify the Alex Test Email contact point.';
+        expect(messageMentionsPeerBandPanelCreate(alertPrompt)).toBe(false);
+        expect(parseAddPeerBandPanelRequest(alertPrompt)).toBeNull();
+        expect(messageDescribesPanelCreate(alertPrompt)).toBe(false);
+        expect(messageHasProgrammaticHandler(alertPrompt)).toBe(true);
+    });
+
     it('parses Modules 1 and 3 through 8 peer lists', () => {
         expect(extractPeerModulesFromMessage('average of Modules 1 and 3 through 8', 2)).toEqual([
             1, 3, 4, 5, 6, 7, 8,

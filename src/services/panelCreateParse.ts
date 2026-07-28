@@ -5,6 +5,10 @@ import { messageMentionsOwnHistoryPanel } from './ownHistoryPanelParse';
 import { messageMentionsAddPeerRfPanel } from './peerRfPanelAddParse';
 import { messageMentionsPredictiveAnalyticsPanel } from './historyComparisonPanelAddParse';
 import { messageMentionsPeerBandPanelCreate } from './peerBandPanelAddParse';
+import {
+    messageMentionsGrafanaAlertCreate,
+    messageMentionsGrafanaAlertUpdate,
+} from './grafanaAlertParse';
 
 export type PanelCreateType = 'barchart' | 'gauge' | 'stat' | 'timeseries' | 'table';
 
@@ -111,9 +115,11 @@ export function messageDescribesPanelCreate(message: string): boolean {
     if (!text || userWantsDashboardMetricPanels(text)) {
         return false;
     }
-    // Own-history / peer-band / peer-RF / History Comparison need specialized Flux builders —
-    // never the generic titled-panel create path (that only builds PromQL / vector(0)).
+    // Own-history / peer-band / peer-RF / History Comparison / Grafana alerts need specialized
+    // handlers — never the generic titled-panel create path (PromQL / vector(0) / "already exists").
     if (
+        messageMentionsGrafanaAlertCreate(text) ||
+        messageMentionsGrafanaAlertUpdate(text) ||
         messageMentionsOwnHistoryPanel(text) ||
         messageMentionsPeerBandPanelCreate(text) ||
         messageMentionsAddPeerRfPanel(text) ||
