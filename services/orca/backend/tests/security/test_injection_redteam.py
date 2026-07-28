@@ -76,7 +76,15 @@ async def _pii_verdict(field: str, value: str, enabled: bool = True) -> Any:
 
 
 class TestPIIPatterns:
-    """PII patterns must always produce Transform (not Allow) when guard enabled."""
+    """PII patterns must always produce Transform (not Allow) when guard enabled.
+
+    Uses the ``label`` field (a plain metadata string), not ``expr``/``query``
+    — those two field names are intentionally excluded from redaction
+    because they carry raw executable query syntax and rewriting them would
+    silently change what the query executes (harness-risk-review.md, F15).
+    Coverage for that exclusion lives in ``TestQueryFieldsNeverRedacted``
+    below.
+    """
 
     @pytest.mark.parametrize("email", [
         "user@example.com",
@@ -85,7 +93,7 @@ class TestPIIPatterns:
         "dot.separated@sub.domain.co.uk",
     ])
     async def test_email_patterns_transform(self, email: str) -> None:
-        verdict = await _pii_verdict("expr", f"filter user={email}")
+        verdict = await _pii_verdict("label", f"filter user={email}")
         assert isinstance(verdict, Transform), f"Expected Transform for {email!r}, got {verdict}"
 
     @pytest.mark.parametrize("ip", [
@@ -98,24 +106,49 @@ class TestPIIPatterns:
         assert isinstance(verdict, Transform), f"Expected Transform for {ip!r}, got {verdict}"
 
     async def test_credit_card_transforms(self) -> None:
-        verdict = await _pii_verdict("query", "card=4111111111111111")
+        verdict = await _pii_verdict("label", "card=4111111111111111")
         assert isinstance(verdict, Transform)
 
     async def test_ssn_transforms(self) -> None:
-        verdict = await _pii_verdict("query", "ssn=123-45-6789")
+        verdict = await _pii_verdict("label", "ssn=123-45-6789")
         assert isinstance(verdict, Transform)
 
     async def test_iban_transforms(self) -> None:
-        verdict = await _pii_verdict("query", "iban=GB29NWBK60161331926819")
+        verdict = await _pii_verdict("label", "iban=GB29NWBK60161331926819")
         assert isinstance(verdict, Transform)
 
     async def test_phone_transforms(self) -> None:
-        verdict = await _pii_verdict("expr", "contact +14155551234")
+        verdict = await _pii_verdict("label", "contact +14155551234")
         assert isinstance(verdict, Transform)
 
     async def test_grafana_uid_transforms(self) -> None:
-        verdict = await _pii_verdict("expr", "grafana_user_id=99")
+        verdict = await _pii_verdict("label", "grafana_user_id=99")
         assert isinstance(verdict, Transform)
+
+
+# ---------------------------------------------------------------------------
+# Category 1b — Query-language fields must never be redacted
+#
+# harness-risk-review.md, F15: mutating `expr`/`query` silently changes
+# what the query executes against the datasource. These fields must pass
+# through PIIRedactionGuard untouched even when they contain PII-shaped
+# content.
+# ---------------------------------------------------------------------------
+
+
+class TestQueryFieldsNeverRedacted:
+    @pytest.mark.parametrize("field", ["expr", "query"])
+    @pytest.mark.parametrize("payload", [
+        "filter user=alice@example.com",
+        'up{instance="10.0.0.5:9100"}',
+        "grafana_user_id=99",
+        "card=4111111111111111",
+    ])
+    async def test_query_field_not_transformed(self, field: str, payload: str) -> None:
+        verdict = await _pii_verdict(field, payload)
+        assert not isinstance(verdict, Transform), (
+            f"Expected {field!r} to be left untouched for {payload!r}, got Transform"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +175,7 @@ class TestPromptInjection:
         pipeline = make_default_pipeline()
         tool = _FakeTool()
         inp = _FakeInput(expr=payload)
-        verdict, _ = await pipeline.run(tool, inp, _FakeCtx())
+        verdict, _, _ = await pipeline.run(tool, inp, _FakeCtx())
         assert isinstance(verdict, Deny), f"Expected Deny for injection: {payload[:50]!r}"
 
 
@@ -163,7 +196,7 @@ class TestRoleEscalation:
         pipeline = make_default_pipeline()
         tool = _FakeTool()
         inp = _FakeInput(expr=payload)
-        verdict, _ = await pipeline.run(tool, inp, _FakeCtx())
+        verdict, _, _ = await pipeline.run(tool, inp, _FakeCtx())
         assert isinstance(verdict, Deny)
 
 
@@ -184,7 +217,7 @@ class TestQueryInjection:
         pipeline = make_default_pipeline()
         tool = _FakeTool(cost_class=CostClass.QUERY)
         inp = _FakeInput(expr=expr)
-        verdict, _ = await pipeline.run(tool, inp, _FakeCtx())
+        verdict, _, _ = await pipeline.run(tool, inp, _FakeCtx())
         assert isinstance(verdict, Deny), f"Expected CostGuard Deny for {expr!r}, got {verdict}"
         assert verdict.code == "cost"
 
@@ -206,7 +239,7 @@ class TestSSRF:
         pipeline = make_default_pipeline()
         tool = _FakeTool(cost_class=CostClass.QUERY)
         inp = _FakeInput(url=url)
-        verdict, _ = await pipeline.run(tool, inp, _FakeCtx())
+        verdict, _, _ = await pipeline.run(tool, inp, _FakeCtx())
         assert isinstance(verdict, Deny)
 
 
@@ -226,7 +259,7 @@ class TestSQLInjection:
         pipeline = make_default_pipeline()
         tool = _FakeTool(cost_class=CostClass.QUERY)
         inp = _FakeInput(label=payload)
-        verdict, _ = await pipeline.run(tool, inp, _FakeCtx())
+        verdict, _, _ = await pipeline.run(tool, inp, _FakeCtx())
         assert isinstance(verdict, Deny)
 
 
@@ -245,7 +278,7 @@ class TestUnicodeObfuscation:
 
     async def test_plain_ascii_email_still_caught(self) -> None:
         """Baseline: plain ASCII email is always transformed."""
-        verdict = await _pii_verdict("expr", "contact=plain@ascii.com")
+        verdict = await _pii_verdict("label", "contact=plain@ascii.com")
         assert isinstance(verdict, Transform)
 
     async def test_plain_ascii_ip_still_caught(self) -> None:
@@ -253,5 +286,5 @@ class TestUnicodeObfuscation:
         assert isinstance(verdict, Transform)
 
     async def test_plain_card_still_caught(self) -> None:
-        verdict = await _pii_verdict("query", "pan=5500005555555559")
+        verdict = await _pii_verdict("label", "pan=5500005555555559")
         assert isinstance(verdict, Transform)

@@ -12,6 +12,15 @@ services:
       GF_AUTH_DISABLE_LOGIN_FORM: "false"
       GF_USERS_AUTO_ASSIGN_ORG: "true"
       GF_USERS_AUTO_ASSIGN_ORG_ROLE: Viewer
+      # Shared HMAC secret for signing internal Go plugin → orca-backend
+      # requests (X-Agent-Signature). MUST be the exact same value as
+      # AGENT_INTERNAL_SECRET on the orca-backend service below — both read
+      # from the single AGENT_INTERNAL_SECRET entry in the root .env file, so
+      # setting it once here keeps both sides in sync. Empty (the default)
+      # disables signing entirely — fine for local dev, refused at startup by
+      # orca-backend when ENVIRONMENT=production. See
+      # docs/harness-risk-review.md F4 and services/orca/README.md.
+      AGENT_INTERNAL_SECRET: ${AGENT_INTERNAL_SECRET:-}
 
   # ---------------------------------------------------------------------------
   # Observability backends
@@ -143,6 +152,16 @@ services:
       GRAFANA_ADMIN_TOKEN: ${GRAFANA_ADMIN_TOKEN}
       ORCA_AGENT_TIMEOUT_SECONDS: ${ORCA_AGENT_TIMEOUT_SECONDS:-300}
       ORCA_MAX_ROUNDS: ${ORCA_MAX_ROUNDS:-5}
+      # Shared HMAC secret validated by InternalAuthMiddleware on every
+      # request the Go plugin proxies to /api/sessions, /api/mcp,
+      # /api/identity, and /api/rca. MUST match AGENT_INTERNAL_SECRET on the
+      # `grafana` service above — both source the same root .env entry, so
+      # setting AGENT_INTERNAL_SECRET once keeps them in sync automatically.
+      # Empty (the default) disables signature validation — acceptable for
+      # local dev; refused at startup when ENVIRONMENT=production (see
+      # app/config.py Settings.validate_production_secrets and
+      # docs/harness-risk-review.md F4).
+      AGENT_INTERNAL_SECRET: ${AGENT_INTERNAL_SECRET:-}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       OTEL_EXPORTER_OTLP_PROTOCOL: grpc
       OTEL_SERVICE_NAME: orca-backend

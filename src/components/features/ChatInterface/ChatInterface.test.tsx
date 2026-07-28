@@ -1,3 +1,16 @@
+/**
+ * @jest-environment ./src/testUtils/jsdomNavigationEnvironment.js
+ *
+ * jsdom makes `window.location` (and its `href` property) non-configurable
+ * "unforgeable" own properties, matching real browser behaviour. This means
+ * `window.location` can never be swapped/deleted/redefined from test code,
+ * and non-hash navigations (e.g. `window.location.href = '/other/path'`)
+ * never actually update `window.location.href` in jsdom - they're
+ * intentionally stubbed out. The custom environment above records every
+ * navigation attempt on `window.__navigationAttempts__` so the "Settings
+ * gear icon" test below can assert on the exact URL without touching
+ * `window.location` at all. See jsdomNavigationEnvironment.js for details.
+ */
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -744,29 +757,28 @@ describe('ChatInterface', () => {
         });
 
         it('navigates to the plugin config page when settings button is clicked', async () => {
-            const originalLocation = window.location;
-            // jsdom does not support navigation, so we replace href with a writable mock
-            delete (window as any).location;
-            (window as any).location = { href: '' };
+            // `window.location` cannot be replaced or spied on in jsdom (its
+            // properties are non-configurable "unforgeable" own properties), and
+            // non-hash navigations never actually update `window.location.href`
+            // there. The custom test environment for this file (see the
+            // `@jest-environment` docblock at the top) records every navigation
+            // attempt instead, so we assert on that.
+            const navigationAttempts = (window as any).__navigationAttempts__ as string[];
+            expect(navigationAttempts).toEqual([]);
 
-            try {
-                render(
-                    <MemoryRouter>
-                        <ChatInterface />
-                    </MemoryRouter>
-                );
+            render(
+                <MemoryRouter>
+                    <ChatInterface />
+                </MemoryRouter>
+            );
 
-                await waitFor(() => {
-                    expect(screen.getByTestId('settings-button')).toBeInTheDocument();
-                });
+            await waitFor(() => {
+                expect(screen.getByTestId('settings-button')).toBeInTheDocument();
+            });
 
-                fireEvent.click(screen.getByTestId('settings-button'));
+            fireEvent.click(screen.getByTestId('settings-button'));
 
-                expect(window.location.href).toBe('/plugins/vikshana-graft-app?page=configuration');
-            } finally {
-                // Always restore original location, even if an assertion throws
-                (window as any).location = originalLocation;
-            }
+            expect(navigationAttempts).toEqual(['http://localhost/plugins/vikshana-graft-app?page=configuration']);
         });
 
         it('settings button is not shown in active chat view', async () => {

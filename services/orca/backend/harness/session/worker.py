@@ -6,27 +6,61 @@ claim and execute any pending turn job, making the system horizontally scalable
 without session affinity.
 
 Claim protocol:
-  1. ``SELECT ... FOR UPDATE SKIP LOCKED`` on ``turn_jobs`` (status=pending).
-  2. ``pg_advisory_xact_lock(hashtext(session_id))`` serialises concurrent
-     turns within the same session (at most one active turn per session).
-  3. Execute the turn via ``GraphRegistry``.
+  1. ``SELECT ... FOR UPDATE SKIP LOCKED`` on ``turn_jobs`` (status=pending),
+     on a pooled connection that is committed immediately so the claim is
+     durable regardless of how long the turn itself takes.
+  2. ``pg_try_advisory_xact_lock(hashtext(session_id))`` — a *non-blocking*,
+     *transaction-scoped* advisory lock, acquired on a dedicated execution
+     session (never the pooled claim connection above) — serialises
+     concurrent turns within the same session (at most one active turn per
+     session). Because it is non-blocking, a contended session never stalls
+     the poll loop or ties up a pooled connection waiting; because it is
+     transaction-scoped, it is released purely by ending that one
+     transaction (commit *or* rollback), so a slow, failing, crashed, or
+     cancelled turn can never leave the session's lock permanently held —
+     there is no separate "unlock" statement that itself has to
+     successfully round-trip to Postgres. If the lock is unavailable
+     (another worker/replica is already executing a turn for this session),
+     the job is safely returned to ``pending`` (see ``_requeue_busy_job``)
+     rather than blocked on.
+  3. Execute the turn via ``GraphRegistry``, while a background heartbeat
+     periodically refreshes ``claimed_at`` so the orphan reaper (see below)
+     never mistakes a live, long-running turn for a crashed one.
   4. Mark job ``done`` or ``failed``.
 
 Concurrency model:
   - Multiple turn requests for the same session are queued as separate
     ``TurnJob`` rows.  The first is claimed and executed; subsequent ones
-    remain ``pending`` until the lock is released.
+    are requeued to ``pending`` until the lock is released.
   - Callers that hit an already-active session receive an ``agent_busy``
     event immediately without blocking.
 
+Orphan reaping:
+  - A job stuck in ``claimed`` because its worker crashed is detected via a
+    stale ``claimed_at`` (older than ``TURN_JOB_LEASE_TTL_S``) and reset to
+    ``pending`` (or ``failed`` past ``TURN_JOB_MAX_ATTEMPTS``).
+  - A *live* turn's heartbeat keeps renewing ``claimed_at`` throughout
+    execution, so a legitimately long-running turn is never requeued out
+    from under the worker that is actively (and safely, per the advisory
+    lock above) still executing it.
+
 Configuration:
-  ``TURN_WORKER_POLL_MS``  — poll interval when queue is empty (default 200ms).
-  ``TURN_WORKER_ID``       — optional worker identifier for observability.
+  ``TURN_WORKER_POLL_MS``            — poll interval when queue is empty
+                                        (default 200ms).
+  ``TURN_WORKER_ID``                 — optional worker identifier for
+                                        observability.
+  ``TURN_JOB_LEASE_TTL_S``           — staleness threshold for orphan
+                                        reaping (default 600s).
+  ``TURN_JOB_MAX_ATTEMPTS``          — crash-retry budget before a job is
+                                        given up on (default 5).
+  ``TURN_JOB_HEARTBEAT_INTERVAL_S``  — how often a live turn renews its
+                                        lease (default 60s).
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import socket
 import uuid
@@ -51,6 +85,11 @@ _CLAIM_LEASE_TTL_S = int(os.environ.get("TURN_JOB_LEASE_TTL_S", "600"))
 # marked failed to prevent an infinite crash-retry loop.
 _MAX_JOB_ATTEMPTS = int(os.environ.get("TURN_JOB_MAX_ATTEMPTS", "5"))
 
+# How often a live turn renews its claim lease (`claimed_at`) while
+# executing, so the orphan reaper never requeues a turn that is still
+# legitimately running just because it has been running for a while.
+_HEARTBEAT_INTERVAL_S = float(os.environ.get("TURN_JOB_HEARTBEAT_INTERVAL_S", "60"))
+
 # Worker identifier (defaults to hostname + pid)
 _WORKER_ID = os.environ.get(
     "TURN_WORKER_ID",
@@ -65,6 +104,8 @@ class TurnWorker:
         poll_ms: Polling interval in milliseconds when the queue is empty.
         worker_id: Identifier for this worker instance (for observability).
         stop_event: Optional asyncio.Event; set it to stop the loop gracefully.
+        heartbeat_interval_s: Seconds between claim-lease renewals while a
+            turn is executing (see ``_heartbeat_loop``).
     """
 
     def __init__(
@@ -72,10 +113,12 @@ class TurnWorker:
         poll_ms: int = _DEFAULT_POLL_MS,
         worker_id: str = _WORKER_ID,
         stop_event: asyncio.Event | None = None,
+        heartbeat_interval_s: float = _HEARTBEAT_INTERVAL_S,
     ) -> None:
         self._poll_ms = poll_ms
         self._worker_id = worker_id
         self._stop_event = stop_event or asyncio.Event()
+        self._heartbeat_interval_s = heartbeat_interval_s
         self._processed = 0
         self._slack_notifier: Any | None = None  # lazily initialised, reused across turns
 
@@ -100,6 +143,8 @@ class TurnWorker:
             except Exception as exc:
                 log.error("turn_worker_unexpected_error", error=str(exc), exc_info=True)
                 await asyncio.sleep(1)
+
+        log.info("turn_worker_stopped", total_processed=self._processed)
 
     async def _reap_orphaned_jobs(self) -> int:
         """Recover jobs orphaned by a crashed worker.
@@ -158,13 +203,16 @@ class TurnWorker:
             )
         return len(failed_ids) + len(requeued_ids)
 
-        log.info("turn_worker_stopped", total_processed=self._processed)
-
     async def _poll_once(self) -> bool:
         """Attempt to claim and execute one pending turn job.
 
         Returns:
-            True if a job was processed, False if the queue was empty.
+            True if a turn was actually executed. False if the queue was
+            empty *or* the only claimable job's session is currently busy
+            (another worker/replica holds its advisory lock) — both cases
+            are treated the same way by the caller (back off for one poll
+            interval), so a busy session can never turn into a tight,
+            DB-hammering retry loop.
         """
         async with AsyncSessionLocal() as db:
             # Claim one pending job with SKIP LOCKED
@@ -197,14 +245,11 @@ class TurnWorker:
             session_id: str = str(row.session_id)
             payload: dict[str, Any] = dict(row.payload)
 
-            # Advisory lock: one active turn per session (hash to int)
-            await db.execute(
-                text("SELECT pg_advisory_xact_lock(hashtext(:sid))"),
-                {"sid": session_id},
-            )
+            # Commit the claim immediately so it is durable and visible to
+            # other workers/observability (e.g. the orphan reaper),
+            # regardless of how long the turn itself takes to run below.
             await db.commit()
 
-        # Execute the turn outside the claiming transaction
         log = logger.bind(
             worker_id=self._worker_id,
             job_id=job_id,
@@ -212,16 +257,156 @@ class TurnWorker:
         )
         log.info("turn_job_claimed")
 
+        # Session serialisation: at most one active turn per session, using
+        # a *non-blocking*, *transaction-scoped* advisory lock
+        # (pg_try_advisory_xact_lock) acquired on a dedicated execution
+        # session — never the pooled `db` connection above, which was
+        # already committed and returned to the pool.
+        #
+        # Why try + xact-scoped, instead of the blocking session-level
+        # pg_advisory_lock/pg_advisory_unlock pair this replaces:
+        #   - `pg_try_advisory_xact_lock` returns immediately (true/false)
+        #     rather than blocking the calling connection for however long
+        #     an in-flight turn takes. A blocking acquire on a pooled
+        #     connection is exactly the head-of-line-blocking /
+        #     permanent-pooled-connection hazard this must avoid — it can
+        #     tie up a connection-pool slot for the full duration of
+        #     someone else's turn, starving unrelated sessions and jobs.
+        #   - Because the lock is transaction-scoped, it is released
+        #     purely by ending the transaction (commit *or* rollback) —
+        #     there is no separate "unlock" statement that must itself
+        #     round-trip successfully to Postgres. If this turn is
+        #     cancelled, raises, or the process is killed, closing/rolling
+        #     back `exec_db` (done automatically on any exit from the
+        #     `async with` block below) releases the lock. A session-level
+        #     lock instead requires an explicit `pg_advisory_unlock` to run
+        #     to completion, which is fragile under cancellation and
+        #     actively dangerous behind a transaction-pooling connection
+        #     pooler (e.g. PgBouncer), where the Postgres "session" a lock
+        #     is attached to can be silently handed to an unrelated client.
+        async with AsyncSessionLocal() as exec_db:
+            lock_result = await exec_db.execute(
+                text("SELECT pg_try_advisory_xact_lock(hashtext(:sid)) AS acquired"),
+                {"sid": session_id},
+            )
+            acquired = bool(lock_result.scalar())
+
+            if not acquired:
+                # Another worker (possibly another replica) is already
+                # executing a turn for this session. Never block waiting
+                # for it — safely return this job to the queue instead.
+                log.info("turn_job_session_busy_requeued")
+                await self._requeue_busy_job(job_id)
+                return False
+
+            log.info("turn_session_lock_acquired")
+
+            # Renew the claim lease periodically while the turn actually
+            # executes, so the orphan reaper (`_reap_orphaned_jobs`) never
+            # mistakes a live, still-running turn for a crashed one and
+            # requeues it out from under us. Cancelled unconditionally in
+            # `finally` once the turn finishes (success, failure, or the
+            # cancellation of this coroutine itself).
+            heartbeat_task = asyncio.create_task(self._heartbeat_loop(job_id))
+            try:
+                await self._execute_turn(session_id, payload)
+                await self._mark_job(job_id, "done")
+                self._processed += 1
+                log.info("turn_job_done")
+            except Exception as exc:
+                log.error("turn_job_failed", error=str(exc), exc_info=True)
+                await self._mark_job(job_id, "failed")
+            finally:
+                heartbeat_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await heartbeat_task
+                # Ending this transaction releases the
+                # pg_try_advisory_xact_lock acquired above. Even if this
+                # commit is itself interrupted (e.g. cancellation), exiting
+                # the `async with` block below rolls back any still-open
+                # transaction on `exec_db` and releases the lock all the
+                # same — there is no code path (crash, cancellation, or
+                # otherwise) that can leave this lock permanently held.
+                await exec_db.commit()
+
+        return True
+
+    async def _requeue_busy_job(self, job_id: str) -> None:
+        """Return a just-claimed job to ``pending`` because its session's
+        advisory lock is currently held by another in-flight turn.
+
+        This is healthy contention (another worker/replica is actively
+        executing a turn for the same session), not a crash, so the
+        ``attempts`` increment applied by the claim step in ``_poll_once``
+        is reversed here — this contention must never count toward the
+        crash-retry budget enforced by ``_reap_orphaned_jobs``.
+
+        Args:
+            job_id: UUID of the turn_jobs row to requeue.
+        """
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                text("""
+                    UPDATE turn_jobs
+                    SET status = 'pending',
+                        worker_id = NULL,
+                        claimed_at = NULL,
+                        attempts = GREATEST(attempts - 1, 0)
+                    WHERE id = :id
+                """),
+                {"id": job_id},
+            )
+            await db.commit()
+
+    async def _heartbeat_loop(self, job_id: str) -> None:
+        """Periodically refresh ``claimed_at`` for a claimed job while its
+        turn is executing.
+
+        The orphan reaper treats any job whose ``claimed_at`` is older than
+        the lease TTL as abandoned and resets it to ``pending``. Without a
+        heartbeat, a legitimately long-running turn (LLM + tool-call loops
+        can easily exceed a fixed lease TTL) would eventually be requeued
+        and picked up by a second worker while the first is still executing
+        it — exactly the concurrent-execution hazard the advisory lock in
+        ``_poll_once`` exists to prevent. Renewing ``claimed_at`` here keeps
+        a *live* turn's lease fresh regardless of total duration; only a
+        worker that has actually stopped heartbeating (crashed or killed)
+        goes stale and is reaped.
+
+        Runs until cancelled by the caller in a ``finally`` block once the
+        turn finishes, by any means (success, failure, or cancellation).
+        """
+        while True:
+            await asyncio.sleep(self._heartbeat_interval_s)
+            await self._send_heartbeat(job_id)
+
+    async def _send_heartbeat(self, job_id: str) -> None:
+        """Refresh ``claimed_at`` for one job to the current time.
+
+        Best-effort: failures are logged, never raised, so a transient DB
+        hiccup on the heartbeat can't crash the turn it is protecting.
+
+        Args:
+            job_id: UUID of the turn_jobs row to renew.
+        """
         try:
-            await self._execute_turn(session_id, payload)
-            await self._mark_job(job_id, "done")
-            self._processed += 1
-            log.info("turn_job_done")
-            return True
+            async with AsyncSessionLocal() as db:
+                await db.execute(
+                    text("""
+                        UPDATE turn_jobs
+                        SET claimed_at = :now
+                        WHERE id = :id AND status = 'claimed'
+                    """),
+                    {"now": datetime.now(timezone.utc), "id": job_id},
+                )
+                await db.commit()
         except Exception as exc:
-            log.error("turn_job_failed", error=str(exc), exc_info=True)
-            await self._mark_job(job_id, "failed")
-            return True  # Still counts as "processed" (not an empty queue)
+            logger.warning(
+                "turn_job_heartbeat_failed",
+                worker_id=self._worker_id,
+                job_id=job_id,
+                error=str(exc),
+            )
 
     async def _execute_turn(self, session_id: str, payload: dict[str, Any]) -> None:
         """Execute a turn using the appropriate graph from the registry.
@@ -242,7 +427,13 @@ class TurnWorker:
         log = logger.bind(session_id=session_id, session_type=session_type)
 
         try:
-            graph = graph_registry.get(session_type)
+            # aget() awaits the graph factory when it is async (the
+            # production factory, `app.agent.rca_graph.get_rca_graph`, is
+            # async — it lazily opens a Postgres checkpointer connection
+            # pool on first call). Using the sync `get()` here would cache
+            # the un-awaited coroutine instead of the compiled graph (see
+            # docs/harness-risk-review.md, F1).
+            graph = await graph_registry.aget(session_type)
         except KeyError as exc:
             log.error("unknown_session_type", error=str(exc))
             raise

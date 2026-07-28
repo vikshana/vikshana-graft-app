@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.agent.dedup import compute_fingerprint, find_canonical_rca, record_duplicate
 from app.db import Base
+from app.models.agent_step import AgentStep
 from app.models.alert import Alert
 from app.models.rca import RCA
 from app.models.rca_duplicate_alert import RCADuplicateAlert
@@ -23,14 +24,31 @@ _TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
 @pytest_asyncio.fixture(scope="module")
 async def dedup_engine():
-    """Shared in-memory SQLite engine for this module."""
+    """Shared in-memory SQLite engine for this module.
+
+    ``Base.metadata`` is a single process-wide registry shared by every
+    SQLAlchemy model in the app, including harness session tables (e.g.
+    ``harness.session.models.Turn``) that live entirely outside this
+    module's import graph. If another test module happens to import those
+    models before this fixture runs, a blanket ``Base.metadata.create_all()``
+    would try to create *every* table registered so far — including
+    ``turns``, whose ``session_id`` FK targets ``rca_sessions`` — even
+    though ``rca_sessions`` was never imported here, raising
+    ``NoReferencedTableError``. Passing an explicit ``tables=[...]`` list
+    scopes creation to only what this module needs, making the fixture
+    self-contained and immune to cross-module import ordering.
+    """
     engine = create_async_engine(_TEST_DB_URL, echo=False)
     async with engine.begin() as conn:
-        import app.models.alert  # noqa: F401
-        import app.models.rca  # noqa: F401
-        import app.models.agent_step  # noqa: F401
-        import app.models.rca_duplicate_alert  # noqa: F401
-        await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(
+            Base.metadata.create_all,
+            tables=[
+                Alert.__table__,
+                RCA.__table__,
+                AgentStep.__table__,
+                RCADuplicateAlert.__table__,
+            ],
+        )
     yield engine
     await engine.dispose()
 
@@ -180,6 +198,9 @@ class TestFindCanonicalRca:
 
         with patch("app.agent.dedup.settings") as mock_settings:
             mock_settings.ORCA_DEDUP_WINDOW_MINUTES = 30
+            # Status is "complete" (not active), so this value doesn't affect the
+            # outcome, but it must be a real int since it's used in a timedelta.
+            mock_settings.ORCA_AGENT_TIMEOUT_SECONDS = 300
             result = await find_canonical_rca(dedup_session, fp)
 
         assert result is None
@@ -211,6 +232,10 @@ class TestFindCanonicalRca:
 
         with patch("app.agent.dedup.settings") as mock_settings:
             mock_settings.ORCA_DEDUP_WINDOW_MINUTES = 30
+            # Must comfortably exceed the 120-minute RCA age (+60s grace buffer
+            # in find_canonical_rca) so the active-status "still running" check
+            # isn't the thing under test here — only the dedup-window bypass is.
+            mock_settings.ORCA_AGENT_TIMEOUT_SECONDS = 7200
             result = await find_canonical_rca(dedup_session, fp)
 
         assert result is not None

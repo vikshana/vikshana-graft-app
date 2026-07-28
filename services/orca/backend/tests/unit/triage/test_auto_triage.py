@@ -9,7 +9,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from harness.triage.auto_triage import AutoTriageResult, AutoTriageService, ConcurrencyLimitError
+from harness.triage.auto_triage import (
+    AutoTriageResult,
+    AutoTriageService,
+    ConcurrencyLimitError,
+    _build_initial_rca_state,
+)
 from harness.triage.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError
 
 
@@ -92,6 +97,22 @@ class TestAutoTriageHappyPath:
         call_kwargs = mock_enqueue.call_args.kwargs
         assert call_kwargs["session_id"] == result.session_id
         assert call_kwargs["session_type"] == "investigation"
+
+        # F1 fix: turn_input must be a complete RCAState-shaped payload, not
+        # the flat {"alert_name", "labels", "alert_id", "org_id"} dict this
+        # previously sent. A partial payload raises KeyError on the graph's
+        # very first node (`state["alert_context"]`).
+        turn_input = call_kwargs["turn_input"]
+        assert turn_input["alert_context"]["alert_name"] == "HighLatency"
+        assert turn_input["alert_context"]["org_id"] == 1
+        assert turn_input["org_id"] == 1
+        assert turn_input["round"] == 0
+        assert turn_input["developer_accepted"] is False
+        assert turn_input["hypotheses"] == []
+        assert turn_input["confidence_scores"] == []
+        assert turn_input["gathered_data"] == []
+        assert turn_input["messages"] == []
+        assert turn_input["max_rounds"] > 0
 
     async def test_new_session_tagged_service_account(self):
         """The INSERT into rca_sessions includes auth_mode=service_account."""
@@ -193,3 +214,96 @@ class TestAutoTriageCircuitBreaker:
         from harness.triage.circuit_breaker import CircuitState
         assert svc._breaker.state == CircuitState.CLOSED
         assert svc._breaker.failure_count == 0
+
+
+# ---------------------------------------------------------------------------
+# _build_initial_rca_state — F1 fix: complete RCAState payload
+# ---------------------------------------------------------------------------
+
+
+class TestBuildInitialRCAState:
+    """`_build_initial_rca_state` must produce every key `RCAState` requires,
+    matching the shape `tests/conftest.py::rca_initial_state` and
+    `app.agent.rca_state.RCAState` define — a partial payload raises
+    `KeyError` on the graph's very first node."""
+
+    def test_contains_every_rca_state_key(self):
+        from app.agent.rca_state import RCAState
+
+        state = _build_initial_rca_state(
+            alert_name="HighErrorRate",
+            labels={"service": "checkout"},
+            alert_id=uuid.uuid4(),
+            org_id=7,
+        )
+        assert set(state.keys()) == set(RCAState.__required_keys__ | RCAState.__optional_keys__)
+
+    def test_alert_context_contains_every_alert_context_key(self):
+        from app.agent.rca_state import AlertContext
+
+        state = _build_initial_rca_state(
+            alert_name="HighErrorRate",
+            labels={"service": "checkout"},
+            alert_id=uuid.uuid4(),
+            org_id=7,
+        )
+        alert_context_keys = set(AlertContext.__required_keys__ | AlertContext.__optional_keys__)
+        assert set(state["alert_context"].keys()) == alert_context_keys
+
+    def test_state_is_directly_usable_by_data_gathering_node(self):
+        """The built state must not raise KeyError when a real graph node
+        indexes required fields directly (state["alert_context"], etc.)."""
+        alert_id = uuid.uuid4()
+        state = _build_initial_rca_state(
+            alert_name="HighErrorRate",
+            labels={"service": "checkout", "environment": "production"},
+            alert_id=alert_id,
+            org_id=7,
+        )
+
+        # These are exactly the direct-index accesses data_gathering_node,
+        # hypothesis_generation_node, and finalize_node perform.
+        assert state["alert_context"]["alert_name"] == "HighErrorRate"
+        assert state["alert_context"]["description"]
+        assert state["round"] == 0
+        assert state["max_rounds"] > 0
+        assert state["hypotheses"] == []
+        assert state["confidence_scores"] == []
+
+    def test_service_and_environment_derived_from_labels(self):
+        state = _build_initial_rca_state(
+            alert_name="HighErrorRate",
+            labels={"service": "checkout", "environment": "production"},
+            alert_id=None,
+            org_id=None,
+        )
+        assert state["alert_context"]["service"] == "checkout"
+        assert state["alert_context"]["environment"] == "production"
+
+    def test_service_and_environment_fall_back_to_grafana_label_names(self):
+        """Webhook-sourced alerts use service_name/deployment_environment_name
+        (see app/schemas/webhook.py REQUIRED_LABELS)."""
+        state = _build_initial_rca_state(
+            alert_name="HighErrorRate",
+            labels={
+                "service_name": "checkout",
+                "deployment_environment_name": "production",
+            },
+            alert_id=None,
+            org_id=None,
+        )
+        assert state["alert_context"]["service"] == "checkout"
+        assert state["alert_context"]["environment"] == "production"
+
+    def test_missing_alert_id_becomes_none(self):
+        state = _build_initial_rca_state(
+            alert_name="HighErrorRate", labels={}, alert_id=None, org_id=None
+        )
+        assert state["alert_context"]["alert_id"] is None
+
+    def test_description_has_a_safe_default_when_absent(self):
+        state = _build_initial_rca_state(
+            alert_name="HighErrorRate", labels={}, alert_id=None, org_id=None
+        )
+        assert isinstance(state["alert_context"]["description"], str)
+        assert len(state["alert_context"]["description"]) > 0

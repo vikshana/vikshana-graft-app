@@ -39,6 +39,13 @@ class Settings(BaseSettings):
         ALERT_TRIAGE_MAX_CONCURRENT: Max concurrent auto-triage sessions (semaphore cap).
         ALERT_TRIAGE_CIRCUIT_BREAKER_THRESHOLD: Consecutive failures to open the circuit.
         ALERT_TRIAGE_CIRCUIT_BREAKER_TIMEOUT_S: Cool-down seconds before half-open probe.
+        AGENT_INTERNAL_SECRET: Shared HMAC secret used by ``InternalAuthMiddleware``
+            to validate ``X-Agent-Signature`` on internal requests proxied from the
+            Grafana Go plugin (``pkg/plugin/internal_signer.go`` signs with the same
+            value). Empty disables signature validation entirely (dev-mode
+            pass-through) — ``validate_production_secrets`` refuses to start with it
+            empty when ``ENVIRONMENT=production``. Must be identical on both sides
+            of the proxy; see docker-compose.yaml and docs/harness-risk-review.md F4.
     """
 
     model_config = SettingsConfigDict(
@@ -71,6 +78,15 @@ class Settings(BaseSettings):
     SLACK_APP_TOKEN: str = ""
     # Signing secret — used to verify HTTP-mode request signatures.
     SLACK_SIGNING_SECRET: str = ""
+
+    # Grafana organisation ID to tag onto sessions created via Slack.
+    # Slack slash commands carry no Grafana org context of their own (no
+    # equivalent of the X-Grafana-Org-Id header the Go gateway injects for
+    # HTTP-originated sessions); a Slack app installation is assumed to
+    # correspond to a single Grafana org for now. None means org_id is left
+    # unset on Slack-created sessions (multi-org Slack workspaces are not
+    # yet supported).
+    SLACK_DEFAULT_ORG_ID: int | None = None
 
     # -------------------------------------------------------------------------
     # Identity linkage (Phase 3, Task 3.1)
@@ -121,6 +137,20 @@ class Settings(BaseSettings):
     # Fernet key for encrypting refresh tokens at rest.
     # Dev default: 32 zero bytes (base64-padded).  Override in production.
     OBO_ENCRYPTION_KEY: str = "devkey00000000000000000000000000"
+
+    # -------------------------------------------------------------------------
+    # Internal auth (Phase 2, hardened Phase 4 — F4/F7/F8)
+    # -------------------------------------------------------------------------
+    # Shared HMAC secret validated by InternalAuthMiddleware on every request
+    # to /api/sessions, /api/mcp, /api/identity, and /api/rca. The Grafana Go
+    # plugin gateway (pkg/plugin/internal_signer.go) must sign with this exact
+    # same value — see docker-compose.yaml, which sources both sides from a
+    # single AGENT_INTERNAL_SECRET entry in the root .env file.
+    #
+    # Empty (the default) disables signature validation entirely — acceptable
+    # for local dev, refused at startup in production (see
+    # validate_production_secrets below).
+    AGENT_INTERNAL_SECRET: str = ""
 
     # -------------------------------------------------------------------------
     # Phase 1 harness settings
@@ -178,6 +208,20 @@ class Settings(BaseSettings):
     # Phase 4 — MCP server integration
     MCP_ENCRYPTION_KEY: str = ""  # 32-byte URL-safe base64; empty = no-op (dev only)
 
+    # Phase 4 — MCP client-manager cross-replica convergence (F10)
+    # `MCPClientManager` state is per-replica in-memory; Postgres is the
+    # runtime source of truth. Two independent mechanisms keep replicas
+    # converged without a restart — see harness/mcp/client_manager.py.
+    #
+    # Bounded periodic background reconciliation interval (seconds).
+    MCP_RECONCILE_INTERVAL_S: int = 30
+    # Max staleness (seconds) tolerated by an API read/write before it
+    # forces a synchronous reconcile ("invalidation on access") — so a
+    # request landing on a replica shortly after another replica's
+    # add/toggle/reconnect/delete still observes the change instead of
+    # waiting for the next periodic tick. Set to 0 to disable.
+    MCP_RECONCILE_TTL_S: int = 10
+
     # Deployment environment: "development" | "production".
     # In production, insecure default/empty encryption keys are rejected at startup.
     ENVIRONMENT: str = "development"
@@ -214,6 +258,15 @@ class Settings(BaseSettings):
             errors.append(
                 "MCP_ENCRYPTION_KEY is empty; MCP bearer tokens would be stored in plaintext. "
                 "Set a 32-byte URL-safe base64 Fernet key in production."
+            )
+        if not self.AGENT_INTERNAL_SECRET:
+            errors.append(
+                "AGENT_INTERNAL_SECRET is empty; InternalAuthMiddleware would run as a "
+                "transparent pass-through, leaving /api/sessions, /api/mcp, /api/identity, "
+                "and /api/rca reachable by anything with network access to this service "
+                "with no signature check (see docs/harness-risk-review.md F4). Set the same "
+                "shared secret here and on the Grafana Go plugin (AGENT_INTERNAL_SECRET env "
+                "var) in production."
             )
         return errors
 

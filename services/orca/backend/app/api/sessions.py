@@ -60,7 +60,12 @@ async def list_sessions(
         x_grafana_org_id: Grafana org ID injected by the Go proxy.
 
     Returns:
-        Dict with ``sessions`` list and ``total`` count.
+        Dict with ``sessions`` list and ``total`` count. An empty list is a
+        valid, successful response (no sessions match the filters).
+
+    Raises:
+        HTTPException: 503 if the database query itself fails (infra
+            failure) — never conflated with a legitimate empty result.
     """
     org_id = _parse_org_id(x_grafana_org_id)
     log = logger.bind(org_id=org_id)
@@ -96,27 +101,40 @@ async def list_sessions(
             rows = (await db.execute(sql, params)).fetchall()
             total = (await db.execute(count_sql, count_params)).scalar() or 0
 
-        sessions = [
-            {
-                "id": row.id,
-                "type": row.type or "investigation",
-                "status": row.status or "active",
-                "alert_type": row.alert_type,
-                "service": row.service,
-                "initiator_user_id": row.initiator_user_id,
-                "initiator_channel": row.initiator_channel or "grafana",
-                "auth_mode": row.auth_mode or "service_account",
-                "created_at": row.created_at.isoformat() if row.created_at else None,
-                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-            }
-            for row in rows
-        ]
-        log.info("sessions_listed", count=len(sessions), total=total)
-        return {"sessions": sessions, "total": total}
-
     except Exception as exc:
-        log.warning("sessions_list_failed", error=str(exc))
-        return {"sessions": [], "total": 0}
+        # A genuinely empty result set never reaches this branch — the
+        # query above returns `[]`/`0` for "no sessions" without raising.
+        # Getting here means the DB/query itself failed (down, unreachable,
+        # bad SQL, etc). Masking that as an empty list is operationally
+        # blind — surface a safe 5xx instead, with the real error logged
+        # server-side (harness-risk-review.md, F16).
+        log.error(
+            "sessions_list_failed",
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to list sessions due to an internal error.",
+        ) from exc
+
+    sessions = [
+        {
+            "id": row.id,
+            "type": row.type or "investigation",
+            "status": row.status or "active",
+            "alert_type": row.alert_type,
+            "service": row.service,
+            "initiator_user_id": row.initiator_user_id,
+            "initiator_channel": row.initiator_channel or "grafana",
+            "auth_mode": row.auth_mode or "service_account",
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+        for row in rows
+    ]
+    log.info("sessions_listed", count=len(sessions), total=total)
+    return {"sessions": sessions, "total": total}
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +186,13 @@ async def search_sessions(
         x_grafana_org_id: Grafana org ID injected by the Go proxy.
 
     Returns:
-        Ranked list of similar past RCA sessions.
+        Ranked list of similar past RCA sessions. An empty ``results`` list
+        is a valid, successful response (no similar sessions found).
+
+    Raises:
+        HTTPException: 503 if the embedding call or the database query
+            fails (infra failure) — never conflated with a legitimate
+            empty result.
     """
     org_id = _parse_org_id(x_grafana_org_id)
     log = logger.bind(org_id=org_id, query=q[:80])
@@ -177,8 +201,15 @@ async def search_sessions(
     try:
         query_embedding = await embed_text(q)
     except Exception as exc:
-        log.warning("session_search_embed_failed", error=str(exc))
-        return SessionSearchResponse(query=q, results=[])
+        log.error(
+            "session_search_embed_failed",
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to search sessions: embedding service unavailable.",
+        ) from exc
 
     where_clauses = [
         "e.chunk_type = 'hypothesis'",
@@ -217,25 +248,36 @@ async def search_sessions(
         async with AsyncSessionLocal() as db:
             rows = (await db.execute(sql, params)).fetchall()
 
-        results = [
-            SessionSearchResult(
-                rca_session_id=str(row.rca_session_id),
-                alert_type=row.alert_type,
-                service=row.service,
-                final_hypothesis=row.final_hypothesis,
-                final_confidence=row.final_confidence,
-                accepted_at=row.accepted_at.isoformat() if row.accepted_at else None,
-                similarity=max(0.0, min(1.0, 1.0 - float(row.distance))),
-            )
-            for row in rows
-        ]
-
-        log.info("session_search_complete", result_count=len(results))
-        return SessionSearchResponse(query=q, results=results)
-
     except Exception as exc:
-        log.warning("session_search_query_failed", error=str(exc))
-        return SessionSearchResponse(query=q, results=[])
+        # A genuinely empty result set never reaches this branch (the query
+        # above returns `[]` for "no similar sessions" without raising).
+        # Getting here means the DB/query itself failed — surface a safe
+        # 5xx instead of a silently-empty result (harness-risk-review.md, F16).
+        log.error(
+            "session_search_query_failed",
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to search sessions due to an internal error.",
+        ) from exc
+
+    results = [
+        SessionSearchResult(
+            rca_session_id=str(row.rca_session_id),
+            alert_type=row.alert_type,
+            service=row.service,
+            final_hypothesis=row.final_hypothesis,
+            final_confidence=row.final_confidence,
+            accepted_at=row.accepted_at.isoformat() if row.accepted_at else None,
+            similarity=max(0.0, min(1.0, 1.0 - float(row.distance))),
+        )
+        for row in rows
+    ]
+
+    log.info("session_search_complete", result_count=len(results))
+    return SessionSearchResponse(query=q, results=results)
 
 
 # ---------------------------------------------------------------------------

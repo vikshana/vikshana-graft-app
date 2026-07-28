@@ -9,17 +9,19 @@ from typing import Any
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text, update
+from sqlalchemy import update
 
 from app.config import settings
-from app.db import Base, async_engine
+from app.db import async_engine
 from app.logging import configure_logging
+from app.schema_check import verify_schema_at_head
 
 logger = structlog.get_logger()
 
 # Background task handles — kept to allow clean cancellation on shutdown
 _worker_task: asyncio.Task | None = None
 _slack_handler: Any | None = None
+_mcp_reconcile_task: asyncio.Task | None = None
 
 
 @asynccontextmanager
@@ -28,8 +30,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     On startup:
     - Configures structlog
-    - Creates all database tables (if not already present)
-    - Attempts to install the pg_trgm extension for GIN trigram indexes
+    - Verifies the database schema is at the Alembic head revision
+      (schema itself is managed exclusively by Alembic; see
+      docker-entrypoint.sh and app/schema_check.py)
+    - Cleans up orphaned in-flight RCAs from a prior container restart
     - Initialises the interactive RCA graph and registers it in GraphRegistry
     - Starts the TurnWorker background loop
 
@@ -40,13 +44,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Args:
         app: The FastAPI application instance.
     """
-    global _worker_task, _slack_handler  # noqa: PLW0603
+    global _worker_task, _slack_handler, _mcp_reconcile_task  # noqa: PLW0603
 
     configure_logging()
     log = structlog.get_logger()
     log.info("orca_starting", version="0.1.0", environment=settings.ENVIRONMENT)
 
-    # Fail fast in production if encryption keys are insecure (empty / dev defaults).
+    # Fail fast in production if encryption keys or the internal HMAC secret
+    # are insecure (empty / dev defaults) — see Settings.validate_production_secrets.
     secret_errors = settings.validate_production_secrets()
     if secret_errors:
         for err in secret_errors:
@@ -56,52 +61,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             + "; ".join(secret_errors)
         )
 
-    # Create all tables and attempt to enable extensions
+    # ── Schema authority: Alembic ───────────────────────────────────────
+    # `alembic upgrade head` runs in docker-entrypoint.sh before this
+    # process starts — the app itself never creates or mutates schema
+    # (see docs/harness-risk-review.md F3/F13). This is a defense-in-depth
+    # check: fail fast in production if the DB isn't at the expected
+    # revision (entrypoint bypassed / migration failed silently); only
+    # warn in development so bare-metal `uvicorn --reload` workflows that
+    # haven't run Alembic yet are not blocked from starting.
     async with async_engine.begin() as conn:
-        # Install trigram extension if available (non-fatal if not)
-        try:
-            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
-            log.info("pg_trgm_extension_enabled")
-        except Exception as exc:
-            log.warning("pg_trgm_extension_failed", error=str(exc))
-
-        # Install pgvector extension for semantic similarity search
-        try:
-            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            log.info("pgvector_extension_enabled")
-        except Exception as exc:
-            log.warning("pgvector_extension_failed", error=str(exc))
-
-        # Import all models so SQLAlchemy knows about them before create_all
-        import app.models.alert  # noqa: F401
-        import app.models.rca  # noqa: F401
-        import app.models.agent_step  # noqa: F401
-        import app.models.rca_duplicate_alert  # noqa: F401
-        import app.models.rca_session  # noqa: F401
-        import app.models.rca_embedding  # noqa: F401
-        # Harness models — required for create_all to include them
-        import harness.session.models  # noqa: F401
-
-        await conn.run_sync(Base.metadata.create_all)
-        log.info("database_tables_created")
-
-        # ── Forward-compatible column migrations ──────────────────────────
-        # create_all() never alters existing tables, so add new columns
-        # here with ADD COLUMN IF NOT EXISTS to stay idempotent.
-        migrations = [
-            "ALTER TABLE rcas ADD COLUMN IF NOT EXISTS feedback_rating INTEGER",
-            "ALTER TABLE rcas ADD COLUMN IF NOT EXISTS feedback_comment TEXT",
-            "ALTER TABLE rcas ADD COLUMN IF NOT EXISTS org_id INTEGER",
-        ]
-        for stmt_sql in migrations:
-            try:
-                await conn.execute(text(stmt_sql))
-            except Exception as exc:
-                log.warning("migration_skipped", stmt=stmt_sql, error=str(exc))
-        log.info("column_migrations_applied")
+        await verify_schema_at_head(conn, fail_hard=settings.is_production())
 
         # ── Orphan RCA cleanup ────────────────────────────────────────────
-        import app.models.rca  # noqa: F401  (ensure RCA mapped before update)
         from app.models.rca import RCA as _RCA  # local import to avoid top-level
 
         stuck_cutoff = datetime.now(timezone.utc) - timedelta(
@@ -184,6 +155,31 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         async with AsyncSessionLocal() as _mcp_db:
             await mcp_client_manager.startup(_mcp_db)
         log.info("mcp_client_manager_started")
+
+        # Cross-replica convergence (F10): MCPClientManager state is
+        # per-replica in-memory; Postgres is the runtime source of truth.
+        # This bounded background loop periodically reconciles this
+        # replica against the DB so add/toggle/reconnect/delete made
+        # through *another* replica's API becomes visible here too,
+        # without waiting for a request to trigger the on-access
+        # `ensure_fresh` TTL check in app/api/mcp_servers.py. See
+        # harness/mcp/client_manager.py and docs/harness-risk-review.md F10.
+        async def _mcp_reconcile_loop() -> None:
+            while True:
+                await asyncio.sleep(settings.MCP_RECONCILE_INTERVAL_S)
+                try:
+                    async with AsyncSessionLocal() as _reconcile_db:
+                        await mcp_client_manager.reconcile(_reconcile_db)
+                except Exception as exc:
+                    log.warning("mcp_reconcile_loop_iteration_failed", error=str(exc))
+
+        _mcp_reconcile_task = asyncio.create_task(
+            _mcp_reconcile_loop(), name="mcp_reconcile"
+        )
+        log.info(
+            "mcp_reconcile_loop_started",
+            interval_s=settings.MCP_RECONCILE_INTERVAL_S,
+        )
     except Exception as exc:
         log.warning("mcp_client_manager_start_failed", error=str(exc))
 
@@ -199,6 +195,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             log.warning("slack_socket_mode_stop_failed", error=str(exc))
 
     # Shutdown MCP client manager — deregister all MCP tools
+    if _mcp_reconcile_task is not None and not _mcp_reconcile_task.done():
+        _mcp_reconcile_task.cancel()
+        try:
+            await _mcp_reconcile_task
+        except asyncio.CancelledError:
+            pass
+        log.info("mcp_reconcile_loop_stopped")
+
     try:
         from harness.mcp.client_manager import mcp_client_manager
         await mcp_client_manager.shutdown()
@@ -250,10 +254,19 @@ def create_app() -> FastAPI:
     )
 
     # HMAC validation middleware for Go gateway → Python service calls.
-    # Applied to /api/sessions/* only; transparent pass-through when
+    # Applied to /api/sessions, /api/mcp, /api/identity, and /api/rca (see
+    # docs/harness-risk-review.md F4); transparent pass-through when
     # AGENT_INTERNAL_SECRET is not configured (dev mode).
+    #
+    # The secret is passed explicitly from `settings` (pydantic-settings —
+    # reads both real env vars and a .env file) rather than left to
+    # InternalAuthMiddleware's own os.environ fallback, so that a secret set
+    # only via a .env file is honoured consistently with what
+    # validate_production_secrets() just checked above — otherwise an
+    # operator could pass startup validation via .env while the middleware
+    # itself (reading raw os.environ) silently stayed in pass-through mode.
     from harness.auth.internal_auth import InternalAuthMiddleware
-    app.add_middleware(InternalAuthMiddleware)
+    app.add_middleware(InternalAuthMiddleware, secret=settings.AGENT_INTERNAL_SECRET)
 
     # Register routers
     from app.api.webhooks import router as webhooks_router

@@ -85,6 +85,10 @@ Makefile                            # Helpers: make up/down/logs/trigger-rca
 # Install dependencies (from backend/)
 pip install -e ".[dev]"
 
+# Apply database schema (Alembic is the sole schema authority — run this
+# once before first startup and after pulling new migrations)
+alembic upgrade head
+
 # Start the backend (dev mode)
 uvicorn app.main:app --reload --port 8000
 
@@ -103,7 +107,8 @@ pytest --cov=app tests/
 # Type checking
 mypy app/
 
-# Database tables are auto-created on startup via SQLAlchemy create_all() in main.py lifespan
+# Docker builds run `alembic upgrade head` automatically via
+# docker-entrypoint.sh before uvicorn starts.
 
 # --- Docker (from services/orca/) ---
 
@@ -218,7 +223,12 @@ ORCA_AGENT_TIMEOUT_SECONDS=300
 ## Database
 
 - PostgreSQL with async driver (`asyncpg`)
-- Tables auto-created on startup via `SQLAlchemy metadata.create_all()` in `main.py` lifespan
+- Schema is managed exclusively by Alembic (`alembic upgrade head`) — run via
+  `docker-entrypoint.sh` before uvicorn starts in the container, or manually
+  before running the backend bare-metal. `app/main.py` never creates or
+  alters schema at runtime; it only verifies (via `app/schema_check.py`)
+  that the DB is at the expected Alembic head, failing fast in production
+  on a mismatch and warning in development.
 - Three main tables: `alerts`, `rcas`, `agent_steps`
 - Label fields are denormalised onto `alerts` and `rcas` for fast filtering
 - `alert_name` uses GIN trigram index for free-text `ILIKE` search

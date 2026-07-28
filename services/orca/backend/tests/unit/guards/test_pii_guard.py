@@ -9,7 +9,7 @@ import pytest
 from pydantic import BaseModel
 
 from harness.guards.pii import PIIRedactionGuard, _redact_string
-from harness.guards.types import Allow, Transform
+from harness.guards.types import Allow, Deny, Transform
 from harness.tools.protocol import CostClass
 
 
@@ -26,6 +26,7 @@ class _SimpleTool:
 
 class _Input(BaseModel):
     expr: str = ""
+    query: str = ""
     label: str = ""
     nested: dict[str, Any] = {}
 
@@ -54,11 +55,11 @@ async def _eval(
 
 class TestFeatureFlag:
     async def test_disabled_flag_allows_everything(self) -> None:
-        verdict = await _eval(CostClass.QUERY, enabled=False, expr="user@example.com")
+        verdict = await _eval(CostClass.QUERY, enabled=False, label="user@example.com")
         assert isinstance(verdict, Allow)
 
     async def test_cheap_tool_always_allows(self) -> None:
-        verdict = await _eval(CostClass.CHEAP, enabled=True, expr="user@example.com")
+        verdict = await _eval(CostClass.CHEAP, enabled=True, label="user@example.com")
         assert isinstance(verdict, Allow)
 
 
@@ -68,14 +69,14 @@ class TestFeatureFlag:
 
 
 class TestEmailRedaction:
-    async def test_email_in_expr_is_redacted(self) -> None:
-        verdict = await _eval(CostClass.QUERY, expr="filter by user=alice@example.com")
+    async def test_email_in_label_is_redacted(self) -> None:
+        verdict = await _eval(CostClass.QUERY, label="filter by user=alice@example.com")
         assert isinstance(verdict, Transform)
         assert "[EMAIL]" in verdict.annotation
-        assert "alice@example.com" not in verdict.new_input.expr  # type: ignore[union-attr]
+        assert "alice@example.com" not in verdict.new_input.label  # type: ignore[union-attr]
 
     async def test_no_email_allows(self) -> None:
-        verdict = await _eval(CostClass.QUERY, expr="rate(http_requests_total[5m])")
+        verdict = await _eval(CostClass.QUERY, label="rate(http_requests_total[5m])")
         assert isinstance(verdict, Allow)
 
     async def test_multiple_emails_all_redacted(self) -> None:
@@ -121,7 +122,7 @@ class TestIPv6Redaction:
 
 class TestPhoneRedaction:
     async def test_e164_phone_redacted(self) -> None:
-        verdict = await _eval(CostClass.WRITE, expr="contact +447911123456 for support")
+        verdict = await _eval(CostClass.WRITE, label="contact +447911123456 for support")
         assert isinstance(verdict, Transform)
         assert "[PHONE]" in verdict.annotation
 
@@ -171,9 +172,9 @@ class TestSSNRedaction:
 
 class TestGrafanaUIDRedaction:
     async def test_grafana_user_id_label_redacted(self) -> None:
-        verdict = await _eval(CostClass.QUERY, expr="grafana_user_id=42")
+        verdict = await _eval(CostClass.QUERY, label="grafana_user_id=42")
         assert isinstance(verdict, Transform)
-        assert "[UID]" in verdict.new_input.expr  # type: ignore[union-attr]
+        assert "[UID]" in verdict.new_input.label  # type: ignore[union-attr]
 
 
 # ---------------------------------------------------------------------------
@@ -209,4 +210,127 @@ class TestNoPII:
             expr="sum(rate(http_requests_total{job='api'}[5m]))",
             label="env=production",
         )
+        assert isinstance(verdict, Allow)
+
+
+# ---------------------------------------------------------------------------
+# Query-language field exclusion (harness-risk-review.md, F15)
+#
+# `expr` (PromQL/LogQL) and `query` (e.g. Pyroscope selector) must never be
+# mutated by the redaction regex substitution — doing so silently changes
+# what the query executes against the datasource. PII-looking content
+# elsewhere in the same input must still be redacted normally.
+# ---------------------------------------------------------------------------
+
+
+class TestQueryLanguageFieldsNeverMutated:
+    async def test_email_in_expr_is_not_redacted(self) -> None:
+        verdict = await _eval(CostClass.QUERY, expr="filter by user=alice@example.com")
+        # No other field carries PII, so the only possible finding lives in
+        # a protected field — the guard must not act on it.
+        assert isinstance(verdict, Allow)
+
+    async def test_ip_in_expr_is_not_redacted(self) -> None:
+        verdict = await _eval(
+            CostClass.QUERY,
+            expr='up{instance="10.0.0.5:9100"}',
+        )
+        assert isinstance(verdict, Allow)
+
+    async def test_grafana_uid_in_expr_is_not_redacted(self) -> None:
+        verdict = await _eval(CostClass.QUERY, expr="grafana_user_id=42")
+        assert isinstance(verdict, Allow)
+
+    async def test_card_in_query_field_is_not_redacted(self) -> None:
+        verdict = await _eval(CostClass.QUERY, query="card=4111111111111111")
+        assert isinstance(verdict, Allow)
+
+    async def test_expr_value_unchanged_when_other_field_transforms(self) -> None:
+        """PII in `label` triggers a Transform, but `expr` must pass through
+        byte-for-byte unchanged even though it also contains PII-looking
+        content — the query must never be rewritten."""
+        original_expr = 'up{instance="10.0.0.5:9100", user="alice@example.com"}'
+        verdict = await _eval(
+            CostClass.QUERY,
+            expr=original_expr,
+            label="contact bob@example.com",
+        )
+        assert isinstance(verdict, Transform)
+        assert "[EMAIL]" in verdict.annotation
+        assert verdict.new_input.expr == original_expr  # type: ignore[union-attr]
+        assert "bob@example.com" not in verdict.new_input.label  # type: ignore[union-attr]
+
+    async def test_query_field_unchanged_when_other_field_transforms(self) -> None:
+        original_query = "service=~checkout.*"
+        verdict = await _eval(
+            CostClass.QUERY,
+            query=original_query,
+            label="ssn=123-45-6789",
+        )
+        assert isinstance(verdict, Transform)
+        assert verdict.new_input.query == original_query  # type: ignore[union-attr]
+
+
+# ---------------------------------------------------------------------------
+# Fail-closed behaviour (harness-risk-review.md, F16)
+#
+# This guard performs a security-sensitive transform. Any internal failure
+# (can't inspect input, can't validate redacted input) must Deny — never
+# fall back to Allow, which would silently pass through un-redacted PII.
+# ---------------------------------------------------------------------------
+
+
+class _DumpFailsInput(BaseModel):
+    """Simulates a tool input whose model_dump() raises."""
+
+    label: str = "user@example.com"
+
+    def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise ValueError("dump exploded")
+
+
+class _ValidateFailsInput(BaseModel):
+    """Simulates a tool input whose model_validate() always raises.
+
+    label carries real PII so the guard proceeds far enough to attempt the
+    transform before validation blows up.
+    """
+
+    label: str = "user@example.com"
+
+    @classmethod
+    def model_validate(cls, *args: Any, **kwargs: Any) -> "_ValidateFailsInput":
+        raise ValueError("validate exploded")
+
+
+class TestFailClosed:
+    async def test_model_dump_failure_denies(self) -> None:
+        guard = PIIRedactionGuard()
+        tool = _SimpleTool(CostClass.QUERY)
+        inp = _DumpFailsInput()
+        with patch("harness.guards.pii.settings") as mock_settings:
+            mock_settings.HARNESS_PII_REDACTION_ENABLED = True
+            verdict = await guard.evaluate(tool, inp, _make_ctx())
+        assert isinstance(verdict, Deny)
+        assert verdict.code == "pii_guard_error"
+
+    async def test_model_validate_failure_denies(self) -> None:
+        guard = PIIRedactionGuard()
+        tool = _SimpleTool(CostClass.QUERY)
+        inp = _ValidateFailsInput()
+        with patch("harness.guards.pii.settings") as mock_settings:
+            mock_settings.HARNESS_PII_REDACTION_ENABLED = True
+            verdict = await guard.evaluate(tool, inp, _make_ctx())
+        assert isinstance(verdict, Deny)
+        assert verdict.code == "pii_guard_error"
+
+    async def test_no_pii_does_not_reach_validate_failure(self) -> None:
+        """No PII means the guard returns Allow before ever calling
+        model_validate, so a broken model_validate is irrelevant."""
+        guard = PIIRedactionGuard()
+        tool = _SimpleTool(CostClass.QUERY)
+        inp = _ValidateFailsInput(label="clean value")
+        with patch("harness.guards.pii.settings") as mock_settings:
+            mock_settings.HARNESS_PII_REDACTION_ENABLED = True
+            verdict = await guard.evaluate(tool, inp, _make_ctx())
         assert isinstance(verdict, Allow)

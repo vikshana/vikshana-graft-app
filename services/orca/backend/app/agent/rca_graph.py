@@ -34,6 +34,7 @@ Key design constraints (from rca-architecture-brief.md):
 """
 
 import json
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Literal
@@ -46,11 +47,24 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import interrupt
 from psycopg_pool import AsyncConnectionPool
 
+from app.agent.historical_context import gather_historical_context
 from app.agent.mcp.grafana_client import get_grafana_tools
 from app.agent.mcp.postgres_client import get_postgres_tools
 from app.agent.rca_state import AlertContext, Hypothesis, RCAState
 from app.config import settings
 from app.db import AsyncSessionLocal
+from harness.auth.types import AuthMode, GrafanaCredential
+from harness.guards.guards import make_default_pipeline
+from harness.mcp.registry_bridge import OrgToolRegistry
+from harness.observability.otel import get_current_span
+from harness.tools.bridge import (
+    GuardedToolExecutor,
+    ToolNotRegisteredError,
+    bind_tools_from_registry,
+)
+from harness.tools.langchain_adapter import LangChainToolAdapter
+from harness.tools.protocol import BudgetConfig, SpendState, ToolContext
+from harness.tools.registry import ToolRegistry, tool_registry
 
 logger = structlog.get_logger()
 
@@ -138,6 +152,163 @@ _llm_main = ChatAnthropic(
 
 
 # ---------------------------------------------------------------------------
+# Harness wiring — guard pipeline + org-scoped tool registry (F1)
+# ---------------------------------------------------------------------------
+#
+# This graph historically called `get_grafana_tools().bind_tools()` /
+# `tool.ainvoke()` directly (in data_gathering_node / refine_node), which
+# bypassed every harness guard (RBAC, PII redaction, cost, budget, timeout,
+# write-approval, loop) and never consulted the org-scoped
+# `OrgToolRegistry` populated by `harness.mcp.client_manager` for
+# user-configured MCP servers — see docs/harness-risk-review.md, F1. The
+# helpers below route both tool sources through `GuardPipeline` via the
+# minimal LangChain bridge in `harness.tools.bridge`, while preserving the
+# existing Grafana MCP sidecar tool set and allow-list behaviour.
+
+
+def _build_guard_context(
+    session_id: str, org_id: int | None, tool_call_count: int = 0
+) -> ToolContext:
+    """Build a per-turn ``ToolContext`` for guard evaluation.
+
+    This graph runs as an automated investigation process (triggered by an
+    alert webhook, a Slack command, or the Sessions UI) with no per-request
+    Grafana OBO/session credential wired in yet, so it is modelled as
+    ``AuthMode.SERVICE_ACCOUNT`` — the same tagging already used for
+    auto-triage-created sessions (``harness.triage.auto_triage``) and the
+    fallback auth path (``harness.auth.service_account``). ``RBACGuard``
+    explicitly allows service-account calls through (RBAC for those tokens
+    is enforced at the Go gateway, not per-tool-call here).
+
+    Args:
+        session_id: Identifier used for guard/audit logging.
+        org_id: Grafana organisation ID (may be None for investigations
+            with no resolved org).
+        tool_call_count: Tool calls already made earlier in this
+            investigation (``state.get("tool_call_count", 0)``) — seeds
+            ``ctx.spend.call_count`` so ``LoopGuard`` enforces its ceiling
+            across the whole investigation (every round combined) instead
+            of resetting to zero every time a node builds a fresh
+            ``ToolContext`` (see docs/harness-risk-review.md, F1).
+
+    Returns:
+        Fresh ``ToolContext`` with budget/spend state seeded from the
+        investigation's accumulated state so far.
+    """
+    credential = GrafanaCredential(token="", auth_mode=AuthMode.SERVICE_ACCOUNT, org_id=org_id)
+    return ToolContext(
+        session_id=session_id,
+        credential=credential,
+        budget=BudgetConfig(),
+        spend=SpendState(call_count=tool_call_count),
+        otel_span=get_current_span(),
+    )
+
+
+def _build_turn_executor(
+    state: RCAState,
+    session_id: str,
+    org_id: int | None,
+    tool_registry_view: ToolRegistry,
+) -> tuple[GuardedToolExecutor, ToolContext, float]:
+    """Build the guard-checked executor for one node's tool-calling loop.
+
+    Threads two pieces of guard state through ``RCAState`` — the one
+    mechanism that genuinely survives across the whole investigation, since
+    ``data_gathering_node`` and ``refine_node`` run in separate
+    ``graph.ainvoke()`` calls (potentially in different worker processes,
+    separated by an ``interrupt()``/``Command(resume=...)`` round-trip) —
+    instead of each node reinitialising a zeroed ``ToolContext`` and a
+    never-started ``GuardPipeline`` from scratch (see
+    docs/harness-risk-review.md, F1):
+
+    - ``ctx.spend.call_count`` is seeded from ``state["tool_call_count"]``
+      so ``LoopGuard`` bounds the whole investigation's tool calls, not
+      just the calls made in the current round.
+    - The pipeline's ``TimeoutGuard`` has its per-session clock seeded from
+      ``state["investigation_started_at"]`` (captured on the very first
+      round and threaded forward every round after) via
+      ``GuardPipeline.start_session``, so ``SESSION_TIMEOUT_S`` bounds the
+      investigation's true wall-clock duration.
+    - ``GuardPipeline.start_turn()`` is still called fresh on every node
+      call — each node's own tool-calling loop is legitimately a new "turn"
+      in ``TimeoutGuard``'s per-turn sense, and this is also what actually
+      *activates* the per-turn ceiling, which was previously always inert
+      because nothing ever called it.
+
+    Args:
+        state: Current ``RCAState`` (read for previously-persisted guard
+            state; never mutated here).
+        session_id: Identifier used for guard/audit logging.
+        org_id: Grafana organisation ID (may be None).
+        tool_registry_view: This node's tool registry view (built by
+            ``_build_turn_tool_registry``).
+
+    Returns:
+        Tuple of ``(executor, ctx, investigation_started_at)``. Callers
+        MUST include ``"tool_call_count": ctx.spend.call_count`` and
+        ``"investigation_started_at": investigation_started_at`` in the
+        node's returned state update so later rounds observe the same
+        accumulated budget and session origin.
+    """
+    ctx = _build_guard_context(
+        session_id=session_id,
+        org_id=org_id,
+        tool_call_count=state.get("tool_call_count", 0),
+    )
+    pipeline = make_default_pipeline()
+    pipeline.start_turn()
+    investigation_started_at = state.get("investigation_started_at") or time.time()
+    pipeline.start_session(started_at=investigation_started_at)
+    executor = GuardedToolExecutor(registry=tool_registry_view, pipeline=pipeline, ctx=ctx)
+    return executor, ctx, investigation_started_at
+
+
+async def _build_turn_tool_registry(org_id: int | None) -> ToolRegistry:
+    """Build a per-call ``ToolRegistry`` combining built-in + org-configured tools.
+
+    A *fresh* registry is built on every call rather than mutating the
+    shared ``harness.tools.registry.tool_registry`` singleton: the built-in
+    Grafana MCP sidecar tools returned by ``get_grafana_tools`` are bound to
+    one org's credentials/header at a time, so registering them into the
+    process-global registry would let a concurrently-running turn for a
+    *different* org observe or overwrite this org's tool instance — the
+    same class of cross-org collision fixed for user-configured MCP servers
+    in ``DiscoveredTool.qualified_name`` (F12).
+
+    User-configured MCP tools (registered by ``harness.mcp.client_manager``
+    into the shared singleton, one entry per ``(org_id, server, tool)`` —
+    see F12 fix) are still sourced from there via ``OrgToolRegistry``, which
+    already isolates them per org, and are copied into the fresh registry so
+    both tool sources are dispatched identically through the same
+    guard-checked executor.
+
+    Args:
+        org_id: Grafana organisation ID. User-configured MCP tools are
+            skipped when None (they always require an org to scope to).
+
+    Returns:
+        Fresh ``ToolRegistry`` containing both tool sources.
+
+    Raises:
+        RuntimeError: If the built-in Grafana MCP sidecar is unreachable
+            (propagated from ``get_grafana_tools`` — preserves the
+            existing fail-fast behaviour of callers).
+    """
+    registry = ToolRegistry()
+
+    lc_tools = await get_grafana_tools(org_id=org_id)
+    for lc_tool in lc_tools:
+        registry.register(LangChainToolAdapter(lc_tool, org_id=org_id), replace=True)
+
+    if org_id is not None:
+        for mcp_tool in OrgToolRegistry(org_id, registry=tool_registry).all_tools():
+            registry.register(mcp_tool, replace=True)
+
+    return registry
+
+
+# ---------------------------------------------------------------------------
 # Node: data_gathering
 # ---------------------------------------------------------------------------
 
@@ -160,13 +331,13 @@ async def data_gathering_node(state: RCAState) -> dict[str, Any]:
     log.info("data_gathering_start", alert_name=ctx["alert_name"])
 
     try:
-        tools = await get_grafana_tools(org_id=org_id)
+        tool_registry_view = await _build_turn_tool_registry(org_id=org_id)
     except RuntimeError as exc:
         log.error("data_gathering_mcp_unavailable", error=str(exc))
         return {"gathered_data": [], "error_message": str(exc)}
 
     # Build a data-gathering prompt using available tools
-    tool_names = [t.name for t in tools]
+    tool_names = [t.name for t in tool_registry_view.all_tools()]
     prompt = f"""You are investigating a Grafana alert. Use the available tools to gather evidence.
 
 Alert: {ctx['alert_name']}
@@ -185,7 +356,18 @@ Gather relevant logs, metrics, and dashboard data. Be systematic — check:
 
 Return a JSON summary of all gathered data points."""
 
-    llm_with_tools = _llm_main.bind_tools(tools)
+    # Every tool call below is dispatched through GuardedToolExecutor, which
+    # evaluates GuardPipeline (RBAC, PII redaction, cost, budget, timeout,
+    # write-approval, loop) before invoking the tool — this graph no longer
+    # calls `tool.ainvoke()` directly (see docs/harness-risk-review.md, F1).
+    # Guard state (tool call budget, session clock) is threaded through
+    # RCAState by `_build_turn_executor` instead of being reinitialised
+    # fresh on every node call.
+    session_id = str(state.get("rca_session_id") or ctx.get("alert_id") or "unknown")
+    executor, tool_ctx, investigation_started_at = _build_turn_executor(
+        state, session_id=session_id, org_id=org_id, tool_registry_view=tool_registry_view
+    )
+    llm_with_tools = bind_tools_from_registry(_llm_main, tool_registry_view, executor)
     messages = [SystemMessage(content=prompt)]
 
     gathered_data: list[dict[str, Any]] = []
@@ -202,17 +384,15 @@ Return a JSON summary of all gathered data points."""
             })
             break
 
-        # Execute tool calls
+        # Execute tool calls — through the guard-checked executor, never
+        # directly. Unregistered/not-visible tool names are surfaced as a
+        # tool-call error, never silently executed.
         from langchain_core.messages import ToolMessage
         for tool_call in response.tool_calls:
-            tool = next((t for t in tools if t.name == tool_call["name"]), None)
-            if tool is None:
-                result = f"Tool {tool_call['name']} not available"
-            else:
-                try:
-                    result = await tool.ainvoke(tool_call["args"])
-                except Exception as exc:
-                    result = f"Tool error: {exc}"
+            try:
+                result = await executor.execute(tool_call["name"], tool_call["args"])
+            except ToolNotRegisteredError as exc:
+                result = str(exc)
 
             gathered_data.append({
                 "source": tool_call["name"],
@@ -225,7 +405,11 @@ Return a JSON summary of all gathered data points."""
             )
 
     log.info("data_gathering_complete", data_points=len(gathered_data))
-    return {"gathered_data": gathered_data}
+    return {
+        "gathered_data": gathered_data,
+        "tool_call_count": tool_ctx.spend.call_count,
+        "investigation_started_at": investigation_started_at,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +433,6 @@ async def historical_context_node(state: RCAState) -> dict[str, Any]:
     ctx = state["alert_context"]
 
     try:
-        from app.agent.historical_context import gather_historical_context
         past_rcas = await gather_historical_context(ctx)
         log.info("historical_context_complete", past_rca_count=len(past_rcas))
         return {"past_rcas": past_rcas}
@@ -453,9 +636,17 @@ async def refine_node(state: RCAState) -> dict[str, Any]:
     # Try to gather additional targeted data
     org_id = state.get("org_id")
     additional_data: list[dict[str, Any]] = []
+    tool_call_count = state.get("tool_call_count", 0)
+    investigation_started_at = state.get("investigation_started_at")
     try:
-        tools = await get_grafana_tools(org_id=org_id)
-        llm_with_tools = _llm_main.bind_tools(tools)
+        tool_registry_view = await _build_turn_tool_registry(org_id=org_id)
+        session_id = str(
+            state.get("rca_session_id") or state["alert_context"].get("alert_id") or "unknown"
+        )
+        executor, tool_ctx, investigation_started_at = _build_turn_executor(
+            state, session_id=session_id, org_id=org_id, tool_registry_view=tool_registry_view
+        )
+        llm_with_tools = bind_tools_from_registry(_llm_main, tool_registry_view, executor)
         refine_prompt = f"""You're refining an RCA investigation based on a developer question.
 
 Current hypothesis: {hypothesis['text'] if hypothesis else 'None'}
@@ -478,8 +669,10 @@ Focus on the specific aspect the developer is asking about."""
                 break
             from langchain_core.messages import ToolMessage
             for tool_call in response.tool_calls:
-                tool = next((t for t in tools if t.name == tool_call["name"]), None)
-                result = await tool.ainvoke(tool_call["args"]) if tool else "Tool not found"
+                try:
+                    result = await executor.execute(tool_call["name"], tool_call["args"])
+                except ToolNotRegisteredError as exc:
+                    result = str(exc)
                 additional_data.append({
                     "source": tool_call["name"],
                     "args": tool_call["args"],
@@ -487,6 +680,7 @@ Focus on the specific aspect the developer is asking about."""
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 })
                 messages.append(ToolMessage(content=str(result), tool_call_id=tool_call["id"]))
+        tool_call_count = tool_ctx.spend.call_count
     except Exception as exc:
         log.warning("refine_tool_call_failed", error=str(exc))
         additional_data.append({"source": "error", "content": str(exc)})
@@ -506,6 +700,8 @@ Focus on the specific aspect the developer is asking about."""
         "gathered_data": merged_data,
         "messages": new_messages,
         "pending_question": None,
+        "tool_call_count": tool_call_count,
+        "investigation_started_at": investigation_started_at,
     }
 
 

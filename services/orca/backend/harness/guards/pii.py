@@ -12,6 +12,15 @@ Patterns covered (GDPR Article 4 personal data categories):
   - Credit / debit card numbers (PAN)
   - SSN-like numbers (US format)
   - Grafana user ID label values
+
+Query-language fields (``expr``, ``query``) are intentionally never
+mutated — see ``_QUERY_LANGUAGE_FIELDS`` below (harness-risk-review.md, F15).
+
+Fail-closed policy: this guard handles security-sensitive redaction, so any
+internal failure (unable to inspect the input, or unable to validate the
+redacted input) returns ``Deny`` rather than ``Allow``. Silently letting a
+tool call through un-redacted because the guard itself broke would defeat
+the guard's purpose (harness-risk-review.md, F16).
 """
 
 from __future__ import annotations
@@ -23,10 +32,28 @@ import structlog
 from pydantic import BaseModel
 
 from app.config import settings
-from harness.guards.types import Allow, Guard, GuardVerdict, Transform
+from harness.guards.types import Allow, Deny, Guard, GuardVerdict, Transform
 from harness.tools.protocol import CostClass
 
 logger = structlog.get_logger()
+
+# ---------------------------------------------------------------------------
+# Query-language fields — never mutated by redaction
+# ---------------------------------------------------------------------------
+#
+# ``expr`` (PromQL/LogQL) and ``query`` (e.g. Pyroscope label selector) hold
+# raw executable query syntax. Regex-substituting a matched IP/email/number
+# inside these strings silently changes what the query executes against the
+# datasource — e.g. `up{instance="10.0.0.5:9100"}` would become
+# `up{instance="[IP]:9100"}`, which is syntactically valid PromQL but a
+# completely different (almost certainly empty-result) query. That is a
+# correctness and security footgun: the mutated query silently executes
+# instead of failing loudly. See harness-risk-review.md, F15.
+#
+# PII-looking content in these fields is still detected for audit
+# visibility (a warning is logged, without echoing the raw matched value)
+# but the field value itself is left untouched.
+_QUERY_LANGUAGE_FIELDS: frozenset[str] = frozenset({"expr", "query"})
 
 # ---------------------------------------------------------------------------
 # PII patterns — (compiled_regex, placeholder) pairs
@@ -107,6 +134,12 @@ def _redact_string(value: str) -> tuple[str, list[str]]:
 def _redact_dict(data: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     """Recursively redact PII from all string values in a dict.
 
+    Keys listed in ``_QUERY_LANGUAGE_FIELDS`` are never mutated — see the
+    module docstring. If PII-looking content is found in one of those
+    fields, it is logged (without the matched value) but the field is
+    passed through unchanged and does not contribute to the returned
+    ``matched`` list (it must never trigger a ``Transform`` on its own).
+
     Args:
         data: Dictionary to traverse and redact.
 
@@ -116,6 +149,17 @@ def _redact_dict(data: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     result: dict[str, Any] = {}
     all_matched: list[str] = []
     for key, value in data.items():
+        if key in _QUERY_LANGUAGE_FIELDS:
+            result[key] = value
+            if isinstance(value, str):
+                _, would_match = _redact_string(value)
+                if would_match:
+                    logger.warning(
+                        "pii_guard_query_field_not_redacted",
+                        field=key,
+                        pattern_types=sorted(set(would_match)),
+                    )
+            continue
         if isinstance(value, str):
             redacted, matched = _redact_string(value)
             result[key] = redacted
@@ -151,9 +195,16 @@ class PIIRedactionGuard(Guard):
       is ``False`` (default) — zero overhead when disabled.
     - Returns ``Allow()`` for ``CostClass.CHEAP`` tools (informational
       read-only tools that never handle user input).
-    - Walks all ``str`` fields in the tool input recursively.
-    - Returns ``Transform`` with redacted input if any PII pattern matched.
-    - Returns ``Allow`` if no PII was found.
+    - Walks all ``str`` fields in the tool input recursively, except
+      ``_QUERY_LANGUAGE_FIELDS`` (``expr``, ``query``), which are never
+      mutated because doing so would silently change what the query
+      executes against the datasource (harness-risk-review.md, F15).
+    - Returns ``Transform`` with redacted input if any PII pattern matched
+      outside of the excluded fields.
+    - Returns ``Allow`` if no (non-excluded) PII was found.
+    - Returns ``Deny`` (fails closed) if the guard cannot safely inspect
+      the input or cannot validate the redacted result — never silently
+      falls back to ``Allow`` on its own internal errors.
     """
 
     name = "pii_redaction"
@@ -177,8 +228,18 @@ class PIIRedactionGuard(Guard):
 
         try:
             raw = input.model_dump()
-        except Exception:
-            return Allow()
+        except Exception as exc:
+            # Fail closed: if we can't even inspect the input for PII, we
+            # cannot certify it is safe to pass through un-redacted.
+            logger.error(
+                "pii_guard_dump_failed",
+                error=str(exc),
+                tool_name=getattr(tool, "name", "unknown"),
+            )
+            return Deny(
+                reason="PII guard could not inspect tool input; failing closed.",
+                code="pii_guard_error",
+            )
 
         redacted, matched = _redact_dict(raw)
 
@@ -191,12 +252,22 @@ class PIIRedactionGuard(Guard):
         try:
             new_input = input.model_validate(redacted)
         except Exception as exc:
-            logger.warning(
+            # Fail closed: PII was detected but the redacted payload could
+            # not be re-validated. Falling back to Allow() here would send
+            # the *original*, un-redacted, PII-bearing input through —
+            # exactly the outcome this guard exists to prevent.
+            logger.error(
                 "pii_guard_transform_failed",
                 error=str(exc),
                 tool_name=tool.name,
             )
-            return Allow()
+            return Deny(
+                reason=(
+                    "PII redaction produced an invalid tool input; failing "
+                    "closed to avoid leaking unredacted content."
+                ),
+                code="pii_guard_error",
+            )
 
         logger.debug(
             "pii_guard_redacted",

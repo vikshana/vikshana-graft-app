@@ -43,6 +43,18 @@ class TestListSessions:
         resp = await client.get("/api/sessions?type=investigation")
         assert resp.status_code == 200
 
+    async def test_db_failure_surfaces_503_not_empty_list(self, client: AsyncClient) -> None:
+        """A genuine infra failure must not be masked as an empty result
+        (harness-risk-review.md, F16) — it should surface as a safe 5xx
+        with the real error logged server-side, distinct from the
+        legitimate "no sessions" 200/empty-list case above."""
+        with patch(
+            "app.api.sessions.AsyncSessionLocal",
+            side_effect=RuntimeError("db unreachable"),
+        ):
+            resp = await client.get("/api/sessions")
+        assert resp.status_code == 503
+
 
 # ---------------------------------------------------------------------------
 # search_sessions
@@ -59,11 +71,23 @@ class TestSearchSessions:
         assert body["query"] == "high error rate"
         assert isinstance(body["results"], list)
 
-    async def test_embed_failure_returns_empty(self, client: AsyncClient) -> None:
+    async def test_embed_failure_surfaces_503(self, client: AsyncClient) -> None:
+        """An embedding-service failure is an infra failure, not "no
+        results" — it must surface as a safe 5xx rather than a silent
+        empty list (harness-risk-review.md, F16)."""
         with patch("app.api.sessions.embed_text", side_effect=RuntimeError("embed down")):
             resp = await client.get("/api/sessions/search?q=latency+spike")
-        assert resp.status_code == 200
-        assert resp.json()["results"] == []
+        assert resp.status_code == 503
+
+    async def test_db_failure_surfaces_503_not_empty_results(self, client: AsyncClient) -> None:
+        with patch("app.api.sessions.embed_text") as mock_embed:
+            mock_embed.return_value = [0.0] * 1536
+            with patch(
+                "app.api.sessions.AsyncSessionLocal",
+                side_effect=RuntimeError("db unreachable"),
+            ):
+                resp = await client.get("/api/sessions/search?q=db+down")
+        assert resp.status_code == 503
 
     async def test_service_filter_accepted(self, client: AsyncClient) -> None:
         with patch("app.api.sessions.embed_text") as mock_embed:

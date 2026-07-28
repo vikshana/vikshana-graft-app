@@ -2,9 +2,14 @@ package plugin
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -217,6 +222,152 @@ func TestSessionsHMACHeaderAbsent(t *testing.T) {
 	mux.ServeHTTP(w, req)
 
 	assert.Empty(t, gotSig, "X-Agent-Signature should be absent when no secret is configured")
+}
+
+// TestSessionsHMACSignatureCorrectness verifies the full signing pipeline end
+// to end for the /sessions/ proxy: the signature received by the backend
+// must match an independent recomputation using the documented
+// canonicalisation (method, timestamp, nonce, full target incl. query, body
+// SHA-256, org ID).
+func TestSessionsHMACSignatureCorrectness(t *testing.T) {
+	var gotSig, gotTS, gotNonce, gotOrgID, gotMethod, gotPath, gotQuery string
+	var gotBody []byte
+	be := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotSig = r.Header.Get("X-Agent-Signature")
+		gotTS = r.Header.Get("X-Agent-Timestamp")
+		gotNonce = r.Header.Get("X-Agent-Nonce")
+		gotOrgID = r.Header.Get("X-Grafana-Org-Id")
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer be.Close()
+
+	t.Setenv("RCA_BACKEND_URL", be.URL)
+	t.Setenv("AGENT_INTERNAL_SECRET", "sessions-correctness-secret")
+
+	settings := backend.AppInstanceSettings{JSONData: []byte(`{}`)}
+	appInstance, err := NewApp(context.Background(), settings)
+	require.NoError(t, err)
+	app := appInstance.(*App)
+
+	mux := http.NewServeMux()
+	app.registerRoutes(mux)
+	app.registerSessionRoutes(mux, settings)
+
+	body := `{"message":"hi"}`
+	req := httptest.NewRequest("POST", "/sessions/turn?stream=true", strings.NewReader(body))
+	ctx := context.WithValue(req.Context(), orgRoleKey{}, "Admin")
+	ctx = context.WithValue(ctx, orgIDKey{}, int64(9))
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	require.Equal(t, "9", gotOrgID)
+	require.Equal(t, "/api/sessions/turn", gotPath)
+	require.Equal(t, "stream=true", gotQuery)
+	require.Equal(t, body, string(gotBody), "body must reach the backend unchanged after being hashed")
+
+	target := gotPath + "?" + gotQuery
+	bodyHash := sha256.Sum256(gotBody)
+	message := gotMethod + ":" + gotTS + ":" + gotNonce + ":" + target + ":" + hex.EncodeToString(bodyHash[:]) + ":" + gotOrgID
+	mac := hmac.New(sha256.New, []byte("sessions-correctness-secret"))
+	mac.Write([]byte(message))
+	expected := hex.EncodeToString(mac.Sum(nil))
+
+	assert.Equal(t, expected, gotSig, "sessions proxy signature must match the documented canonicalisation")
+}
+
+// TestMCPHMACSignatureCorrectness mirrors TestSessionsHMACSignatureCorrectness
+// for the /mcp/ proxy.
+func TestMCPHMACSignatureCorrectness(t *testing.T) {
+	var gotSig, gotTS, gotNonce, gotOrgID, gotMethod, gotPath, gotQuery string
+	var gotBody []byte
+	be := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotSig = r.Header.Get("X-Agent-Signature")
+		gotTS = r.Header.Get("X-Agent-Timestamp")
+		gotNonce = r.Header.Get("X-Agent-Nonce")
+		gotOrgID = r.Header.Get("X-Grafana-Org-Id")
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer be.Close()
+
+	t.Setenv("RCA_BACKEND_URL", be.URL)
+	t.Setenv("AGENT_INTERNAL_SECRET", "mcp-correctness-secret")
+
+	settings := backend.AppInstanceSettings{JSONData: []byte(`{}`)}
+	appInstance, err := NewApp(context.Background(), settings)
+	require.NoError(t, err)
+	app := appInstance.(*App)
+
+	mux := http.NewServeMux()
+	app.registerRoutes(mux)
+	app.registerMCPRoutes(mux, settings)
+
+	body := `{"name":"github"}`
+	req := httptest.NewRequest("POST", "/mcp/servers", strings.NewReader(body))
+	ctx := context.WithValue(req.Context(), orgRoleKey{}, "Admin")
+	ctx = context.WithValue(ctx, orgIDKey{}, int64(3))
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	require.Equal(t, "3", gotOrgID)
+	require.Equal(t, "/api/mcp/servers", gotPath)
+	require.Equal(t, "", gotQuery)
+	require.Equal(t, body, string(gotBody), "body must reach the backend unchanged after being hashed")
+
+	target := gotPath
+	bodyHash := sha256.Sum256(gotBody)
+	message := gotMethod + ":" + gotTS + ":" + gotNonce + ":" + target + ":" + hex.EncodeToString(bodyHash[:]) + ":" + gotOrgID
+	mac := hmac.New(sha256.New, []byte("mcp-correctness-secret"))
+	mac.Write([]byte(message))
+	expected := hex.EncodeToString(mac.Sum(nil))
+
+	assert.Equal(t, expected, gotSig, "mcp proxy signature must match the documented canonicalisation")
+}
+
+// TestSessionsHMACNonceUniquePerRequest verifies that two separate requests
+// through the /sessions/ proxy get distinct nonces (and therefore distinct
+// signatures even when the request is otherwise identical).
+func TestSessionsHMACNonceUniquePerRequest(t *testing.T) {
+	var nonces []string
+	be := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nonces = append(nonces, r.Header.Get("X-Agent-Nonce"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer be.Close()
+
+	t.Setenv("RCA_BACKEND_URL", be.URL)
+	t.Setenv("AGENT_INTERNAL_SECRET", "sessions-nonce-secret")
+
+	settings := backend.AppInstanceSettings{JSONData: []byte(`{}`)}
+	appInstance, err := NewApp(context.Background(), settings)
+	require.NoError(t, err)
+	app := appInstance.(*App)
+
+	mux := http.NewServeMux()
+	app.registerRoutes(mux)
+	app.registerSessionRoutes(mux, settings)
+
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest("GET", "/sessions/", nil)
+		ctx := context.WithValue(req.Context(), orgRoleKey{}, "Admin")
+		req = req.WithContext(ctx)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+	}
+
+	require.Len(t, nonces, 2)
+	assert.NotEqual(t, nonces[0], nonces[1], "each proxied request should carry a fresh nonce")
 }
 
 // ---------------------------------------------------------------------------

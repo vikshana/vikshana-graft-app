@@ -22,9 +22,10 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.db import get_session
 from harness.mcp.client_manager import mcp_client_manager
-from harness.mcp.crypto import encrypt_token
+from harness.mcp.crypto import TokenDecryptionError, encrypt_token
 from harness.mcp.models import MCPServerConfig
 
 logger = structlog.get_logger()
@@ -126,6 +127,11 @@ async def list_mcp_servers(
     Returns:
         Dict with ``servers`` list.
     """
+    # Cross-replica convergence (F10): make sure this replica's view of
+    # `connected`/`tool_count` isn't stale before reporting it — see
+    # harness/mcp/client_manager.py.
+    await mcp_client_manager.ensure_fresh(db, settings.MCP_RECONCILE_TTL_S)
+
     rows = (
         await db.execute(
             text(
@@ -370,6 +376,10 @@ async def list_mcp_tools(
     """
     await _assert_server_owned_by_org(db, server_id, org_id)
 
+    # Cross-replica convergence (F10): a server/tool added or toggled on
+    # another replica should show up here without waiting for a restart.
+    await mcp_client_manager.ensure_fresh(db, settings.MCP_RECONCILE_TTL_S)
+
     tools = mcp_client_manager.get_discovered_tools(server_id)
     return {
         "server_id": str(server_id),
@@ -418,10 +428,27 @@ async def toggle_mcp_tool(
 
     Raises:
         HTTPException: 404 if the server does not belong to this org.
+        HTTPException: 422 if enabling requires a bearer token that cannot
+            be decrypted (malformed ciphertext or a rotated encryption
+            key). The tool is not registered in this case — we fail closed
+            rather than sending ciphertext as a bearer token.
     """
     await _assert_server_owned_by_org(db, server_id, org_id)
 
-    await mcp_client_manager.set_tool_enabled(server_id, tool_name, body.enabled, db)
+    # Cross-replica convergence (F10): if this server was added/enabled on
+    # a different replica and this one hasn't caught up yet, `_configs`
+    # would not have it and `set_tool_enabled` would silently no-op the
+    # live registry side (though the DB override would still be written).
+    # Catch up first so the toggle actually takes effect here too.
+    await mcp_client_manager.ensure_fresh(db, settings.MCP_RECONCILE_TTL_S)
+
+    try:
+        await mcp_client_manager.set_tool_enabled(server_id, tool_name, body.enabled, db)
+    except TokenDecryptionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Cannot enable tool {tool_name!r}: server token could not be decrypted ({exc}).",
+        ) from exc
     logger.info(
         "mcp_tool_toggled",
         server_id=str(server_id),

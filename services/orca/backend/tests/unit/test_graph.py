@@ -88,23 +88,12 @@ async def test_historical_context_node_returns_past_rcas(rca_initial_state: RCAS
         }
     ]
 
-    with patch("app.agent.rca_graph.gather_historical_context", new_callable=AsyncMock) as mock_gather:
-        # historical_context imports locally, so patch in the node's namespace
-        with patch(
-            "app.agent.historical_context.gather_historical_context",
-            new_callable=AsyncMock,
-            return_value=fake_past_rcas,
-        ):
-            mock_gather.return_value = fake_past_rcas
-            # patch the import inside the node
-            with patch("app.agent.rca_graph.historical_context_node.__globals__", {}):
-                pass
-
-        # Patch at module level where it's imported
-        with patch("app.agent.historical_context.AsyncSessionLocal"):
-            with patch("app.agent.historical_context.embed_text", new_callable=AsyncMock, return_value=[0.1] * 1536):
-                with patch("app.agent.rca_graph.gather_historical_context", new_callable=AsyncMock, return_value=fake_past_rcas):
-                    result = await historical_context_node(rca_initial_state)
+    with patch(
+        "app.agent.rca_graph.gather_historical_context",
+        new_callable=AsyncMock,
+        return_value=fake_past_rcas,
+    ):
+        result = await historical_context_node(rca_initial_state)
 
     assert result["past_rcas"] == fake_past_rcas
 

@@ -57,6 +57,9 @@ class DiscoveredTool:
         tool_name: Bare tool name from the MCP server.
         description: Tool description from the server.
         input_schema: JSON Schema dict from the server.
+        org_id: Grafana org ID that owns the server this tool was discovered
+            from. Included in ``qualified_name`` so the registry key itself
+            is unique per org (see ``qualified_name`` docstring).
         enabled: Whether enabled by override (default True).
     """
 
@@ -65,9 +68,22 @@ class DiscoveredTool:
     tool_name: str
     description: str
     input_schema: dict
+    org_id: int
     enabled: bool = True
 
     @property
     def qualified_name(self) -> str:
-        """Return ``mcp:{server_name}:{tool_name}``."""
-        return f"mcp:{self.server_name}:{self.tool_name}"
+        """Return ``mcp:{org_id}:{server_name}:{tool_name}``.
+
+        The org ID is embedded directly in the registry key — not just as
+        an ``_org_id`` tag on the registered tool object — because
+        ``harness.tools.registry.ToolRegistry`` is a single process-global
+        ``dict[name, Tool]``. Two different orgs are free to name their MCP
+        server the same thing (e.g. both call it "github"); without the org
+        ID in the key, both orgs' tools would collide on the same
+        ``mcp:{server_name}:{tool_name}`` key, and whichever org
+        connects/reconnects last would silently overwrite (and disconnecting
+        one org's server would deregister the *other* org's live tool from
+        the shared registry too). See docs/harness-risk-review.md, F12.
+        """
+        return f"mcp:{self.org_id}:{self.server_name}:{self.tool_name}"

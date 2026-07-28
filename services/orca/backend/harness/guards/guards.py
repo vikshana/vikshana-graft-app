@@ -287,13 +287,42 @@ class TimeoutGuard(Guard):
         self._turn_started_at: float | None = None
         self._session_started_at: float | None = None
 
-    def start_turn(self) -> None:
-        """Record turn start time.  Call at the beginning of each turn."""
-        self._turn_started_at = time.monotonic()
+    def start_turn(self, started_at: float | None = None) -> None:
+        """Record turn start time.  Call at the beginning of each turn.
 
-    def start_session(self) -> None:
-        """Record session start time.  Call once at session creation."""
-        self._session_started_at = time.monotonic()
+        Uses a monotonic clock — a single turn (one node's tool-calling
+        loop) never crosses a process boundary, so a monotonic clock is
+        safe and immune to wall-clock adjustments.
+
+        Args:
+            started_at: Optional explicit ``time.monotonic()`` value
+                (mainly for tests / callers with their own clock source).
+                Defaults to "now".
+        """
+        self._turn_started_at = started_at if started_at is not None else time.monotonic()
+
+    def start_session(self, started_at: float | None = None) -> None:
+        """Record session start time.  Call once at session creation.
+
+        Uses the wall clock (``time.time()``), unlike ``start_turn``'s
+        monotonic clock: a session can span multiple turns executed over
+        real wall-clock time — potentially by a different worker process
+        than the one that started it, via the interrupt/resume LangGraph
+        checkpointing flow (see ``app.agent.rca_graph``) — and
+        ``time.monotonic()``'s origin is arbitrary per-process, so a value
+        captured in one process is meaningless when compared against
+        ``time.monotonic()`` in another. ``time.time()`` is a shared,
+        absolute reference that survives being persisted and reloaded
+        across turns/processes.
+
+        Args:
+            started_at: Optional explicit ``time.time()`` epoch value —
+                pass the value persisted from a previous turn so the
+                session ceiling is measured from the investigation's true
+                start, not reset every turn. Defaults to "now" (first turn
+                of a new session).
+        """
+        self._session_started_at = started_at if started_at is not None else time.time()
 
     async def evaluate(self, tool: Any, input: BaseModel, ctx: ToolContext) -> GuardVerdict:
         """Check per-turn and per-session timeout ceilings.
@@ -309,12 +338,11 @@ class TimeoutGuard(Guard):
         Returns:
             Allow or Deny.
         """
-        now = time.monotonic()
         ctx.tool_timeout_s = self._tool_s
 
-        # Per-turn check
+        # Per-turn check (monotonic clock — see start_turn docstring).
         if self._turn_started_at is not None:
-            turn_elapsed = now - self._turn_started_at
+            turn_elapsed = time.monotonic() - self._turn_started_at
             if turn_elapsed >= self._turn_s:
                 return Deny(
                     reason=(
@@ -324,9 +352,9 @@ class TimeoutGuard(Guard):
                     code="turn_timeout",
                 )
 
-        # Per-session check
+        # Per-session check (wall clock — see start_session docstring).
         if self._session_started_at is not None:
-            session_elapsed = now - self._session_started_at
+            session_elapsed = time.time() - self._session_started_at
             if session_elapsed >= self._session_s:
                 return Deny(
                     reason=(

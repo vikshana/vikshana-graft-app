@@ -19,11 +19,19 @@ RUN opentelemetry-bootstrap -a install
 COPY app/ ./app/
 COPY harness/ ./harness/
 
+# Alembic is the sole schema authority in production (see
+# docs/harness-risk-review.md F3/F13) — ship its config and migration
+# scripts, and run `alembic upgrade head` via the entrypoint before uvicorn.
+COPY alembic.ini .
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 # Run as non-root user
-RUN useradd -m orca
+RUN useradd -m orca && chown -R orca:orca /app
 USER orca
 
 EXPOSE 8000
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["opentelemetry-instrument", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 

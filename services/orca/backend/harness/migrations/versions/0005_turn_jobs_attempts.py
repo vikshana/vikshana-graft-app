@@ -17,16 +17,19 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "turn_jobs",
-        sa.Column(
-            "attempts",
-            sa.Integer(),
-            nullable=False,
-            server_default="0",
-        ),
-    )
+    # Idempotent: uses ADD COLUMN IF NOT EXISTS (matching the style used by
+    # migrations 0001/0002) rather than `op.add_column`, which raises
+    # "column already exists" against a database whose `turn_jobs` table was
+    # provisioned via `Base.metadata.create_all()` -- the ORM `TurnJob`
+    # model already declares `attempts`, so a dev/legacy environment that
+    # bootstrapped its schema via create_all() before adopting Alembic as
+    # the sole schema authority may already have this column. Without this,
+    # `alembic upgrade head` fails outright on such a database.
+    op.execute(sa.text(
+        "ALTER TABLE turn_jobs ADD COLUMN IF NOT EXISTS attempts "
+        "INTEGER NOT NULL DEFAULT 0"
+    ))
 
 
 def downgrade() -> None:
-    op.drop_column("turn_jobs", "attempts")
+    op.execute(sa.text("ALTER TABLE turn_jobs DROP COLUMN IF EXISTS attempts"))

@@ -102,7 +102,9 @@ class TestInvestigateNode:
         mock_mcp_context = MagicMock()
         mock_mcp_context.__aenter__ = AsyncMock(return_value=mock_mcp_context)
         mock_mcp_context.__aexit__ = AsyncMock(return_value=None)
-        mock_mcp_context.get_tools = MagicMock(return_value=[mock_tool])
+        # get_tools is a coroutine on the real MultiServerMCPClient (it's
+        # awaited in production code), so the mock must be an AsyncMock.
+        mock_mcp_context.get_tools = AsyncMock(return_value=[mock_tool])
 
         with (
             patch("app.agent.nodes.investigate.MultiServerMCPClient", return_value=mock_mcp_context),

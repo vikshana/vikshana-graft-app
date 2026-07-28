@@ -7,7 +7,11 @@ module import from ``harness/slack/__init__.py``).
 Slash command: ``/obs <subcommand> [args]``
 
 Supported subcommands:
-  ask <prompt>          — Single-shot question to the agent.
+  ask <prompt>          — Not implemented yet; replies with a rejection
+                           message pointing at `investigate` (see
+                           docs/harness-risk-review.md, F1 — no `"ask"`
+                           graph is registered in
+                           `harness.session.registry.graph_registry`).
   investigate <prompt>  — Start a structured investigation session.
   link                  — Start the Entra identity linkage flow.
 
@@ -126,8 +130,16 @@ async def _do_ask(
 ) -> None:
     """Handle ``/obs ask <prompt>``.
 
-    Creates a new ``ask`` session in the TurnWorker queue and posts a
-    "Thinking…" message with the session ID so the user can track progress.
+    ``ask`` sessions are not implemented yet: only ``session_type="investigation"``
+    is registered in ``harness.session.registry.graph_registry`` (see
+    ``app/main.py``) — there is no ``"ask"`` graph. Previously this handler
+    enqueued a turn job for ``session_type="ask"`` anyway, which the
+    ``TurnWorker`` can never execute: ``graph_registry.aget("ask")`` raises
+    ``KeyError`` deep inside ``_execute_turn``, the job is marked
+    ``failed``, and the Slack user is left staring at an unresolved
+    "Thinking…" message forever with no feedback (see
+    docs/harness-risk-review.md, F1). Reject up front instead, with a
+    clear message pointing at the supported ``/obs investigate`` subcommand.
 
     Args:
         command: Slack slash command payload.
@@ -142,36 +154,77 @@ async def _do_ask(
         )
         return
 
-    session_id = str(uuid.uuid4())
-    channel: str = command.get("channel_id", "")
-    thread_ts: str | None = None  # top-level post; reply thread_ts set after posting
-    team_id: str = command.get("team_id", "")
-    user_id: str = command.get("user_id", "")
+    log.info("obs_ask_rejected_unsupported")
+    await say(
+        blocks=error_message(
+            reason=(
+                "`/obs ask` is not supported yet. Use `/obs investigate <alert description>` "
+                "to start a structured investigation instead."
+            )
+        ),
+        text="`/obs ask` is not supported yet — try `/obs investigate` instead.",
+    )
 
-    try:
-        # Post "Thinking…" to get a thread_ts
-        response = await say(
-            blocks=thinking_message(session_id=session_id, prompt_preview=prompt),
-            text="Thinking…",
-        )
-        thread_ts = response.get("ts") if response else None
 
-        # Persist session with channel_ref so SlackNotifier can find the thread
-        await _create_session_and_enqueue(
-            session_id=session_id,
-            session_type="ask",
-            turn_input={"prompt": prompt, "user_id": user_id},
-            channel=channel,
-            thread_ts=thread_ts,
-            team_id=team_id,
-        )
-        log.info("obs_ask_enqueued", session_id=session_id)
-    except Exception as exc:
-        log.error("obs_ask_failed", error=str(exc), exc_info=True)
-        await say(
-            blocks=error_message(reason=f"Failed to start session: {exc}"),
-            text="Error.",
-        )
+def _build_slack_investigation_state(prompt: str, org_id: int | None) -> dict[str, Any]:
+    """Build a complete ``RCAState``-shaped initial turn input for a Slack investigation.
+
+    ``harness.session.worker.TurnWorker._execute_turn`` passes this dict
+    straight to ``graph.ainvoke(turn_input, ...)`` for a fresh invocation.
+    The interactive RCA graph's nodes index required keys directly (e.g.
+    ``state["alert_context"]``, ``state["round"]``) rather than via
+    ``.get(...)`` with a default, so a partial payload — as previously sent
+    here (only ``{"prompt": ..., "user_id": ...}`` at the top level, with no
+    ``alert_context`` wrapper at all) — raises a bare ``KeyError`` on the
+    very first node the first time the graph runs. The ``TurnWorker`` can
+    only surface that as a generic failed job with no feedback posted back
+    to the Slack thread (see docs/harness-risk-review.md, F1). This mirrors
+    the equivalent, already-fixed builder in
+    ``harness.triage.auto_triage._build_initial_rca_state`` and
+    ``app.agent.rca_state.RCAState``.
+
+    Args:
+        prompt: The developer's alert-description / investigation prompt
+            text from ``/obs investigate <prompt>``.
+        org_id: Grafana organisation ID to scope MCP tool calls to (Slack
+            investigations use ``settings.SLACK_DEFAULT_ORG_ID`` — there is
+            no per-request Grafana org header at this layer).
+
+    Returns:
+        A dict satisfying every required key of
+        ``app.agent.rca_state.RCAState``.
+    """
+    from app.config import settings
+
+    alert_context: dict[str, Any] = {
+        "alert_id": None,
+        "alert_name": "Slack investigation",
+        "description": prompt,
+        "service": None,
+        "environment": None,
+        "labels": {},
+        "org_id": org_id,
+    }
+
+    return {
+        "alert_context": alert_context,
+        "org_id": org_id,
+        "gathered_data": [],
+        "past_rcas": [],
+        "hypotheses": [],
+        "confidence_scores": [],
+        "round": 0,
+        "developer_accepted": False,
+        "max_rounds": settings.ORCA_MAX_ROUNDS,
+        "messages": [],
+        "pending_question": None,
+        "final_report": None,
+        "rca_session_id": None,
+        "error_message": None,
+        "force_finalized": False,
+        "tool_call_count": 0,
+        "investigation_started_at": None,
+    }
 
 
 async def _do_investigate(
@@ -212,13 +265,18 @@ async def _do_investigate(
         )
         thread_ts = response.get("ts") if response else None
 
+        from app.config import settings
+
         await _create_session_and_enqueue(
             session_id=session_id,
             session_type="investigation",
-            turn_input={"prompt": prompt, "user_id": user_id},
+            turn_input=_build_slack_investigation_state(
+                prompt, org_id=settings.SLACK_DEFAULT_ORG_ID
+            ),
             channel=channel,
             thread_ts=thread_ts,
             team_id=team_id,
+            slack_user_id=user_id,
         )
         log.info("obs_investigate_enqueued", session_id=session_id)
     except Exception as exc:
@@ -360,6 +418,45 @@ async def _do_resume(
 # ---------------------------------------------------------------------------
 
 
+async def _resolve_slack_initiator_user_id(
+    slack_user_id: str,
+    slack_team_id: str,
+    db: Any,
+) -> str | None:
+    """Resolve the internal harness user id linked to a Slack user, if any.
+
+    Looks up the ``identities`` table for a ``provider='slack'`` row whose
+    ``provider_subject`` matches ``{team_id}:{user_id}`` — the same
+    composite subject the Entra linkage flow writes in
+    ``harness.auth.linkage.complete_link``. This is what lets
+    ``rca_sessions.initiator_user_id`` be populated for Slack-created
+    sessions so the write-approval check
+    (``decided_by_user_id == sessions.initiator_user_id``, see
+    ``harness.guards.guards.WriteGuard``) can recognise the Slack user who
+    started the session.
+
+    Args:
+        slack_user_id: Slack user ID (e.g. ``U01234567``).
+        slack_team_id: Slack workspace/team ID (e.g. ``T01234567``).
+        db: Async DB session.
+
+    Returns:
+        The linked ``users.id`` UUID string, or ``None`` if this Slack user
+        has not completed ``/obs link`` yet.
+    """
+    from sqlalchemy import text
+
+    result = await db.execute(
+        text("""
+            SELECT user_id FROM identities
+            WHERE provider = 'slack' AND provider_subject = :subject
+        """),
+        {"subject": f"{slack_team_id}:{slack_user_id}"},
+    )
+    row = result.fetchone()
+    return str(row.user_id) if row else None
+
+
 async def _create_session_and_enqueue(
     session_id: str,
     session_type: str,
@@ -367,6 +464,7 @@ async def _create_session_and_enqueue(
     channel: str,
     thread_ts: str | None,
     team_id: str,
+    slack_user_id: str = "",
 ) -> None:
     """Create an rca_sessions row and enqueue the first turn.
 
@@ -377,34 +475,54 @@ async def _create_session_and_enqueue(
         channel: Slack channel ID.
         thread_ts: Slack thread timestamp (may be None for top-level).
         team_id: Slack team/workspace ID.
+        slack_user_id: Slack user ID of the command's caller, used to
+            resolve ``initiator_user_id`` via identity linkage. Empty
+            string (default) leaves ``initiator_user_id`` unset.
     """
     import json
     from datetime import datetime, timezone
     from sqlalchemy import text
 
+    from app.config import settings
     from app.db import AsyncSessionLocal
     from harness.slack.channel_refs import build_slack_ref
     from harness.session.worker import enqueue_turn
 
     now = datetime.now(timezone.utc)
     slack_ref = build_slack_ref(channel=channel, thread_ts=thread_ts, team_id=team_id)
+    org_id = settings.SLACK_DEFAULT_ORG_ID
 
     async with AsyncSessionLocal() as db:
-        # Upsert rca_sessions row with channel_refs
+        initiator_user_id: str | None = None
+        if slack_user_id:
+            initiator_user_id = await _resolve_slack_initiator_user_id(
+                slack_user_id=slack_user_id, slack_team_id=team_id, db=db
+            )
+
+        # Upsert rca_sessions row with channel_refs, org_id, and
+        # initiator_user_id — previously these last two were never included
+        # in the INSERT at all, so Slack-created sessions silently had no
+        # org scoping and no resolvable initiator even when a link existed
+        # (see docs/harness-risk-review.md, F1).
         await db.execute(
             text("""
                 INSERT INTO rca_sessions
-                    (id, type, status, auth_mode, initiator_channel, channel_refs, created_at, updated_at)
+                    (id, type, status, auth_mode, initiator_channel,
+                     initiator_user_id, org_id, channel_refs, created_at, updated_at)
                 VALUES
                     (:id, :type, 'pending', 'service_account', 'slack',
-                     :channel_refs::jsonb, :now, :now)
+                     :initiator_user_id, :org_id, :channel_refs::jsonb, :now, :now)
                 ON CONFLICT (id) DO UPDATE
                     SET channel_refs = EXCLUDED.channel_refs,
+                        initiator_user_id = EXCLUDED.initiator_user_id,
+                        org_id = EXCLUDED.org_id,
                         updated_at = EXCLUDED.updated_at
             """),
             {
                 "id": session_id,
                 "type": session_type,
+                "initiator_user_id": initiator_user_id,
+                "org_id": org_id,
                 "channel_refs": json.dumps([slack_ref]),
                 "now": now,
             },

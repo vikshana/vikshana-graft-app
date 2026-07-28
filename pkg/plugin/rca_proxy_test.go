@@ -2,6 +2,10 @@ package plugin
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -194,6 +198,157 @@ func TestRCAProxyStripsPrefix(t *testing.T) {
 	mux.ServeHTTP(w, req)
 
 	assert.Equal(t, "/api/rca", receivedPath, "StripPrefix should remove /rca from path")
+}
+
+// ---------------------------------------------------------------------------
+// RCA proxy HMAC signing tests (F4 / F7 — /api/rca previously bypassed
+// internal HMAC signing entirely, unlike /sessions and /mcp).
+// ---------------------------------------------------------------------------
+
+// TestRCAProxyHMACHeaderPresent verifies that when AGENT_INTERNAL_SECRET is
+// set, requests forwarded through /rca/ carry signed X-Agent-* headers.
+func TestRCAProxyHMACHeaderPresent(t *testing.T) {
+	var gotSig, gotTS, gotNonce string
+	be := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotSig = r.Header.Get("X-Agent-Signature")
+		gotTS = r.Header.Get("X-Agent-Timestamp")
+		gotNonce = r.Header.Get("X-Agent-Nonce")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer be.Close()
+
+	t.Setenv("RCA_BACKEND_URL", be.URL)
+	t.Setenv("AGENT_INTERNAL_SECRET", "rca-secret")
+
+	settings := backendSettings()
+	appInstance, err := NewApp(context.Background(), settings)
+	require.NoError(t, err)
+	app := appInstance.(*App)
+
+	mux := http.NewServeMux()
+	app.registerRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/rca/api/rca", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.NotEmpty(t, gotSig, "X-Agent-Signature should be set")
+	assert.NotEmpty(t, gotTS, "X-Agent-Timestamp should be set")
+	assert.NotEmpty(t, gotNonce, "X-Agent-Nonce should be set")
+}
+
+// TestRCAProxyHMACHeaderAbsent verifies that without AGENT_INTERNAL_SECRET the
+// forwarded request does NOT carry X-Agent-* signing headers.
+func TestRCAProxyHMACHeaderAbsent(t *testing.T) {
+	var gotSig string
+	be := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotSig = r.Header.Get("X-Agent-Signature")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer be.Close()
+
+	t.Setenv("RCA_BACKEND_URL", be.URL)
+	t.Setenv("AGENT_INTERNAL_SECRET", "")
+
+	settings := backendSettings()
+	appInstance, err := NewApp(context.Background(), settings)
+	require.NoError(t, err)
+	app := appInstance.(*App)
+
+	mux := http.NewServeMux()
+	app.registerRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/rca/api/rca", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Empty(t, gotSig, "X-Agent-Signature should be absent when no secret is configured")
+}
+
+// TestRCAProxyHMACSignatureCorrectness verifies the full signing pipeline end
+// to end: the signature received by the backend must match an independent
+// recomputation using the documented canonicalisation (method, timestamp,
+// nonce, full target incl. query, body SHA-256, org ID).
+func TestRCAProxyHMACSignatureCorrectness(t *testing.T) {
+	var gotSig, gotTS, gotNonce, gotOrgID, gotMethod, gotPath, gotQuery string
+	var gotBody []byte
+	be := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotSig = r.Header.Get("X-Agent-Signature")
+		gotTS = r.Header.Get("X-Agent-Timestamp")
+		gotNonce = r.Header.Get("X-Agent-Nonce")
+		gotOrgID = r.Header.Get("X-Grafana-Org-Id")
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer be.Close()
+
+	t.Setenv("RCA_BACKEND_URL", be.URL)
+	t.Setenv("AGENT_INTERNAL_SECRET", "rca-correctness-secret")
+
+	settings := backendSettings()
+	appInstance, err := NewApp(context.Background(), settings)
+	require.NoError(t, err)
+	app := appInstance.(*App)
+
+	mux := http.NewServeMux()
+	app.registerRoutes(mux)
+
+	body := `{"alert_id":"abc"}`
+	req := httptest.NewRequest("POST", "/rca/api/rca/start?dry_run=true", strings.NewReader(body))
+	ctx := context.WithValue(req.Context(), orgIDKey{}, int64(55))
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	require.Equal(t, "55", gotOrgID)
+	require.Equal(t, "/api/rca/start", gotPath)
+	require.Equal(t, "dry_run=true", gotQuery)
+	require.Equal(t, body, string(gotBody), "body must reach the backend unchanged after being hashed")
+
+	target := gotPath + "?" + gotQuery
+	bodyHash := sha256.Sum256(gotBody)
+	message := gotMethod + ":" + gotTS + ":" + gotNonce + ":" + target + ":" + hex.EncodeToString(bodyHash[:]) + ":" + gotOrgID
+	mac := hmac.New(sha256.New, []byte("rca-correctness-secret"))
+	mac.Write([]byte(message))
+	expected := hex.EncodeToString(mac.Sum(nil))
+
+	assert.Equal(t, expected, gotSig, "RCA proxy signature must match the documented canonicalisation")
+}
+
+// TestRCAProxyHMACNonceUniquePerRequest verifies that two separate requests
+// through the /rca/ proxy get distinct nonces (and therefore distinct
+// signatures even when the request is otherwise identical).
+func TestRCAProxyHMACNonceUniquePerRequest(t *testing.T) {
+	var nonces []string
+	be := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nonces = append(nonces, r.Header.Get("X-Agent-Nonce"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer be.Close()
+
+	t.Setenv("RCA_BACKEND_URL", be.URL)
+	t.Setenv("AGENT_INTERNAL_SECRET", "rca-nonce-secret")
+
+	settings := backendSettings()
+	appInstance, err := NewApp(context.Background(), settings)
+	require.NoError(t, err)
+	app := appInstance.(*App)
+
+	mux := http.NewServeMux()
+	app.registerRoutes(mux)
+
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest("GET", "/rca/api/rca", nil)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+	}
+
+	require.Len(t, nonces, 2)
+	assert.NotEqual(t, nonces[0], nonces[1], "each proxied request should carry a fresh nonce")
 }
 
 // TestGetEnvDefault verifies getEnv returns the default when the env var is unset.

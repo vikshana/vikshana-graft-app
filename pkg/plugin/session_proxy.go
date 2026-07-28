@@ -1,16 +1,12 @@
 package plugin
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 )
@@ -36,7 +32,9 @@ var defaultAllowedRoles = []string{"Admin", "Editor"}
 // The /sessions/ path is forwarded to the same ORCA FastAPI backend with:
 //   - X-Grafana-Org-Id injected from PluginContext (as on /rca/)
 //   - Plugin-level RBAC: only allowed Grafana roles may reach the backend
-//   - X-Agent-Signature HMAC header when AGENT_INTERNAL_SECRET is set
+//   - Signed X-Agent-Signature/X-Agent-Timestamp/X-Agent-Nonce headers
+//     (method+timestamp+nonce+target+body-hash+org-id) when
+//     AGENT_INTERNAL_SECRET is set — see signInternalRequest.
 func (a *App) registerSessionRoutes(mux *http.ServeMux, settings backend.AppInstanceSettings) {
 	rcaBackendURL := getEnv("RCA_BACKEND_URL", "http://orca-backend:8000")
 	target, err := url.Parse(rcaBackendURL)
@@ -72,13 +70,10 @@ func (a *App) registerSessionRoutes(mux *http.ServeMux, settings backend.AppInst
 				req.Header.Set("X-Grafana-Org-Id", strconv.FormatInt(orgID, 10))
 			}
 
-			// Add HMAC signature when the internal secret is configured.
-			if secret != "" {
-				ts := strconv.FormatInt(time.Now().Unix(), 10)
-				mac := hmac.New(sha256.New, []byte(secret))
-				mac.Write([]byte(ts + ":" + req.URL.Path))
-				req.Header.Set("X-Agent-Signature", hex.EncodeToString(mac.Sum(nil)))
-				req.Header.Set("X-Agent-Timestamp", ts)
+			// Sign the request (binds method, timestamp, nonce, full target,
+			// body digest, and org ID) when the internal secret is configured.
+			if err := signInternalRequest(req, secret); err != nil {
+				backend.Logger.Error("Failed to sign internal session request", "err", err)
 			}
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -146,7 +141,9 @@ func parseAllowedRoles(settings backend.AppInstanceSettings) []string {
 // The /mcp/ path is forwarded to the ORCA FastAPI backend at /api/mcp/:
 //   - X-Grafana-Org-Id injected from PluginContext (not spoofable)
 //   - Plugin-level RBAC: only allowed Grafana roles may reach the backend
-//   - X-Agent-Signature HMAC header when AGENT_INTERNAL_SECRET is set
+//   - Signed X-Agent-Signature/X-Agent-Timestamp/X-Agent-Nonce headers
+//     (method+timestamp+nonce+target+body-hash+org-id) when
+//     AGENT_INTERNAL_SECRET is set — see signInternalRequest.
 func (a *App) registerMCPRoutes(mux *http.ServeMux, settings backend.AppInstanceSettings) {
 	rcaBackendURL := getEnv("RCA_BACKEND_URL", "http://orca-backend:8000")
 	target, err := url.Parse(rcaBackendURL)
@@ -183,12 +180,8 @@ func (a *App) registerMCPRoutes(mux *http.ServeMux, settings backend.AppInstance
 			}
 
 			// Add HMAC signature when the internal secret is configured.
-			if secret != "" {
-				ts := strconv.FormatInt(time.Now().Unix(), 10)
-				mac := hmac.New(sha256.New, []byte(secret))
-				mac.Write([]byte(ts + ":" + req.URL.Path))
-				req.Header.Set("X-Agent-Signature", hex.EncodeToString(mac.Sum(nil)))
-				req.Header.Set("X-Agent-Timestamp", ts)
+			if err := signInternalRequest(req, secret); err != nil {
+				backend.Logger.Error("Failed to sign internal MCP request", "err", err)
 			}
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {

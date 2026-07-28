@@ -43,6 +43,75 @@ class ConcurrencyLimitError(Exception):
     """Raised when the auto-triage concurrency cap is reached."""
 
 
+def _build_initial_rca_state(
+    alert_name: str,
+    labels: dict[str, str],
+    alert_id: Any,
+    org_id: int | None,
+) -> dict[str, Any]:
+    """Build a complete ``RCAState``-shaped initial turn input for an alert.
+
+    ``harness.session.worker.TurnWorker._execute_turn`` passes this dict
+    straight to ``graph.ainvoke(turn_input, ...)`` for a fresh invocation.
+    The interactive RCA graph's nodes index required keys directly (e.g.
+    ``state["alert_context"]``, ``state["round"]``) rather than via
+    ``.get(...)`` with a default, so a partial payload — as previously sent
+    here (only ``alert_name``/``labels``/``alert_id``/``org_id`` at the
+    top level, with no ``alert_context`` wrapper at all) — raises
+    ``KeyError`` on the very first node (see docs/harness-risk-review.md,
+    F1). This mirrors the shape ``tests/conftest.py::rca_initial_state``
+    and ``app.agent.rca_state.RCAState`` define as the minimal valid state.
+
+    Args:
+        alert_name: Alert name (e.g. ``"HighErrorRate"``).
+        labels: Full label set for the alert.
+        alert_id: UUID of the persisted ``Alert`` row (may be None).
+        org_id: Grafana organisation ID for MCP tool scoping.
+
+    Returns:
+        A dict matching every key of ``app.agent.rca_state.RCAState``.
+    """
+    from app.config import settings
+
+    description = (
+        labels.get("description")
+        or labels.get("summary")
+        or f"Alert {alert_name!r} is firing."
+    )
+    service = labels.get("service") or labels.get("service_name")
+    environment = labels.get("environment") or labels.get("deployment_environment_name")
+
+    alert_context: dict[str, Any] = {
+        "alert_id": str(alert_id) if alert_id else None,
+        "alert_name": alert_name,
+        "description": description,
+        "service": service,
+        "environment": environment,
+        "labels": labels,
+        "org_id": org_id,
+    }
+
+    return {
+        "alert_context": alert_context,
+        "org_id": org_id,
+        "gathered_data": [],
+        "past_rcas": [],
+        "hypotheses": [],
+        "confidence_scores": [],
+        "round": 0,
+        "developer_accepted": False,
+        "max_rounds": settings.ORCA_MAX_ROUNDS,
+        "messages": [],
+        "pending_question": None,
+        "final_report": None,
+        "rca_session_id": None,
+        "error_message": None,
+        "force_finalized": False,
+        "tool_call_count": 0,
+        "investigation_started_at": None,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Result types
 # ---------------------------------------------------------------------------
@@ -245,16 +314,17 @@ class AutoTriageService:
 
         await db.commit()
 
-        # 4. Enqueue the first turn
+        # 4. Enqueue the first turn with a complete RCAState-shaped payload
+        # (see _build_initial_rca_state docstring — F1).
         await enqueue_turn(
             session_id=session_id,
             session_type="investigation",
-            turn_input={
-                "alert_name": alert_name,
-                "labels": labels,
-                "alert_id": str(alert_id) if alert_id else None,
-                "org_id": org_id,
-            },
+            turn_input=_build_initial_rca_state(
+                alert_name=alert_name,
+                labels=labels,
+                alert_id=alert_id,
+                org_id=org_id,
+            ),
         )
 
         log.info(

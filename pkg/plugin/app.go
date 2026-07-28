@@ -52,6 +52,23 @@ type App struct {
 func NewApp(_ context.Context, settings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
 	var app App
 
+	// Surface a loud, discoverable warning when the internal HMAC secret is
+	// unset — every /sessions, /mcp, and /rca request to the ORCA backend
+	// will be forwarded unsigned (dev-mode pass-through). The Go plugin has
+	// no "production" flag of its own to hard-fail on (unlike the ORCA
+	// backend's ENVIRONMENT=production startup check in app/config.py), so
+	// this is a log-only guard: operators deploying to production MUST set
+	// AGENT_INTERNAL_SECRET to the same value on both sides (see
+	// docker-compose.yaml and docs/harness-risk-review.md F4).
+	if getEnv("AGENT_INTERNAL_SECRET", "") == "" {
+		backend.Logger.Warn(
+			"AGENT_INTERNAL_SECRET is not set — internal HMAC signing to the ORCA backend " +
+				"is disabled and every /sessions, /mcp, and /rca request will be forwarded " +
+				"unsigned. This is expected in local development; set AGENT_INTERNAL_SECRET " +
+				"to the same value here and on the ORCA backend before running in production.",
+		)
+	}
+
 	mux := http.NewServeMux()
 	app.registerRoutes(mux)
 	// Register session proxy routes (Phase 2) — requires settings for RBAC config.
@@ -153,6 +170,12 @@ func (a *App) registerRoutes(mux *http.ServeMux) {
 		return
 	}
 
+	// HMAC secret for signing internal requests to the ORCA backend. Empty
+	// in dev mode, in which case signInternalRequest is a no-op (see
+	// docs/harness-risk-review.md F4 — /api/rca previously bypassed HMAC
+	// entirely, unlike /sessions and /mcp).
+	rcaSecret := getEnv("AGENT_INTERNAL_SECRET", "")
+
 	rcaProxy := &httputil.ReverseProxy{
 		FlushInterval: -1, // required for SSE passthrough
 		Director: func(req *http.Request) {
@@ -162,6 +185,10 @@ func (a *App) registerRoutes(mux *http.ServeMux) {
 			// This comes from PluginContext.OrgID, which the client cannot spoof.
 			if orgID, ok := req.Context().Value(orgIDKey{}).(int64); ok {
 				req.Header.Set("X-Grafana-Org-Id", strconv.FormatInt(orgID, 10))
+			}
+			// Sign the request when the internal secret is configured.
+			if err := signInternalRequest(req, rcaSecret); err != nil {
+				backend.Logger.Error("Failed to sign internal RCA request", "err", err)
 			}
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {

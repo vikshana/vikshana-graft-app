@@ -184,8 +184,12 @@ class TurnJob(Base):
     """A pending agent turn claimed from the job queue.
 
     The worker loop polls this table with ``FOR UPDATE SKIP LOCKED`` to claim
-    a single job, then uses ``pg_advisory_xact_lock`` to serialise turns
-    within a session.
+    a single job, then uses a non-blocking, transaction-scoped
+    ``pg_try_advisory_xact_lock`` (held on a dedicated execution session for
+    the full turn execution, released automatically when that transaction
+    ends) to serialise turns within a session. ``claimed_at`` doubles as a
+    heartbeat: it is periodically refreshed while a turn is executing so the
+    orphan reaper never requeues a still-live, long-running turn.
     """
 
     __tablename__ = "turn_jobs"

@@ -90,7 +90,7 @@ git checkout -b feat/agent-harness-phase-4
 **What was built:**
 - `pkg/plugin/session_proxy.go`: `/sessions/` + `/sessions` reverse proxy with RBAC (reads `agent_allowed_roles` from plugin JSONData, default `["Admin","Editor"]`), HMAC signing (`X-Agent-Signature` when `AGENT_INTERNAL_SECRET` set), `X-Grafana-Org-Id` injection, SSE passthrough
 - `pkg/plugin/app.go`: `registerSessionRoutes()` call in `NewApp`; `CallResource` now threads `OrgRole` via `orgRoleKey{}` alongside existing `orgIDKey{}`
-- `harness/auth/internal_auth.py`: `InternalAuthMiddleware` — HMAC-SHA256 validation on `/api/sessions/*`, 60s timestamp skew, dev-mode pass-through when `AGENT_INTERNAL_SECRET` empty
+- `harness/auth/internal_auth.py`: `InternalAuthMiddleware` — HMAC-SHA256 validation on `/api/sessions`, `/api/mcp`, `/api/identity`, and `/api/rca`; signature binds method + raw encoded path/query + body digest + org ID + a replay-cache nonce; 30s timestamp skew (hosts must be NTP-synced — see services/orca/README.md); dev-mode pass-through when `AGENT_INTERNAL_SECRET` empty, refused at startup when `ENVIRONMENT=production` (see `app/config.py`)
 - `app/api/rca_sessions.py`: new endpoints:
   - `GET /api/sessions/drill-down/{handle}` — retrieves stored tool result for EvidencePanel re-execution (Option B)
   - `GET /api/sessions` — lists rca_sessions with status/type/org filters

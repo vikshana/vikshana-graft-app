@@ -117,3 +117,28 @@ class RCAState(TypedDict):
 
     force_finalized: bool
     """True if the graph hit max_rounds and force-finalised without developer acceptance."""
+
+    # --- Guard state (threaded through so it is preserved across the whole
+    # investigation rather than reinitialised on every node call — see
+    # app.agent.rca_graph._build_turn_executor and
+    # docs/harness-risk-review.md, F1) ---
+
+    tool_call_count: int
+    """Cumulative tool calls made across the *whole* investigation (every
+    round combined), not just the current node call. Seeds
+    ``ToolContext.spend.call_count`` on every node's ``GuardedToolExecutor``
+    so ``LoopGuard`` enforces its ceiling across the investigation as a
+    whole rather than resetting to zero every round. Defaults to 0 (and
+    read via ``state.get("tool_call_count", 0)`` by nodes, so a state
+    payload built before this field existed does not crash)."""
+
+    investigation_started_at: float | None
+    """Wall-clock (``time.time()``) timestamp of the investigation's first
+    tool-calling round. Seeds ``TimeoutGuard``'s per-session clock (via
+    ``GuardPipeline.start_session``) so ``SESSION_TIMEOUT_S`` bounds the
+    investigation's true wall-clock duration across every
+    interrupt/resume round, instead of being reset to "now" — and
+    therefore never actually elapsing — every round. ``None`` until the
+    first round sets it; read via ``state.get("investigation_started_at")``
+    by nodes so a state payload built before this field existed does not
+    crash."""

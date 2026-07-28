@@ -65,7 +65,8 @@ def get_grafana_mcp_config(org_id: int | None = None) -> dict[str, Any]:
 
     Args:
         org_id: Grafana organisation ID to scope this investigation to.
-            None means no org header is sent (server uses its default org).
+            None or 0 (falsy — Grafana org IDs start at 1) means no org
+            header is sent (server uses its default org).
 
     Returns:
         Dictionary suitable for passing to ``MultiServerMCPClient``.
@@ -78,7 +79,7 @@ def get_grafana_mcp_config(org_id: int | None = None) -> dict[str, Any]:
         # Inject X-Grafana-Org-Id so every tool call is scoped to this org.
         # ------------------------------------------------------------------
         headers: dict[str, str] = {}
-        if org_id is not None:
+        if org_id:
             headers["X-Grafana-Org-Id"] = str(org_id)
 
         logger.info(

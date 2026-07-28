@@ -235,7 +235,8 @@ cp .env.example .env
 # Start Orca services only (Postgres + backend + frontend)
 docker compose up --force-recreate --remove-orphans --build
 
-# Tables are auto-created on first backend startup via SQLAlchemy create_all()
+# Schema is managed by Alembic — docker-entrypoint.sh runs
+# `alembic upgrade head` automatically before the backend starts.
 ```
 
 ### Option B — Local development (backend + frontend outside Docker)
@@ -261,8 +262,10 @@ docker-compose up -d orca-postgres
 # Install backend dependencies and start dev server
 cd backend
 pip install -e ".[dev]"
+alembic upgrade head
+# Schema is managed exclusively by Alembic — run the migration above once
+# before first startup and whenever new migrations land.
 uvicorn app.main:app --reload --port 8000
-# Tables are auto-created on startup
 
 # In a second terminal — install frontend dependencies and start dev server
 cd frontend
@@ -339,6 +342,56 @@ open http://localhost:3000
 ```
 
 See [demo/README.md](demo/README.md) for the full step-by-step walkthrough including available feature flags and pre-provisioned alert rules.
+
+---
+
+## 🔐 Internal Authentication (HMAC)
+
+The Grafana Go plugin gateway (`pkg/plugin/`) is the only intended caller of
+this backend's internal API surface (`/api/sessions`, `/api/mcp`,
+`/api/identity`, `/api/rca`). Every request the gateway proxies is signed
+with HMAC-SHA256 and validated by `InternalAuthMiddleware`
+(`harness/auth/internal_auth.py`):
+
+```
+X-Agent-Signature: HMAC-SHA256(method:timestamp:nonce:target:body_sha256:org_id, secret)
+X-Agent-Timestamp: <unix timestamp>
+X-Agent-Nonce:     <random per-request token>
+```
+
+`target` is the raw, percent-encoded path plus raw query string exactly as
+transmitted on the wire (Go's `req.URL.EscapedPath()` / Python's ASGI
+`raw_path` — not the decoded path), so a byte-for-byte identical
+canonicalisation is used on both sides of the proxy.
+
+**Shared secret.** Both sides read `AGENT_INTERNAL_SECRET` — the Go plugin
+(`grafana` service) and this backend (`orca-backend` service) **must** be
+configured with the exact same value, or every internal request will be
+rejected with `401 invalid signature`. The root `docker-compose.yaml` sources
+both from a single `AGENT_INTERNAL_SECRET` entry in the repo-root `.env`
+file, so setting it once keeps them in sync:
+
+```bash
+# repo root .env
+AGENT_INTERNAL_SECRET=$(openssl rand -hex 32)
+```
+
+Leaving it unset (the default) disables signature validation entirely —
+acceptable for local development, but `Settings.validate_production_secrets`
+(`app/config.py`) refuses to start this backend when `ENVIRONMENT=production`
+and `AGENT_INTERNAL_SECRET` is empty.
+
+**Clock synchronisation (NTP).** The signature's timestamp is checked
+against a 30-second freshness window (`_MAX_TIMESTAMP_SKEW_S` in
+`internal_auth.py`) to bound the replay attack surface. This means the Go
+plugin container/host and the `orca-backend` container/host **must have
+their clocks synchronised via NTP to within a few seconds of each other** —
+if either host's clock drifts by more than ~30 seconds, every internal
+request will start failing with `401 timestamp too old`, even with a correct
+secret. In `docker-compose.yaml` both services normally share the host's
+clock (containers inherit host time by default), so this only becomes a
+concern in multi-host production deployments — ensure `chrony`/`ntpd` (or
+equivalent) is running and healthy on every host that runs either service.
 
 ---
 

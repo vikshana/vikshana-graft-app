@@ -7,15 +7,76 @@ by the guard pipeline.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
+import httpx
 import structlog
 from pydantic import BaseModel, create_model
 
 from harness.tools.protocol import CostClass, ToolContext, ToolError, ToolResult
 
 logger = structlog.get_logger()
+
+# ---------------------------------------------------------------------------
+# Error classification
+# ---------------------------------------------------------------------------
+#
+# Exceptions that indicate a transient, infrastructure-level failure where
+# retrying the *same* call has a reasonable chance of succeeding (the
+# network blipped, the upstream MCP server timed out or returned a 5xx).
+_RETRYABLE_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    httpx.TimeoutException,
+    httpx.ConnectError,
+    httpx.ReadError,
+    httpx.WriteError,
+    httpx.NetworkError,
+    httpx.RemoteProtocolError,
+    asyncio.TimeoutError,
+)
+
+
+def _classify_error(exc: Exception) -> tuple[str, bool]:
+    """Classify an MCP tool-call exception into (error_code, retryable).
+
+    Blanket ``retryable=True`` for every failure (the previous behaviour)
+    risks retry storms against a server that is rejecting requests for a
+    non-transient reason (bad arguments, permission denied, unknown tool).
+    This classifies by the *actual* exception type instead:
+
+    - Timeouts / connection / network errors → transient infra failure,
+      retryable.
+    - HTTP 5xx from the MCP server → upstream server error, retryable.
+    - HTTP 4xx from the MCP server → client/request error, NOT retryable
+      (the same arguments will fail the same way).
+    - ``RuntimeError`` raised for a JSON-RPC ``error`` field in the MCP
+      response → the server understood and rejected the call, NOT
+      retryable.
+    - Anything else (unexpected/unknown) → NOT retryable by default; an
+      unclassified failure should not be blindly retried.
+
+    Args:
+        exc: The exception raised while calling the MCP server.
+
+    Returns:
+        Tuple of ``(error_code, retryable)``.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        if exc.response.status_code >= 500:
+            return "mcp_upstream_error", True
+        return "mcp_client_error", False
+    if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+        return "mcp_timeout", True
+    if isinstance(exc, _RETRYABLE_EXCEPTIONS):
+        return "mcp_connection_error", True
+    if isinstance(exc, RuntimeError):
+        # Raised by _call_mcp_tool for a JSON-RPC-level `error` field —
+        # the server actively rejected the call (e.g. unknown tool,
+        # invalid arguments). Retrying without changing the request would
+        # fail identically.
+        return "mcp_protocol_error", False
+    return "mcp_error", False
 
 
 def _build_input_model(tool_name: str, schema: dict) -> type[BaseModel]:
@@ -111,9 +172,16 @@ class MCPTool:
             log.debug("mcp_tool_success", result_len=len(text))
             return ToolResult(data=text, truncated=False)
         except Exception as exc:
-            log.error("mcp_tool_failed", error=str(exc))
+            code, retryable = _classify_error(exc)
+            log.error(
+                "mcp_tool_failed",
+                error=str(exc),
+                error_type=type(exc).__name__,
+                code=code,
+                retryable=retryable,
+            )
             return ToolResult(
                 data=f"MCP tool error: {exc}",
                 truncated=False,
-                error=ToolError(code="mcp_error", message=str(exc), retryable=True),
+                error=ToolError(code=code, message=str(exc), retryable=retryable),
             )

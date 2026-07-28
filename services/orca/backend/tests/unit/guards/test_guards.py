@@ -327,7 +327,37 @@ class TestTimeoutGuard:
         import time as _time
         guard = TimeoutGuard(tool_timeout_s=30, turn_timeout_s=9999, session_timeout_s=1800)
         guard.start_turn()
-        guard._session_started_at = _time.monotonic() - 2000
+        # Session dimension uses the wall clock (time.time()), not
+        # time.monotonic() — see TimeoutGuard.start_session docstring: a
+        # session can span turns executed by a different process, so its
+        # origin must be a value comparable across process boundaries.
+        guard._session_started_at = _time.time() - 2000
+        ctx = _make_ctx()
+        result = await guard.evaluate(MockTool(), EmptyInput(), ctx)
+        assert isinstance(result, Deny)
+        assert result.code == "session_timeout"
+
+    @pytest.mark.asyncio
+    async def test_start_turn_accepts_explicit_started_at(self):
+        """start_turn(started_at=...) seeds the monotonic clock explicitly
+        (used by GuardPipeline.start_turn to forward a caller-supplied
+        value) rather than always capturing "now"."""
+        import time as _time
+        guard = TimeoutGuard(tool_timeout_s=30, turn_timeout_s=120, session_timeout_s=1800)
+        guard.start_turn(started_at=_time.monotonic() - 200)
+        ctx = _make_ctx()
+        result = await guard.evaluate(MockTool(), EmptyInput(), ctx)
+        assert isinstance(result, Deny)
+        assert result.code == "turn_timeout"
+
+    @pytest.mark.asyncio
+    async def test_start_session_accepts_explicit_started_at(self):
+        """start_session(started_at=...) seeds the wall clock explicitly —
+        this is how a persisted investigation start survives across
+        interrupt/resume rounds (see app.agent.rca_graph)."""
+        import time as _time
+        guard = TimeoutGuard(tool_timeout_s=30, turn_timeout_s=9999, session_timeout_s=1800)
+        guard.start_session(started_at=_time.time() - 2000)
         ctx = _make_ctx()
         result = await guard.evaluate(MockTool(), EmptyInput(), ctx)
         assert isinstance(result, Deny)
@@ -467,9 +497,10 @@ class TestGuardPipeline:
         guard2 = BudgetGuard(session_tokens=999_999, user_daily_tokens=999_999, global_daily_tokens=999_999)
         pipeline = GuardPipeline([guard1, guard2])
         ctx = _make_ctx(role="Editor")
-        verdict, decisions = await pipeline.run(MockTool(), EmptyInput(), ctx)
+        verdict, effective_input, decisions = await pipeline.run(MockTool(), EmptyInput(), ctx)
         assert isinstance(verdict, Allow)
         assert len(decisions) == 2
+        assert effective_input is not None
 
     @pytest.mark.asyncio
     async def test_first_deny_short_circuits(self):
@@ -478,9 +509,10 @@ class TestGuardPipeline:
         never_called_guard = BudgetGuard(session_tokens=0)  # would also deny
         pipeline = GuardPipeline([deny_guard, never_called_guard])
         ctx = _make_ctx(role="Viewer")
-        verdict, decisions = await pipeline.run(MockTool(), EmptyInput(), ctx)
+        verdict, effective_input, decisions = await pipeline.run(MockTool(), EmptyInput(), ctx)
         assert isinstance(verdict, Deny)
         assert len(decisions) == 1  # only first guard ran
+        assert isinstance(effective_input, EmptyInput)  # no transform applied before short-circuit
 
     @pytest.mark.asyncio
     async def test_transform_continues_pipeline(self):
@@ -490,7 +522,7 @@ class TestGuardPipeline:
         pipeline = GuardPipeline([cost_guard, loop_guard])
         ctx = _make_ctx(call_count=5)
         # 25h range will be transformed, then loop guard should still run
-        verdict, decisions = await pipeline.run(
+        verdict, effective_input, decisions = await pipeline.run(
             MockTool(),
             QueryInput(from_="now-25h", to="now"),
             ctx,
@@ -498,6 +530,9 @@ class TestGuardPipeline:
         # Cost guard transforms, loop guard allows → final Allow
         assert isinstance(verdict, Allow)
         assert len(decisions) == 2
+        # effective_input must reflect the CostGuard's clamped transform,
+        # not the original (unclamped) input
+        assert effective_input.from_ == "now-24h"
 
     @pytest.mark.asyncio
     async def test_write_guard_stops_pipeline(self):
@@ -506,9 +541,10 @@ class TestGuardPipeline:
         loop_guard = LoopGuard(max_calls_per_turn=0)  # would also deny
         pipeline = GuardPipeline([write_guard, loop_guard])
         ctx = _make_ctx()
-        verdict, decisions = await pipeline.run(MockWriteTool(), EmptyInput(), ctx)
+        verdict, effective_input, decisions = await pipeline.run(MockWriteTool(), EmptyInput(), ctx)
         assert isinstance(verdict, ApprovalRequired)
         assert len(decisions) == 1
+        assert isinstance(effective_input, EmptyInput)  # no transform applied before short-circuit
 
     @pytest.mark.asyncio
     async def test_guard_exception_produces_deny(self):
@@ -522,9 +558,10 @@ class TestGuardPipeline:
 
         pipeline = GuardPipeline([BrokenGuard()])
         ctx = _make_ctx()
-        verdict, decisions = await pipeline.run(MockTool(), EmptyInput(), ctx)
+        verdict, effective_input, decisions = await pipeline.run(MockTool(), EmptyInput(), ctx)
         assert isinstance(verdict, Deny)
         assert "Guard error" in verdict.reason
+        assert isinstance(effective_input, EmptyInput)  # no transform applied before short-circuit
 
     def test_make_default_pipeline_has_7_guards(self):
         """make_default_pipeline returns a pipeline with all 7 guards (PII added in Phase 4)."""
