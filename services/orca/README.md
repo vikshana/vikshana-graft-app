@@ -4,6 +4,20 @@
 
 Orca is an AI-powered system that automatically investigates production incidents. When a critical Grafana alert fires, Orca spins up an LLM agent that queries your observability stack via MCP (Model Context Protocol), analyses metrics, logs, and traces, correlates with past incidents, and produces a structured Root Cause Analysis report — all without human intervention.
 
+> **Scope note.** This document describes the original standalone Orca
+> backend and its legacy webhook-triggered 5-node graph
+> (`app/agent/graph.py`) and RCA report model. The **standalone Next.js
+> frontend** described below (`frontend/`, the `demo/` OTel walkthrough, the
+> `orca-frontend` container) is **historical — it is not present in this
+> repository today**. The live, active UI is the Grafana plugin
+> (`src/`, root `ARCHITECTURE.md`), which talks to this same backend's
+> interactive Sessions API (`app/api/sessions.py`) through the Go plugin
+> gateway (`pkg/plugin/`). For the current, canonical architecture read
+> root [`ARCHITECTURE.md`](../../ARCHITECTURE.md); for the agent-harness
+> subsystem (guards, MCP tool registry, `TurnWorker`) added on top of this
+> backend, read [`docs/HARNESS_PLAN.md`](../../docs/HARNESS_PLAN.md) and
+> [`docs/harness-risk-review.md`](../../docs/harness-risk-review.md).
+
 ---
 
 ## ✨ Features
@@ -29,14 +43,20 @@ Orca is an AI-powered system that automatically investigates production incident
 | **LLM Provider** | Anthropic (Claude Haiku, Claude Sonnet) |
 | **Agent Tools** | Grafana MCP Server (`grafana/mcp-grafana`) · Postgres MCP Server |
 | **Database** | PostgreSQL (async via SQLAlchemy) |
-| **Frontend** | TypeScript · Next.js · React |
+| **Frontend (historical, not present)** | TypeScript · Next.js · React — see the scope note above; the active UI is the Grafana plugin (`src/`) |
 | **Observability** | LangSmith (agent tracing) · structlog (operational logs) |
 | **Integrations** | Slack (webhook) · Grafana (alert webhook) |
-| **Demo** | OpenTelemetry Demo (git submodule) |
+| **Demo (historical, not present)** | OpenTelemetry Demo (git submodule) — see § Demo below |
 
 ---
 
 ## 📐 Architecture Overview
+
+The diagram below is the original design, including the standalone Next.js
+frontend — see the scope note at the top of this document. In the current
+repository, "Frontend" is the Grafana plugin (`src/`), which reaches this
+backend's Sessions API via the Go plugin gateway rather than talking to it
+directly.
 
 ```
 ┌─────────────┐     webhook      ┌──────────────────┐     MCP      ┌─────────────────┐
@@ -49,13 +69,18 @@ Orca is an AI-powered system that automatically investigates production incident
                                           │
                            ┌──────────────┼──────────────┐
                            ▼              ▼              ▼
-                    ┌────────────┐ ┌────────────┐ ┌────────────┐
-                    │ PostgreSQL │ │   Slack    │ │  Frontend  │
-                    │ (storage)  │ │ (notify)   │ │  (Next.js) │
-                    └────────────┘ └────────────┘ └────────────┘
+                    ┌────────────┐ ┌────────────┐ ┌──────────────┐
+                    │ PostgreSQL │ │   Slack    │ │  "Frontend"  │
+                    │ (storage)  │ │ (notify)   │ │  (historical,│
+                    │            │ │            │ │   Next.js)   │
+                    └────────────┘ └────────────┘ └──────────────┘
 ```
 
-For detailed architecture with Mermaid diagrams, see [docs/architecture.md](docs/architecture.md).
+For detailed architecture with Mermaid diagrams (also describing the
+legacy graph — see the scope note above), see
+[docs/architecture.md](docs/architecture.md). For the current two-system
+topology (Grafana plugin ↔ Orca backend, HMAC contract, guarded tool
+execution, etc.), see root `ARCHITECTURE.md`.
 
 ---
 
@@ -111,6 +136,13 @@ Orca requires the following labels on every Grafana alert. If any are missing, t
 ---
 
 ## 📁 Project Structure
+
+> **Historical.** The tree below is the original, pre-harness backend layout
+> and includes the historical `frontend/` and `demo/` directories described
+> in the scope note at the top of this document — neither exists in this
+> repository today. It also predates the `harness/` package. For the
+> current backend layout, see **Current backend layout** immediately after
+> this block.
 
 <details>
 
@@ -212,6 +244,26 @@ O11y-Orca/
 
 </details>
 
+**Current backend layout (post-harness):** the pre-harness tree above omits
+what was added by the Phase 0–4 agent harness and `61534e4`'s hardening pass.
+On top of `backend/app/` (still the entry point — `main.py`, `config.py`,
+plus newer modules `schema_check.py`, `api/sessions.py`, `api/mcp_servers.py`,
+`api/identity.py`, and the interactive `agent/rca_graph.py`), the backend now
+also has:
+
+- `backend/harness/` — the agent harness package: `auth/` (OBO + internal
+  HMAC), `guards/` (guard pipeline), `mcp/` (client manager, org-scoped
+  registry, token crypto), `session/` (`TurnWorker`, `GraphRegistry`),
+  `tools/` (guarded executor, LLM-safe naming, registry), `slack/`,
+  `triage/`, `migrations/` (Alembic — the sole schema authority).
+- `backend/docker-entrypoint.sh` — runs `alembic upgrade head` before the
+  app starts.
+- `backend/tests/` — `unit/`, `integration/`, `security/`,
+  `characterization/`, `llm/`, `eval/`, `load/` (see `ARCHITECTURE.md` §
+  Testing for the run commands and the CI gap).
+
+See root `ARCHITECTURE.md` and `docs/HARNESS_PLAN.md` for the full picture.
+
 ---
 
 ## 🚀 Quick Start
@@ -232,14 +284,20 @@ O11y-Orca/
 cp .env.example .env
 # Edit .env — set ANTHROPIC_API_KEY at minimum
 
-# Start Orca services only (Postgres + backend + frontend)
+# Start Orca services only (Postgres + backend — see services/orca/docker-compose.yml)
 docker compose up --force-recreate --remove-orphans --build
 
 # Schema is managed by Alembic — docker-entrypoint.sh runs
 # `alembic upgrade head` automatically before the backend starts.
 ```
 
-### Option B — Local development (backend + frontend outside Docker)
+> There is no `orca-frontend` service in `services/orca/docker-compose.yml`
+> today (see the scope note at the top of this document) — this starts
+> `orca-postgres` + `orca-backend` only. To interact with the backend, use
+> the Grafana plugin (`npm run server` from the repo root) or `curl`/
+> `http://localhost:8000/docs` directly.
+
+### Option B — Local development (backend outside Docker)
 
 > **Prerequisite:** PostgreSQL must be running and reachable at `localhost:5432` before starting the backend.
 > The easiest way is to spin up just the Postgres container:
@@ -266,11 +324,6 @@ alembic upgrade head
 # Schema is managed exclusively by Alembic — run the migration above once
 # before first startup and whenever new migrations land.
 uvicorn app.main:app --reload --port 8000
-
-# In a second terminal — install frontend dependencies and start dev server
-cd frontend
-npm install
-npm run dev
 ```
 
 ### Run Tests
@@ -288,9 +341,27 @@ pytest tests/integration/ -v
 pytest --cov=app tests/
 ```
 
-### Demo with OpenTelemetry
+> This is not part of any CI workflow — see `ARCHITECTURE.md` § Testing.
 
-The demo environment uses the [OpenTelemetry Demo](https://github.com/open-telemetry/opentelemetry-demo) as a git submodule. A standalone `demo/docker-compose.yml` defines a minimal subset of OTel demo services — only 3 fault-injection targets plus the infrastructure needed to generate traffic and alerts.
+### Demo (historical — not present in this repository)
+
+> The OpenTelemetry Demo git submodule, `services/orca/demo/`, and the
+> `orca-frontend` container referenced below do not exist in this
+> repository (see the scope note at the top of this document); this
+> section is preserved for historical context only. **For the current
+> chaos/alert-trigger demo flow**, use the root-level dev stack instead:
+>
+> ```bash
+> npm run server                 # from the repo root — full stack incl. test-app
+> open http://localhost:8080     # test-app chaos UI
+> # POST /api/chaos/enable?type=error|latency|exception → alert fires → Orca RCA
+> ```
+>
+> See root `ARCHITECTURE.md` § RCA Pipeline and § Test App for the current
+> flow, and `services/orca/Makefile` (`make trigger-rca`) to fire a test
+> alert directly against a standalone Orca backend.
+
+The demo environment used the [OpenTelemetry Demo](https://github.com/open-telemetry/opentelemetry-demo) as a git submodule. A standalone `demo/docker-compose.yml` defined a minimal subset of OTel demo services — only 3 fault-injection targets plus the infrastructure needed to generate traffic and alerts.
 
 **Step 1 — Initialise the submodule:**
 
@@ -313,7 +384,7 @@ cp .env.example .env
 make up
 ```
 
-This starts the following services — enough to generate realistic traffic and trigger meaningful alerts:
+This started the following services — enough to generate realistic traffic and trigger meaningful alerts:
 
 | Layer | Services |
 |---|---|
@@ -340,8 +411,6 @@ open http://localhost:8080/feature
 ```bash
 open http://localhost:3000
 ```
-
-See [demo/README.md](demo/README.md) for the full step-by-step walkthrough including available feature flags and pre-provisioned alert rules.
 
 ---
 

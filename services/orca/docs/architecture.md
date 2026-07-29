@@ -1,6 +1,30 @@
 # Orca — Architecture
 
-This document describes the architecture of the Orca system in detail, covering the system context, agent orchestration, data model, MCP integration, observability strategy, and deployment topology.
+This document describes the architecture of the **original, standalone
+Orca system** in detail: the legacy webhook-triggered 5-node LangGraph
+(`app/agent/graph.py`), its data model, its stdio-based MCP client
+integration, and its standalone Next.js frontend. It predates the
+observability agent harness (`services/orca/backend/harness/`, added in
+Phases 0–4 and hardened in commit `61534e4`).
+
+> **Scope note.**
+> - The **standalone Next.js frontend** described in § Frontend Architecture
+>   and shown in § Deployment Topology (`orca-frontend`, port `:3000`) is
+>   **historical — it is not present in this repository today**. The live
+>   UI is the Grafana plugin (`src/`), which reaches this backend's
+>   interactive Sessions API through the Go plugin gateway.
+> - The **MCP integration** described in § MCP Integration below (stdio
+>   transport, subprocess-spawned, LangGraph tool-binding allow-list) is the
+>   *legacy* client used by the original webhook graph. The harness's
+>   user-configurable MCP integration (`harness/mcp/`: SSE/HTTP transport,
+>   per-org `MCPClientManager`, org-qualified tool registry, Fernet token
+>   encryption) is a separate, newer subsystem — see
+>   `docs/decisions/ADR-007-mcp-architecture.md` and root `ARCHITECTURE.md`
+>   § Org Scoping & MCP Tool Registry Replication.
+> - For the current, canonical two-system architecture (Grafana plugin ↔
+>   Orca backend, HMAC contract, guarded tool execution, `TurnWorker`
+>   concurrency), read root `ARCHITECTURE.md`. For harness implementation
+>   history, read `docs/HARNESS_PLAN.md` and `docs/harness-risk-review.md`.
 
 ---
 
@@ -332,6 +356,13 @@ The wall-clock timeout wraps the entire `graph.ainvoke()` call via `asyncio.wait
 
 ## MCP Integration
 
+> **This section describes the legacy webhook graph's MCP client**
+> (stdio subprocess, LangGraph tool-binding allow-list). It is distinct
+> from the harness's user-configurable MCP integration
+> (`harness/mcp/client_manager.py`: SSE/HTTP transport, per-org
+> `MCPClientManager`, org-qualified registry keys, Fernet token
+> encryption) — see `docs/decisions/ADR-007-mcp-architecture.md`.
+
 ### Grafana MCP Server
 
 - **Server**: `grafana/mcp-grafana` (official Grafana Labs MCP server)
@@ -572,6 +603,12 @@ log.info("investigation_step", step=3, tool="query_prometheus", query="rate(http
 
 ## Deployment Topology
 
+> Both diagrams below (and the `demo/` submodule-based walkthrough that
+> follows) are historical — see the scope note at the top of this
+> document. `services/orca/docker-compose.yml` today defines only
+> `orca-postgres` + `orca-backend`; there is no `orca-frontend` service or
+> `services/orca/demo/` directory in this repository.
+
 ### Development (docker-compose)
 
 ```mermaid
@@ -673,6 +710,11 @@ graph TB
 ---
 
 ## Frontend Architecture
+
+> **Historical — not present in this repository.** See the scope note at
+> the top of this document. The Next.js frontend described below does not
+> exist in `services/orca/` today; the active UI is the Grafana plugin
+> (`src/`).
 
 The frontend is a Next.js application with two main views:
 

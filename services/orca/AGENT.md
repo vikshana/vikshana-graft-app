@@ -307,5 +307,5 @@ Before considering any task complete:
 - [ ] No `print()` statements — use `structlog`
 - [ ] No hardcoded values — use `app/config.py`
 - [ ] Pydantic schemas defined for any new API request/response shapes
-- [ ] Database model changes reflected in SQLAlchemy models (tables auto-created via `create_all()`)
+- [ ] Database model changes accompanied by a new Alembic migration in `harness/migrations/versions/` — Alembic is the sole schema authority (`docker-entrypoint.sh` runs `alembic upgrade head`; `app/main.py` never calls `create_all()` at runtime). See `ARCHITECTURE.md` § Schema Authority.
 

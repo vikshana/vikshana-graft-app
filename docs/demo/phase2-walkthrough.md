@@ -1,5 +1,17 @@
 # Phase 2 Demo Walkthrough
 
+> **Stale as of commit `61534e4` — steps 2, 3, 5, and 6 no longer work.**
+> This walkthrough was written for the Phase 2 UI, before the harness
+> Phase 4 hardening pass deleted `app/api/rca_sessions.py` (the backend for
+> `POST /rca/start`/`/rca/{id}/refine`/`/rca/{id}/accept`) without a
+> replacement. Step 2 ("Trigger a new investigation from the RCA page")
+> will 404 on **Start investigation**; steps 3, 5, and 6 (which assume that
+> investigation is running) cannot be reached as a result. Step 1 (Sessions
+> list) and steps 4/7/8 (SessionPanel/feedback), if a session already
+> exists via Slack or auto-triage, are still representative of the current
+> UI. See `docs/manual-verification.md` § 6 and
+> `services/orca/backend/AGENTS.md` for the current, accurate state.
+
 Step-by-step walkthrough of the Phase 2 Session UI.
 
 ## Prerequisites

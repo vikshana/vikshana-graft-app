@@ -4,6 +4,16 @@ Comprehensive audit of what is missing or broken before the ORCA/RCA integration
 
 Severity labels: **Critical** (broken today, silently wrong), **High** (security or data-loss risk), **Medium** (significant UX or operational gap), **Low** (polish, hygiene).
 
+> **Point-in-time snapshot.** This audit predates the observability agent
+> harness (`services/orca/backend/harness/`, Phases 0–4) and commit
+> `61534e4` ("fix(backend): harden agent harness") — several file paths
+> below (e.g. `services/orca/backend/main.py`, `.../agent/historical_context.py`
+> without an `app/` prefix) reflect an even earlier layout and may no longer
+> match the current tree exactly. Findings have **not** been re-verified
+> against current source except where explicitly marked **Resolved**
+> below. For the harness's own, currently-tracked findings and their
+> resolution status, see `docs/harness-risk-review.md`.
+
 ---
 
 ## 1. Critical Blockers
@@ -130,9 +140,26 @@ The `.env` file in the ORCA service directory is tracked in git. It contains `AN
 
 ---
 
-### 2.4 No rate limiting on `/api/rca/start`
+### 2.4 No rate limiting on `/api/rca/start` — **Superseded (endpoint removed)**
 
 **File:** `services/orca/backend/api/rca_sessions.py:87–149`  
+
+> **Superseded, not resolved.** `app/api/rca_sessions.py` (and the
+> `/api/rca/start`, `/api/rca/{id}/refine`, `/api/rca/{id}/accept` routes it
+> implemented) was **deleted** in the harness Phase 4 hardening pass and
+> never reimplemented — it wasn't rate-limited, it no longer exists.
+> `app/api/rca.py` today serves only `GET /api/rca`, `GET /api/rca/{id}`,
+> `PATCH /api/rca/{id}/feedback`, `GET /api/stats`,
+> `GET /api/filters/values` (confirmed by enumerating `app.routes` at
+> runtime). This is a functional regression, not a fix: the frontend's
+> `RCAInvestigate.tsx` (`startRCAStream`/`refineRCAStream`/`acceptRCA`/
+> `getHistory`) now calls routes that 404. See
+> `services/orca/backend/AGENTS.md` and `docs/manual-verification.md` § 6
+> for detail. The original finding below is preserved for historical
+> record — the concern it raises (unbounded concurrent investigations) is
+> moot only because the endpoint no longer exists at all, not because it
+> was hardened.
+
 **Severity:** High
 
 A single authenticated Grafana user can submit unlimited concurrent `/api/rca/start` requests. Each request spawns a LangGraph thread, an Anthropic API session, and a Postgres connection. There is no idempotency check — submitting the same alert twice creates two separate investigations.
@@ -141,6 +168,10 @@ A single authenticated Grafana user can submit unlimited concurrent `/api/rca/st
 - Add per-org rate limiting (e.g. max 5 concurrent active investigations per org) enforced at the API layer.
 - Add idempotency: hash `alert_context` fields and reject duplicate starts within a configurable window (e.g. 5 minutes).
 - Surface a `429 Too Many Requests` with a `Retry-After` header.
+- **Or, if the interactive RCA flow is not being reinstated, remove the
+  dead frontend code (`startRCAStream`, `refineRCAStream`, `acceptRCA`,
+  `getHistory`, `RCAInvestigate.tsx`) rather than leaving it calling
+  routes that don't exist.**
 
 ---
 
@@ -252,7 +283,14 @@ Each keystroke in the alert name or service inputs immediately triggers a new AP
 **File:** `src/services/rcaApi.ts:100–137`  
 **Severity:** Medium
 
-Both functions are fully implemented in the API service layer and the ORCA backend has the corresponding endpoints. Neither is called from any page component.
+> **Partially superseded.** `submitFeedback`'s backend endpoint
+> (`PATCH /api/rca/{id}/feedback`) still exists. `searchRCAs`'s
+> (`GET /api/rca/search`) does **not** — it lived in
+> `app/api/rca_sessions.py`, deleted in Phase 4 and never reimplemented
+> (see § 2.4). So `searchRCAs` is now missing both a UI *and* a backend
+> route; adding a UI for it alone would not be enough.
+
+Both functions are fully implemented in the API service layer; at the time this was written the ORCA backend had the corresponding endpoints. Neither is called from any page component.
 
 - `searchRCAs`: semantic search over past investigations — relevant when an operator wants to find a similar past incident before starting a new one.
 - `submitFeedback`: thumbs-up/down with comment — needed for quality measurement and model improvement.
@@ -357,10 +395,20 @@ The Go backend tracks `rcaRequestErrors` (a counter) but has no `rcaRequestsTota
 
 ---
 
-### 4.5 Column migrations are hand-written SQL — no rollback capability
+### 4.5 Column migrations are hand-written SQL — no rollback capability — **Resolved**
 
-**File:** `services/orca/backend/main.py:68–77`  
+**File:** `services/orca/backend/main.py:68–77` (original location — since moved/removed)
 **Severity:** Medium
+
+> **Resolved.** As of commit `61534e4`, Alembic is the sole schema
+> authority: `services/orca/backend/docker-entrypoint.sh` runs `alembic
+> upgrade head` before the app starts, and `app/main.py` no longer runs any
+> hand-written `ADD COLUMN IF NOT EXISTS` statements or calls
+> `Base.metadata.create_all`. A startup check (`app/schema_check.py`) fails
+> hard in production if the DB isn't at the expected Alembic head. Rollback
+> (`alembic downgrade`) is available in principle but its paths are not
+> exercised by any test — see `docs/harness-risk-review.md` F3/F13. The
+> original finding below is preserved for historical record.
 
 Schema changes are applied via raw `ADD COLUMN IF NOT EXISTS` statements at startup. This handles only additive migrations. Column type changes, renames, index additions, and drops cannot be expressed, and there is no migration history or rollback path.
 
@@ -540,9 +588,16 @@ The ORCA service `CLAUDE.md` describes the legacy 5-node one-shot graph (`triage
 
 ---
 
-### 7.3 No consolidated environment variable reference
+### 7.3 No consolidated environment variable reference — **Resolved**
 
 **Severity:** Medium
+
+> **Resolved.** Commit `61534e4` added a root `.env.example` (131 lines)
+> documenting every variable needed to run the full stack, grouped by
+> concern (required core vars, internal HMAC auth, database, agent tuning,
+> auth chain, Slack, alert triage, Langfuse, image build args), each with
+> its default and whether it's required. The original finding below is
+> preserved for historical record.
 
 Environment variables for the full stack are scattered across `services/orca/.env` (if it exists), `docker-compose.yaml` inline defaults, and hardcoded fallbacks in Go and Python. There is no single document listing every variable, its purpose, its default, and whether it is required.
 
@@ -563,7 +618,7 @@ Environment variables for the full stack are scattered across `services/orca/.en
 | 2.1 | ORCA webhook has no authentication | **High** | Security |
 | 2.2 | Postgres MCP has unrestricted DB write access | **High** | Security |
 | 2.3 | `.env` with API key committed to git | **High** | Security |
-| 2.4 | No rate limiting on `/api/rca/start` | **High** | Security |
+| 2.4 | No rate limiting on `/api/rca/start` — **Superseded, endpoint removed (Phase 4)** | **High** | Security |
 | 3.1 | Data-gathering phase is invisible — tool calls not rendered | **High** | UX |
 | 3.2 | Manual investigation start is a stub with hardcoded dummy data | **High** | UX |
 | 4.1 | Health check never probes ORCA backend | **High** | Ops |
@@ -577,7 +632,7 @@ Environment variables for the full stack are scattered across `services/orca/.en
 | 3.7 | `searchRCAs` and `submitFeedback` have no UI | **Medium** | UX |
 | 4.3 | `RCA_BACKEND_URL` not documented or configurable from Grafana | **Medium** | Ops |
 | 4.4 | No RCA-specific metrics on the Go proxy | **Medium** | Ops |
-| 4.5 | Column migrations are hand-written SQL — no Alembic | **Medium** | Ops |
+| 4.5 | Column migrations are hand-written SQL — no Alembic — **Resolved (`61534e4`)** | **Medium** | Ops |
 | 4.6 | No operational runbook | **Medium** | Ops |
 | 5.3 | `streaming.py` has no tests | **Medium** | Tests |
 | 5.4 | No E2E tests for any RCA page | **Medium** | Tests |
@@ -591,4 +646,4 @@ Environment variables for the full stack are scattered across `services/orca/.en
 | 6.4 | `test.db` committed to the repository | **Low** | Infra |
 | 7.1 | Root `CLAUDE.md` and `docs/` do not mention RCA | **Medium** | Docs |
 | 7.2 | `services/orca/CLAUDE.md` describes the old graph only | **Medium** | Docs |
-| 7.3 | No consolidated environment variable reference | **Medium** | Docs |
+| 7.3 | No consolidated environment variable reference — **Resolved (`61534e4`)** | **Medium** | Docs |

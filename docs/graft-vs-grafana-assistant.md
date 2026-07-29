@@ -108,6 +108,19 @@ Point-in-time comparison against Grafana Assistant as documented for Grafana Clo
 
 ## 7. Root Cause Analysis (Automated Investigation)
 
+> **Currently broken end-to-end as of commit `61534e4`.** The frontend
+> rows below describe the intended/designed feature set of
+> `RCAInvestigate.tsx`. As of the harness Phase 4 hardening pass,
+> `app/api/rca_sessions.py` (the backend for `/rca/start`, `/rca/{id}/refine`,
+> `/rca/{id}/accept`, `/rca/{id}/history`, `/rca/search`) was deleted and
+> never reimplemented — starting or refining an investigation from the UI
+> 404s today. "Start investigation from UI" through "Suggested follow-up
+> questions" below are not currently reachable; only the automated
+> alert-webhook trigger (`POST /webhook/grafana` → legacy batch graph),
+> the dashboard/list views, and feedback-on-a-completed-RCA still function.
+> See `services/orca/backend/AGENTS.md` and `docs/manual-verification.md`
+> § 6 for detail.
+
 | Feature | Graft | Grafana Assistant |
 |---|---|---|
 | Automated multi-step RCA pipeline | Yes (ORCA integration) | Yes (Assistant Investigations) |

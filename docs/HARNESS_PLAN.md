@@ -1,5 +1,62 @@
 # Observability Agent Harness — Implementation State
 
+> **This document is a historical phase record.** It captures the
+> Phase 0–4 implementation plan and status as it stood on **2026-07-04**,
+> before the `feat/agent-harness-phase-4` PR (#27) was reviewed and before
+> commit `61534e4` ("fix(backend): harden agent harness") landed. The phase
+> narrative below is preserved as-is for historical context; it is **not**
+> an accurate description of current behaviour in several places (schema
+> management, live-path wiring, test status — see the addendum immediately
+> below). For the current architecture, read
+> [`ARCHITECTURE.md`](../ARCHITECTURE.md) (canonical, current) and
+> [`docs/harness-risk-review.md`](harness-risk-review.md) (findings +
+> resolution status). For current ADR text, read `docs/decisions/ADR-003-worker-queue.md`
+> and `docs/decisions/ADR-007-mcp-architecture.md` directly, not the "ADR
+> Index" summaries below, which reflect the pre-`61534e4` decisions.
+
+---
+
+## Current-State Addendum (post-`61534e4`)
+
+Corrections to the phase narrative below, current as of commit `61534e4`:
+
+- **Schema authority.** Phase 0 below says "`create_all()` inline remains
+  for backward compat" alongside Alembic. That is no longer true: Alembic is
+  now the *sole* schema authority. `services/orca/backend/docker-entrypoint.sh`
+  runs `alembic upgrade head` before the app starts; `app/main.py` no longer
+  calls `Base.metadata.create_all` or runs ad-hoc column migrations; a
+  startup check (`app/schema_check.py`) fails hard in production if the DB
+  isn't at the expected Alembic head. See docs/harness-risk-review.md F3/F13.
+- **Harness is now on the live path.** Phase 2's "Verification status" and
+  Phase 4's summary predate the risk review finding (F1) that the guard
+  pipeline and org-scoped tool registry were dead code — the live
+  `app/agent/rca_graph.py` bound tools directly and never ran
+  `GuardPipeline`. This was fixed in `61534e4`: the graph now dispatches
+  every tool call through `GuardedToolExecutor`. See
+  `ARCHITECTURE.md` § Guarded Tool Execution.
+- **TurnWorker concurrency.** The worker design described under Phase 1
+  ("`pg_advisory_xact_lock` … exactly one active turn per session") had a
+  bug where the lock was released immediately on claim-commit, before the
+  turn ran (risk review F2). `61534e4` replaced this with a non-blocking
+  `pg_try_advisory_xact_lock` held for the duration of the turn, plus a
+  heartbeat and busy-requeue. See `ARCHITECTURE.md` § TurnWorker Concurrency
+  Model and `docs/decisions/ADR-003-worker-queue.md`.
+- **MCP org-scoping and replication.** Phase 4's `harness/mcp/` summary
+  predates fixes for cross-org registry-key collisions and per-replica
+  staleness (risk review F10/F12) — see `ARCHITECTURE.md` § Org Scoping & MCP
+  Tool Registry Replication and `docs/decisions/ADR-007-mcp-architecture.md`.
+- **Test status.** The "Running tests" section below is still the correct
+  command to run the Python suite locally. It is **not**, and has never
+  been, wired into CI: `.github/workflows/ci.yml` runs frontend unit tests,
+  Go tests, and Python dependency/vulnerability scans (`pip-audit`,
+  `govulncheck`) — it does not invoke `pytest` for
+  `services/orca/backend/tests/` anywhere. Coverage/pass-count figures
+  quoted per-phase below (e.g. "410 passed", "86.96% harness coverage") were
+  true at the time they were written but are not re-verified by any
+  automated gate today.
+
+---
+
 **Last updated:** 2026-07-04
 **Active branch:** `feat/orca-rca-integration` (all harness work lives here until complete)
 **Monorepo root:** `services/orca/backend/` — Python backend (FastAPI + LangGraph)
@@ -32,7 +89,6 @@ To start Phase 4:
 ```bash
 git checkout feat/orca-rca-integration && git pull
 git checkout -b feat/agent-harness-phase-4
-```
 ```
 
 ---
@@ -186,6 +242,11 @@ npm run test:ci
 npm run e2e
 ```
 
+> The Python `pytest` command above is not invoked by any CI workflow —
+> `.github/workflows/ci.yml` runs the Go and frontend suites plus Python
+> dependency/vulnerability scans (`pip-audit`, `govulncheck`) only. Run it
+> manually before merging any change under `services/orca/backend/`.
+
 ---
 
 ## Known Infrastructure Quirks
@@ -212,11 +273,20 @@ npm run e2e
 | ADR-005 | Langfuse included in Phase 1 dev compose |
 | ADR-006 | Dev compose: extend root `docker-compose.yaml` in place (not `deploy/dev/`) |
 
-Full ADR docs in `docs/decisions/`.
+Full ADR docs in `docs/decisions/`. **ADR-003 and ADR-007 were amended after
+`61534e4`** to describe the non-blocking lock/heartbeat design and the
+org-qualified MCP registry keys / bounded replication convergence
+respectively — read those two files directly rather than relying on this
+one-line summary table.
 
 ---
 
 ## How to Continue in a New Session
+
+> Historical — written when Phase 3 was the next unstarted phase. All
+> phases (0–4) are now complete and `61534e4` has landed on top of them. For
+> current work, start from `ARCHITECTURE.md` and
+> `docs/harness-risk-review.md` instead of this section.
 
 1. Read this file (`docs/HARNESS_PLAN.md`) and the ADRs in `docs/decisions/`
 2. Check current branch: `git branch --show-current`

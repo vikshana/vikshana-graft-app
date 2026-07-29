@@ -136,12 +136,18 @@ When the agent presents a hypothesis:
 
 ### 3.4 Approval gate (write-class tools)
 
-When the agent requests a write operation:
-
-- [ ] **Approval modal appears only for the session initiator** — log in as the initiator user to verify
-- [ ] Non-initiator users do not see the approval modal (the `isInitiator` check uses `window.grafanaBootData.user.login` vs `session.initiator_user_id`)
-- [ ] **Approve** and **Deny** buttons are present in the modal for the initiator
-- [ ] Approving resumes the agent; denying cancels the tool call
+> **Not currently exercisable end-to-end.** No write-class tool is
+> registered on the live RCA path today, and the frontend's
+> `approveAction` (`POST /sessions/{id}/approve`) has no matching backend
+> route in `app/api/sessions.py` — the four registered routes are `GET
+> /sessions`, `GET /sessions/search`, `GET /sessions/drill-down/{handle}`,
+> and `POST /sessions/{id}/feedback`. If a write-class tool call is ever
+> attempted on the live path, `GuardedToolExecutor` refuses it outright
+> (`ApprovalRequired` → "requires human approval, which this execution
+> context does not support" — see `harness/tools/bridge.py` and
+> `docs/harness-risk-review.md` F1) rather than executing it unapproved, but
+> there is no working approve/deny UI flow to manually verify yet. Skip
+> this check until an approval-consumer endpoint exists.
 
 ### 3.5 Feedback widget
 
@@ -190,13 +196,21 @@ Confirm no regression from Sessions page changes:
 
 ## 6. RCA Pages
 
-Confirm the legacy RCA flow is unaffected (no endpoints were removed from the proxy):
+> **`/rca/investigate/:threadId` is not currently exercisable end-to-end.**
+> `app/api/rca_sessions.py` (which implemented `POST /rca/start`,
+> `POST /rca/{id}/refine`, `POST /rca/{id}/accept`, `GET /rca/{id}/history`,
+> `GET /rca/search`) was deleted in the harness Phase 4 hardening commit and
+> never reimplemented — `app/api/rca.py` today only serves `GET /rca`,
+> `GET /rca/{id}`, `PATCH /rca/{id}/feedback`, `GET /stats`,
+> `GET /filters/values` (confirmed by enumerating `app.routes` at runtime).
+> Clicking **Start Investigation** will 404. Skip the two checks below;
+> only the dashboard/list/history-list checks are currently verifiable.
 
 **URL**: `http://localhost:3000/a/vikshana-graft-app/rca`
 
 - [ ] Root Cause Analysis page loads
-- [ ] **Start Investigation** button is present (or equivalent — form to submit an alert)
-- [ ] Submitting an investigation creates a row in `rca_sessions` that subsequently appears on the Sessions page
+- [ ] ~~**Start Investigation** button is present (or equivalent — form to submit an alert)~~ — present in the UI but the submit call 404s; not currently verifiable
+- [ ] ~~Submitting an investigation creates a row in `rca_sessions` that subsequently appears on the Sessions page~~ — not currently verifiable (see note above)
 - [ ] RCA History page (`/rca/runs`) lists past investigations
 
 ---
@@ -261,13 +275,19 @@ For each area above, the corresponding automated tests:
 | Area | Test file(s) |
 |---|---|
 | Sessions API endpoints | `tests/integration/test_api_sessions.py` |
-| MCP registry (org scoping) | `tests/unit/mcp/test_registry_bridge.py` |
-| MCP tool adapter | `tests/unit/mcp/test_tool_adapter.py` |
-| MCP token encryption | `tests/unit/mcp/test_crypto.py` |
+| MCP registry (org scoping) | `tests/unit/mcp_client/test_registry_bridge.py` |
+| MCP tool adapter | `tests/unit/mcp_client/test_tool_adapter.py` |
+| MCP token encryption (incl. fail-closed decrypt) | `tests/unit/mcp_client/test_crypto.py` |
+| MCP client-manager cross-replica reconcile | `tests/unit/mcp_client/test_client_manager_reconcile.py` |
+| Guarded tool execution (bridge) | `tests/unit/tools/test_bridge.py` |
+| LLM-safe tool-name aliasing | `tests/unit/tools/test_naming.py` |
+| RCA graph tool routing (live guard wiring) | `tests/unit/test_rca_graph_tool_routing.py` |
+| Alembic-only schema authority | `tests/unit/test_schema_authority.py` |
 | PII redaction guard | `tests/unit/guards/test_pii_guard.py` |
 | Injection red-team | `tests/security/test_injection_redteam.py` |
 | Guard pipeline (7 guards) | `tests/unit/guards/test_guards.py` |
-| Session worker / queue | `tests/unit/session/test_session.py` |
+| Session worker / queue (non-blocking lock, heartbeat, reaper) | `tests/unit/session/test_session.py` |
+| Internal HMAC auth (all four protected prefixes, nonce replay) | `tests/unit/auth/test_internal_auth.py` |
 | RCA graph node behaviour | `tests/characterization/test_characterization.py` |
 | SessionList page | `src/pages/SessionList.test.tsx` |
 | SessionPanel page | `src/pages/SessionPanel.test.tsx` |
@@ -286,6 +306,11 @@ go test ./pkg/...
 npm run test:ci
 ```
 
+> **Note:** the Python `pytest` command above is not part of any CI
+> workflow — `.github/workflows/ci.yml` runs the Go and frontend suites plus
+> Python dependency/vulnerability scans (`pip-audit`, `govulncheck`) only.
+> Run it manually; see `ARCHITECTURE.md` § Testing.
+
 ---
 
 ## Known Limitations
@@ -296,3 +321,6 @@ npm run test:ci
 | MCP server tools not available to chat interface | Tools from user-configured MCP servers are available to harness sessions but not to the chat LLM | Future |
 | Sessions page only shows `rca_sessions` rows | Rows from old RCA investigations may show blank type/status columns | Cosmetic only |
 | Characterization tests test old RCA nodes only | No characterization tests for the new harness session worker yet | Future |
+| No write-tool approval consumer | `GuardedToolExecutor` refuses `ApprovalRequired` outright rather than executing unapproved; there is no working approve/deny endpoint or UI flow (see § 3.4) | Future |
+| Python test suite not run in CI | `pytest` for `services/orca/backend/tests/` must be run manually — no workflow invokes it | Future |
+| RCA investigate flow (`/rca/investigate/:threadId`) has no backend routes | `app/api/rca_sessions.py` (start/refine/accept/history/search) was deleted in Phase 4 and never reimplemented; only dashboard/list/feedback still work (see § 6) | Future |
