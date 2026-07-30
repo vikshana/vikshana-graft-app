@@ -27,8 +27,22 @@ export function extractInstrumentationLabel(text: string): string | undefined {
     if (/\bkeysight\b/i.test(text)) {
         return 'Keysight';
     }
-    const quoted = text.match(/\b(?:machine|monitors?)\s+(?:named\s+)?["']?([A-Za-z][A-Za-z0-9 _-]{2,30})["']?/i);
-    return quoted?.[1]?.trim();
+    // Prefer "machine named X" / "monitor named X".
+    const named = text.match(
+        /\b(?:machine|monitors?)\s+named\s+["']?([A-Za-z][A-Za-z0-9 _-]{2,30})["']?/i
+    );
+    if (named?.[1]?.trim()) {
+        return named[1].trim();
+    }
+    // "machine Keysight" style — never match "machine learning …".
+    const bare = text.match(
+        /\bmachine\s+(?!learning\b)["']?([A-Za-z][A-Za-z0-9 _-]{2,30})["']?/i
+    );
+    const label = bare?.[1]?.trim();
+    if (!label || /^learning\b/i.test(label)) {
+        return undefined;
+    }
+    return label;
 }
 
 export function userWantsDashboardMetricPanels(message: string): boolean {

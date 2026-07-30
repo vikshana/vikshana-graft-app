@@ -104,7 +104,9 @@ import {
   messageMentionsAddPeerRfPanel,
 } from '../../../services/peerRfPanelAddParse';
 import {
+  formatHistoryComparisonSignalClarification,
   messageMentionsPredictiveAnalyticsPanel,
+  messageNeedsHistoryComparisonSignalClarification,
   parseAddHistoryComparisonPanelRequest,
 } from '../../../services/historyComparisonPanelAddParse';
 import {
@@ -2153,7 +2155,9 @@ export const ChatInterface = () => {
         return;
       }
       if (messageMentionsPredictiveAnalyticsPanel(content) && !addHistoryComparisonRequest) {
-        finalContent = formatModuleMlPanelGuidanceReply(parseModuleMlGuidanceContext(content));
+        finalContent = messageNeedsHistoryComparisonSignalClarification(content)
+          ? formatHistoryComparisonSignalClarification(content)
+          : formatModuleMlPanelGuidanceReply(parseModuleMlGuidanceContext(content));
         setMessages((prev) => {
           const updated = [...prev];
           const last = updated[updated.length - 1];

@@ -1,4 +1,5 @@
 import {
+    extractInstrumentationLabel,
     formatDashboardMetricPanelsExamplePrompt,
     parseDashboardMetricPanelsRequest,
     userWantsDashboardMetricPanels,
@@ -29,6 +30,15 @@ describe('dashboardMetricPanelsParse', () => {
         );
         expect(req?.titleLabel).toBe('Keysight');
         expect(req?.maxPanels).toBe(50);
+    });
+
+    it('does not treat "machine learning" as an instrumentation titleLabel', () => {
+        expect(
+            extractInstrumentationLabel(
+                'Create a Random Forest machine learning panel for sensing voltage on the dashboard with UID = afq7tc6hl1m9sb.'
+            )
+        ).toBeUndefined();
+        expect(extractInstrumentationLabel('machine named Exsolve')).toBe('Exsolve');
     });
 
     it('includes uid in example prompt', () => {

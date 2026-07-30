@@ -403,13 +403,36 @@ function extractQuotedField(text: string, field: 'summary' | 'description'): str
         if (withField?.[1] != null && withField[1].trim()) {
             return withField[1].trim();
         }
-        // Bare "that says" only for description (never steal into summary).
-        if (field === 'description') {
+        // Bare "that says" only for description prompts — never when the operator
+        // is adding/changing a summary (would otherwise duplicate into description).
+        if (
+            field === 'description' &&
+            !/\b(add|set|make|change)\s+(?:a\s+|the\s+)?summary\b/i.test(text)
+        ) {
             const says =
                 text.match(/\bthat\s+says\s+"([^"]*)"/i) ?? text.match(/\bthat\s+says\s+'([^']*)'/i);
             if (says?.[1] != null && says[1].trim()) {
                 return says[1].trim();
             }
+        }
+    }
+    // "Change the summary of the alert … to "X"" / "… to be "X""
+    if (field === 'summary' || field === 'description') {
+        const toQuoted =
+            text.match(
+                new RegExp(
+                    `\\b(?:change|set|update|edit)\\s+(?:the\\s+)?${field}\\b[\\s\\S]*?\\bto\\s+(?:be\\s+)?"([^"]+)"`,
+                    'i'
+                )
+            ) ??
+            text.match(
+                new RegExp(
+                    `\\b(?:change|set|update|edit)\\s+(?:the\\s+)?${field}\\b[\\s\\S]*?\\bto\\s+(?:be\\s+)?'([^']+)'`,
+                    'i'
+                )
+            );
+        if (toQuoted?.[1] != null && toQuoted[1].trim()) {
+            return toQuoted[1].trim();
         }
     }
     return undefined;
@@ -529,8 +552,11 @@ export function messageMentionsGrafanaAlertUpdate(message: string): boolean {
             text
         ) ||
         (/\b(update|edit|patch)\b/i.test(text) &&
-            /\b(?:alert|alarm)(?:\s+rule)?\s+(?:named|titled|called)\b/i.test(text));
-
+            /\b(?:alert|alarm)(?:\s+rule)?\s+(?:named|titled|called)\b/i.test(text)) ||
+        // "Change the summary/description of the alert for the panel titled …"
+        /\b(change|set|update|edit|modify)\s+(?:the\s+)?(summary|description)\s+(?:of\s+)?(?:the\s+)?(?:alert|alarm)\b/i.test(
+            text
+        );
     const hasPanelRef =
         /\bpanel\s+(?:titled|named|called|of)\b/i.test(text) ||
         /\bfor\s+(?:the\s+)?panel\b/i.test(text) ||

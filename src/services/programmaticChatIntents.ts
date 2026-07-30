@@ -54,6 +54,14 @@ import {
     messageMentionsGrafanaEvalGroupIntervalChange,
 } from './grafanaAlertParse';
 import {
+    messageMentionsPredictiveAnalyticsPanel,
+    parseAddHistoryComparisonPanelRequest,
+} from './historyComparisonPanelAddParse';
+import {
+    messageMentionsOwnHistoryPanel,
+    parseAddOwnHistoryPanelRequest,
+} from './ownHistoryPanelParse';
+import {
     messageDescribesBulkGaugePanelRename,
     parseBulkGaugePanelRenameRequest,
     userWantsBulkGaugePanelRenameProgrammatic,
@@ -118,6 +126,10 @@ export function messageHasProgrammaticHandler(message: string, contextDashboardU
         messageMentionsGrafanaAlertCreate(text) ||
         messageMentionsGrafanaAlertUpdate(text) ||
         messageMentionsGrafanaEvalGroupIntervalChange(text) ||
+        parseAddHistoryComparisonPanelRequest(text) != null ||
+        messageMentionsPredictiveAnalyticsPanel(text) ||
+        parseAddOwnHistoryPanelRequest(text) != null ||
+        messageMentionsOwnHistoryPanel(text) ||
         userWantsDashboardRebuild(text) ||
         parseDashboardRebuildRequest(text) != null ||
         parseAddPeerRfPanelRequest(text) != null ||

@@ -223,6 +223,25 @@ describe('grafanaAlertParse', () => {
         expect(messageHasProgrammaticHandler(ADD_DESCRIPTION_ALARM_TITLED_PROMPT)).toBe(true);
     });
 
+    it('parses Change-the-summary-of-the-alert-for-panel prompts', () => {
+        const prompt =
+            'Change the summary of the alert for the panel titled Module 2 Pressure — Alert Test Peer Band ±2σ on the dashboard with UID = afq7tc6hl1m9sb to "Out of band"';
+        expect(messageMentionsGrafanaAlertUpdate(prompt)).toBe(true);
+        const req = parseGrafanaAlertUpdateRequest(prompt);
+        expect(req?.panelTitle).toBe('Module 2 Pressure — Alert Test Peer Band ±2σ');
+        expect(req?.summary).toBe('Out of band');
+        expect(req?.description).toBeUndefined();
+        expect(messageHasProgrammaticHandler(prompt)).toBe(true);
+    });
+
+    it('parses Add-summary-to-alert-titled without bleeding into description', () => {
+        const prompt =
+            'Add a summary to the alert titled "Module 2 Pressure — Alert Test Peer Band ±2σ — outside ±2σ" on the dashboard with UID = afq7tc6hl1m9sb that says "Pressure alert"';
+        const req = parseGrafanaAlertUpdateRequest(prompt);
+        expect(req?.summary).toBe('Pressure alert');
+        expect(req?.description).toBeUndefined();
+    });
+
     it('does not treat full create prompts as update-only', () => {
         expect(messageMentionsGrafanaAlertUpdate(FULL_CUSTOM_METADATA_PROMPT)).toBe(false);
         expect(parseGrafanaAlertUpdateRequest(FULL_CUSTOM_METADATA_PROMPT)).toBeNull();

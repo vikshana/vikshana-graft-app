@@ -12,7 +12,13 @@ export type RegressionHandlerId =
     | 'bulk-gauge-panel-rename'
     | 'ambiguous-graph-clarify'
     | 'unsupported-admin'
-    | 'llm-save-guard';
+    | 'llm-save-guard'
+    | 'grafana-alert-create'
+    | 'grafana-alert-update'
+    | 'peer-band-create'
+    | 'history-comparison'
+    | 'peer-rf-create'
+    | 'history-comparison-clarify';
 
 export interface RegressionCase {
     id: string;
@@ -178,5 +184,75 @@ export const REGRESSION_CASES: RegressionCase[] = [
         expectLlmIntent: 'programmatic',
         expectReplyContains: ['Outside Graft', 'user'],
         expectReplyNotContains: ['Reply **Continue**', 'stopped for confirmation'],
+    },
+    {
+        id: 'alert-create-not-panel-create',
+        failure:
+            'Grafana-managed alert for an existing Peer Band panel was stolen by panel create ("already exists")',
+        prompt:
+            'Create a Grafana-managed alert for the panel titled "Module 2 Pressure — Alert Test Peer Band ±2σ" on the dashboard with UID = afq7tc6hl1m9sb. Configure the alert to trigger when the Module 1 Actual value is greater than the Upper Bound (±2σ) or less than the Lower Bound (±2σ). Use Reduce expressions with the Last function. Configure the alert to notify the Alex Test Email contact point.',
+        expectHandler: 'grafana-alert-create',
+        expectProgrammatic: true,
+        expectLlmIntent: 'programmatic',
+    },
+    {
+        id: 'alert-update-description-by-panel',
+        failure:
+            'Change alert description by panel title was mis-routed to LLM dashboard save',
+        prompt:
+            'Change the alert for the panel titled Module 2 Pressure — Alert Test Peer Band ±2σ on the dashboard with the UID = afq7tc6hl1m9sb to have the description of "Alert on Module 2"',
+        expectHandler: 'grafana-alert-update',
+        expectProgrammatic: true,
+        expectLlmIntent: 'programmatic',
+    },
+    {
+        id: 'alert-update-alarm-titled-that-says',
+        failure:
+            'Add description to alarm titled … Peer Band … that says … was stolen by Peer Band panel create',
+        prompt:
+            'Add a description to the alarm titled "Module 2 Pressure — Alert Test Peer Band ±2σ — outside ±2σ" on the dashboard with UID = afq7tc6hl1m9sb that says ". Description for Pressure Panel"',
+        expectHandler: 'grafana-alert-update',
+        expectProgrammatic: true,
+        expectLlmIntent: 'programmatic',
+    },
+    {
+        id: 'peer-band-pressure-create',
+        failure: 'Peer Band Pressure create was stolen by History Comparison predictive analytics',
+        prompt:
+            'Create a new machine learning time series panel titled "Module 2 Pressure — Alert Test Peer Band ±2σ" on the dashboard with UID afq7tc6hl1m9sb. Compare Module 2 Pressure against the average of Modules 1 and 3 through 8. Create four visible lines: Module 2 Actual Peer Mean Upper Peer Bound (Peer Mean + 2 × Standard Deviation) Lower Peer Bound (Peer Mean - 2 × Standard Deviation) Calculate the Upper and Lower Peer Bounds in the Flux query itself.',
+        expectHandler: 'peer-band-create',
+        expectProgrammatic: true,
+        expectLlmIntent: 'programmatic',
+    },
+    {
+        id: 'rf-sensing-voltage-not-module5',
+        failure:
+            'Random Forest sensing voltage create defaulted to Module 5 Current History Comparison',
+        prompt:
+            'Create a Random Forest machine learning panel for sensing voltage on the dashboard with UID = afq7tc6hl1m9sb.',
+        expectHandler: 'history-comparison',
+        expectProgrammatic: true,
+        expectLlmIntent: 'programmatic',
+    },
+    {
+        id: 'peer-rf-vs-peers',
+        failure: 'RandomForest vs Peers create must not route to History Comparison',
+        prompt:
+            'Create a RandomForest vs Peers (Influx) machine learning panel for Module 3 Current for the dashboard with UID = afq7tc6hl1m9sb.',
+        expectHandler: 'peer-rf-create',
+        expectProgrammatic: true,
+        expectLlmIntent: 'programmatic',
+    },
+    {
+        id: 'rf-bare-pressure-clarify',
+        failure:
+            'Random Forest for bare pressure fell through to Module 5 ML guidance instead of clarifying',
+        prompt:
+            'Create a Random Forest machine learning panel for pressure on the dashboard with UID = afq7tc6hl1m9sb.',
+        expectHandler: 'history-comparison-clarify',
+        expectProgrammatic: true,
+        expectLlmIntent: 'programmatic',
+        expectReplyContains: ['Need a clearer Random Forest signal', 'pressure'],
+        expectReplyNotContains: ['Module 5 Current — History Comparison'],
     },
 ];

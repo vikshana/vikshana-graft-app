@@ -65,6 +65,26 @@ import { formatClarificationIfNeeded } from '../requestClarity';
 import { machineMetricsFieldSelectors } from '../prometheusDiscovery';
 import type { ToolExecution } from '../../types/llm.types';
 import {
+    messageMentionsGrafanaAlertCreate,
+    messageMentionsGrafanaAlertUpdate,
+    parseGrafanaAlertCreateRequest,
+    parseGrafanaAlertUpdateRequest,
+} from '../grafanaAlertParse';
+import {
+    formatHistoryComparisonSignalClarification,
+    messageMentionsPredictiveAnalyticsPanel,
+    messageNeedsHistoryComparisonSignalClarification,
+    parseAddHistoryComparisonPanelRequest,
+} from '../historyComparisonPanelAddParse';
+import {
+    messageMentionsPeerBandPanelCreate,
+    parseAddPeerBandPanelRequest,
+} from '../peerBandPanelAddParse';
+import {
+    messageMentionsAddPeerRfPanel,
+    parseAddPeerRfPanelRequest,
+} from '../peerRfPanelAddParse';
+import {
     KEYSIGHT_DASHBOARD_UID,
     REGRESSION_CASES,
     type RegressionCase,
@@ -172,6 +192,52 @@ function assertHandlerRouting(c: RegressionCase): void {
             expect(describesCapabilityLimitation(reply)).toBe(true);
             break;
         }
+        case 'grafana-alert-create':
+            expect(messageMentionsGrafanaAlertCreate(prompt)).toBe(true);
+            expect(parseGrafanaAlertCreateRequest(prompt)?.panelTitle).toContain('Peer Band');
+            expect(messageMentionsGrafanaAlertUpdate(prompt)).toBe(false);
+            expect(messageMentionsPeerBandPanelCreate(prompt)).toBe(false);
+            expect(messageDescribesPanelCreate(prompt)).toBe(false);
+            break;
+        case 'grafana-alert-update':
+            expect(messageMentionsGrafanaAlertUpdate(prompt)).toBe(true);
+            expect(parseGrafanaAlertUpdateRequest(prompt)).not.toBeNull();
+            expect(parseGrafanaAlertCreateRequest(prompt)).toBeNull();
+            expect(messageMentionsPeerBandPanelCreate(prompt)).toBe(false);
+            expect(messageDescribesPanelCreate(prompt)).toBe(false);
+            break;
+        case 'peer-band-create':
+            expect(messageMentionsPeerBandPanelCreate(prompt)).toBe(true);
+            expect(parseAddPeerBandPanelRequest(prompt)?.metricKind).toBe('pressure');
+            expect(messageMentionsPredictiveAnalyticsPanel(prompt)).toBe(false);
+            expect(messageDescribesPanelCreate(prompt)).toBe(false);
+            break;
+        case 'history-comparison':
+            expect(messageMentionsPredictiveAnalyticsPanel(prompt)).toBe(true);
+            expect(parseAddHistoryComparisonPanelRequest(prompt)?.signal?.field).toBe(
+                'Cartridge_Sensing_Voltage'
+            );
+            expect(messageMentionsPeerBandPanelCreate(prompt)).toBe(false);
+            expect(messageMentionsAddPeerRfPanel(prompt)).toBe(false);
+            break;
+        case 'peer-rf-create':
+            expect(messageMentionsAddPeerRfPanel(prompt)).toBe(true);
+            expect(parseAddPeerRfPanelRequest(prompt)?.moduleNumber).toBe(3);
+            expect(messageMentionsPredictiveAnalyticsPanel(prompt)).toBe(false);
+            expect(messageMentionsPeerBandPanelCreate(prompt)).toBe(false);
+            break;
+        case 'history-comparison-clarify': {
+            expect(messageNeedsHistoryComparisonSignalClarification(prompt)).toBe(true);
+            expect(parseAddHistoryComparisonPanelRequest(prompt)).toBeNull();
+            const reply = formatHistoryComparisonSignalClarification(prompt);
+            for (const needle of c.expectReplyContains ?? []) {
+                expect(reply).toContain(needle);
+            }
+            for (const needle of c.expectReplyNotContains ?? []) {
+                expect(reply).not.toContain(needle);
+            }
+            break;
+        }
         default:
             throw new Error(`Unhandled handler ${c.expectHandler as string}`);
     }
@@ -179,8 +245,8 @@ function assertHandlerRouting(c: RegressionCase): void {
 
 describe('graft historical failure regression', () => {
     describe('fixture catalog', () => {
-        it('documents thirteen known failure patterns', () => {
-            expect(REGRESSION_CASES).toHaveLength(13);
+        it('documents twenty known failure patterns', () => {
+            expect(REGRESSION_CASES).toHaveLength(20);
             const ids = REGRESSION_CASES.map((c) => c.id);
             expect(new Set(ids).size).toBe(ids.length);
         });
@@ -457,6 +523,12 @@ describe('graft historical failure regression', () => {
             'bulk-gauge-panel-rename',
             'ambiguous-graph-clarify',
             'unsupported-admin',
+            'grafana-alert-create',
+            'grafana-alert-update',
+            'peer-band-create',
+            'history-comparison',
+            'peer-rf-create',
+            'history-comparison-clarify',
         ];
 
         it.each(handlers)('%s prompt does not collide with unrelated handlers', (handlerId) => {
@@ -493,6 +565,24 @@ describe('graft historical failure regression', () => {
             }
             if (handlerId !== 'unsupported-admin') {
                 expect(messageDescribesUnsupportedAdminRequest(c.prompt)).toBeNull();
+            }
+            if (handlerId !== 'grafana-alert-create') {
+                expect(messageMentionsGrafanaAlertCreate(c.prompt)).toBe(false);
+            }
+            if (handlerId !== 'grafana-alert-update') {
+                expect(messageMentionsGrafanaAlertUpdate(c.prompt)).toBe(false);
+            }
+            if (handlerId !== 'peer-band-create') {
+                expect(messageMentionsPeerBandPanelCreate(c.prompt)).toBe(false);
+            }
+            if (
+                handlerId !== 'history-comparison' &&
+                handlerId !== 'history-comparison-clarify'
+            ) {
+                expect(messageMentionsPredictiveAnalyticsPanel(c.prompt)).toBe(false);
+            }
+            if (handlerId !== 'peer-rf-create') {
+                expect(messageMentionsAddPeerRfPanel(c.prompt)).toBe(false);
             }
         });
     });

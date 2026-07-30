@@ -7,11 +7,11 @@ import { normalizeUpdateDashboardArgs } from './updateDashboardArgs';
 import { listDashboardPanels, type DashboardPanelEntry } from './panelDiscovery';
 import { isMachineId } from './dashboardCloneParse';
 import type { AddHistoryComparisonPanelRequest } from './historyComparisonPanelAddParse';
+import { resolveHistoryComparisonSignal } from './historyComparisonPanelAddParse';
 import { resolveDashboardUid } from './programmaticDashboardResolve';
 import { findPrometheusTemplatePanel } from './instrumentationMetricDiscovery';
 import { getPanelTargetList } from './fluxPeerBandFix';
 import {
-    canonicalLiveHistoryComparisonTitle,
     isLiveHistoryComparisonPanel,
 } from './modulePanelTitles';
 import { MODULE_PANEL_GRID } from './programmaticModulePanelReorder';
@@ -60,19 +60,26 @@ function promUidFromDashboard(panels: unknown): string | undefined {
 
 function buildHistoryComparisonPanel(
     machineId: string,
-    moduleNumber: number,
+    signal: {
+        field: string;
+        panelTitle: string;
+        titleBase: string;
+        unit: string;
+        moduleNumber?: number;
+    },
     promDatasourceUid?: string
 ): PanelRecord {
-    const field = `Module${moduleNumber}_Current_A`;
+    const field = signal.field;
     const m = escapePromqlString(machineId);
     const ds = promDatasourceUid ? { type: 'prometheus', uid: promDatasourceUid } : { type: 'prometheus' };
-    const title = canonicalLiveHistoryComparisonTitle(moduleNumber);
+    const title = signal.panelTitle;
+    const actualLegend = `${signal.titleBase} (Actual)`;
     return {
         id: null,
         type: 'timeseries',
         title,
         description:
-            `Module ${moduleNumber} actual vs **RandomForest ML** bands (own 30-day history). ` +
+            `${signal.titleBase} actual vs **RandomForest ML** bands (own 30-day history). ` +
             'Live PromQL (~35d). For older dates add the historical/Influx History Comparison panel.',
         timezone: 'browser',
         datasource: ds,
@@ -80,7 +87,7 @@ function buildHistoryComparisonPanel(
         fieldConfig: {
             defaults: {
                 custom: { drawStyle: 'line', spanNulls: true, showPoints: 'never' },
-                unit: 'amp',
+                unit: signal.unit,
             },
         },
         options: { legend: { displayMode: 'list', placement: 'bottom', showLegend: true } },
@@ -89,7 +96,7 @@ function buildHistoryComparisonPanel(
                 refId: 'A',
                 datasource: ds,
                 expr: `machine_metrics{machine="${m}",field="${field}"}`,
-                legendFormat: `Module ${moduleNumber} (Actual)`,
+                legendFormat: actualLegend,
             },
             {
                 refId: 'B',
@@ -220,12 +227,33 @@ export async function runProgrammaticAddHistoryComparisonPanel(
 
     const baseline = extracted.dashboard;
     const dashboardTitle = typeof baseline.title === 'string' ? baseline.title : resolved.title;
-    const moduleNumber = request.moduleNumber;
-    const panelTitle = canonicalLiveHistoryComparisonTitle(moduleNumber);
+    const signal =
+        request.signal ??
+        resolveHistoryComparisonSignal({
+            moduleNumber: request.moduleNumber,
+            metricLabel: request.metricLabel,
+        });
+    if (!signal) {
+        return {
+            ok: false,
+            error:
+                'Could not resolve which signal to chart. Name a module (e.g. Module 2 Current) or a known metric (e.g. sensing voltage).',
+            toolExecutions,
+            dashboardUid: resolved.uid,
+        };
+    }
+    const panelTitle = signal.panelTitle;
+    const moduleNumber = signal.moduleNumber;
     const proposed = JSON.parse(JSON.stringify(baseline)) as Record<string, unknown>;
     const entries = listDashboardPanels(proposed.panels);
 
-    if (entries.some((e) => parseModuleNumberFromTitle(e.title) === moduleNumber && isLiveHistoryComparisonPanel(e.title))) {
+    const titleExists = entries.some((e) => e.title.trim().toLowerCase() === panelTitle.toLowerCase());
+    const moduleHcExists =
+        moduleNumber != null &&
+        entries.some(
+            (e) => parseModuleNumberFromTitle(e.title) === moduleNumber && isLiveHistoryComparisonPanel(e.title)
+        );
+    if (titleExists || moduleHcExists) {
         return {
             ok: false,
             error: `Panel "${panelTitle}" already exists.`,
@@ -241,9 +269,21 @@ export async function runProgrammaticAddHistoryComparisonPanel(
             : machineIdFromDashboardTitle(dashboardTitle, '2406-176021');
 
     const promUid = promUidFromDashboard(proposed.panels);
-    const newPanel = buildHistoryComparisonPanel(machineId, moduleNumber, promUid);
+    const newPanel = buildHistoryComparisonPanel(machineId, signal, promUid);
     newPanel.id = maxPanelId(entries) + 1;
-    newPanel.gridPos = gridPosForModuleBlock(entries, moduleNumber);
+    newPanel.gridPos =
+        moduleNumber != null
+            ? gridPosForModuleBlock(entries, moduleNumber)
+            : (() => {
+                  let maxY = 0;
+                  for (const e of entries) {
+                      const gp = e.panel.gridPos as { y?: number; h?: number } | undefined;
+                      if (gp && typeof gp.y === 'number' && typeof gp.h === 'number') {
+                          maxY = Math.max(maxY, gp.y + gp.h);
+                      }
+                  }
+                  return { x: 0, y: maxY, w: MODULE_PANEL_GRID.w, h: MODULE_PANEL_GRID.h };
+              })();
 
     if (!Array.isArray(proposed.panels)) {
         proposed.panels = [newPanel];

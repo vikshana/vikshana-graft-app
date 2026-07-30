@@ -64,4 +64,27 @@ describe('runProgrammaticAddHistoryComparisonPanel', () => {
         expect(blob).toContain('2505-200033');
         expect(blob).not.toContain('Module5_Current_A');
     });
+
+    it('adds Sensing Voltage — History Comparison for Random Forest sensing-voltage prompts', async () => {
+        const capture: { saved?: { panels?: SavedPanel[] } } = {};
+        const result = await runProgrammaticAddHistoryComparisonPanel(client(capture), {
+            dashboardUid: 'afq7tc6hl1m9sb',
+            metricLabel: 'sensing voltage',
+            signal: {
+                field: 'Cartridge_Sensing_Voltage',
+                titleBase: 'Sensing Voltage',
+                panelTitle: 'Sensing Voltage — History Comparison',
+                unit: 'volt',
+            },
+        });
+        expect(result.ok).toBe(true);
+        expect(result.panelTitle).toBe('Sensing Voltage — History Comparison');
+        const added = capture.saved?.panels?.find((p) => p.title === 'Sensing Voltage — History Comparison');
+        const blob = JSON.stringify(added);
+        expect(blob).toContain('Cartridge_Sensing_Voltage');
+        expect(blob).toContain('machine_metric_upper_bound');
+        expect(blob).toContain('"unit":"volt"');
+        expect(blob).not.toContain('Module5_Current_A');
+        expect(blob).not.toContain('Module 5 Current');
+    });
 });

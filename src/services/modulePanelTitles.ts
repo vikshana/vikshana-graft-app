@@ -42,6 +42,11 @@ export function canonicalLiveHistoryComparisonTitle(moduleNumber: number): strin
     return `Module ${moduleNumber} Current — History Comparison`;
 }
 
+/** Live RF History Comparison for an arbitrary signal label (e.g. "Sensing Voltage"). */
+export function canonicalLiveHistoryComparisonTitleForLabel(label: string): string {
+    return `${label.trim()} — History Comparison`;
+}
+
 /** Rename legacy "RandomForest ML (Influx)" to operator-facing History Comparison label. */
 export function canonicalHistoricalHistoryComparisonTitle(moduleNumber: number): string {
     return `Module ${moduleNumber} Current — History Comparison (historical / Influx)`;
