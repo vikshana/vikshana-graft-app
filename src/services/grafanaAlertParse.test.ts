@@ -190,6 +190,39 @@ describe('grafanaAlertParse', () => {
         expect(messageHasProgrammaticHandler(SET_CONTACT_POINT_PROMPT)).toBe(true);
     });
 
+    // Production: description-only change by panel title was mis-routed to LLM dashboard save.
+    const CHANGE_DESCRIPTION_BY_PANEL_PROMPT =
+        'Change the alert for the panel titled Module 2 Pressure — Alert Test Peer Band ±2σ on the dashboard with the UID = afq7tc6hl1m9sb to have the description of "Alert on Module 2"';
+
+    it('parses change-description prompts that identify the alert by panel + dashboard (no rule name)', () => {
+        expect(messageMentionsGrafanaAlertUpdate(CHANGE_DESCRIPTION_BY_PANEL_PROMPT)).toBe(true);
+        expect(parseGrafanaAlertCreateRequest(CHANGE_DESCRIPTION_BY_PANEL_PROMPT)).toBeNull();
+        const req = parseGrafanaAlertUpdateRequest(CHANGE_DESCRIPTION_BY_PANEL_PROMPT);
+        expect(req?.ruleTitle).toBeUndefined();
+        expect(req?.dashboardUid).toBe('afq7tc6hl1m9sb');
+        expect(req?.panelTitle).toBe('Module 2 Pressure — Alert Test Peer Band ±2σ');
+        expect(req?.description).toBe('Alert on Module 2');
+        expect(messageHasProgrammaticHandler(CHANGE_DESCRIPTION_BY_PANEL_PROMPT)).toBe(true);
+        expect(isSimpleConversationalMessage(CHANGE_DESCRIPTION_BY_PANEL_PROMPT)).toBe(false);
+    });
+
+    // Production: "alarm titled" + "that says" was stolen by Peer Band panel create (build 204).
+    const ADD_DESCRIPTION_ALARM_TITLED_PROMPT =
+        'Add a description to the alarm titled "Module 2 Pressure — Alert Test Peer Band ±2σ — outside ±2σ" on the dashboard with UID = afq7tc6hl1m9sb that says ". Description for Pressure Panel"';
+
+    it('parses Add-description-to-alarm-titled prompts and does not route to Peer Band create', () => {
+        expect(messageMentionsGrafanaAlertUpdate(ADD_DESCRIPTION_ALARM_TITLED_PROMPT)).toBe(true);
+        expect(parseGrafanaAlertCreateRequest(ADD_DESCRIPTION_ALARM_TITLED_PROMPT)).toBeNull();
+        const req = parseGrafanaAlertUpdateRequest(ADD_DESCRIPTION_ALARM_TITLED_PROMPT);
+        expect(req?.ruleTitle).toBe(
+            'Module 2 Pressure — Alert Test Peer Band ±2σ — outside ±2σ'
+        );
+        expect(req?.dashboardUid).toBe('afq7tc6hl1m9sb');
+        expect(req?.description).toBe('. Description for Pressure Panel');
+        expect(req?.summary).toBeUndefined();
+        expect(messageHasProgrammaticHandler(ADD_DESCRIPTION_ALARM_TITLED_PROMPT)).toBe(true);
+    });
+
     it('does not treat full create prompts as update-only', () => {
         expect(messageMentionsGrafanaAlertUpdate(FULL_CUSTOM_METADATA_PROMPT)).toBe(false);
         expect(parseGrafanaAlertUpdateRequest(FULL_CUSTOM_METADATA_PROMPT)).toBeNull();

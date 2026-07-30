@@ -130,6 +130,13 @@ export function messageMentionsPeerBandPanelCreate(message: string): boolean {
     if (messageMentionsGrafanaAlertCreate(text) || messageMentionsGrafanaAlertUpdate(text)) {
         return false;
     }
+    // "Add a description to the alarm titled … Peer Band …" is an alert update, not a panel create.
+    if (
+        /\b(?:alert|alarm)(?:\s+rule)?\s+(?:named|titled|called)\b/i.test(text) &&
+        /\b(description|summary|label|annotation|contact\s*point)\b/i.test(text)
+    ) {
+        return false;
+    }
     if (messageMentionsAddPeerRfPanel(text)) {
         return false;
     }
@@ -143,7 +150,14 @@ export function messageMentionsPeerBandPanelCreate(message: string): boolean {
     if (!/\b(add|create|new|make)\b/i.test(text)) {
         return false;
     }
-    if (!/\bpanel\b/i.test(text)) {
+    // Require creating a panel — do not match merely because free text contains "Pressure Panel".
+    const createsPanel =
+        /\b(?:create|add|make)\b[\s\S]{0,100}\b(?:machine\s+learning\s+)?(?:time\s+series\s+)?panel\b/i.test(
+            text
+        ) ||
+        /\bnew\s+(?:machine\s+learning\s+)?(?:time\s+series\s+)?panel\b/i.test(text) ||
+        /\bpanel\s+titled\b/i.test(text);
+    if (!createsPanel) {
         return false;
     }
 

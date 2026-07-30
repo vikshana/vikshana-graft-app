@@ -2,6 +2,7 @@ import { getBackendSrv } from '@grafana/runtime';
 import { lastValueFrom } from 'rxjs';
 import type { GrafanaAlertUpdateRequest } from './grafanaAlertParse';
 import {
+    defaultAlertRuleTitle,
     matchContactPointName,
     parseEvalIntervalSeconds,
     reconcilePendingWithEvalInterval,
@@ -154,12 +155,52 @@ function findRuleByTitle(
             return onDash[0];
         }
         if (onDash.length > 1) {
+            const panel = opts?.panelTitle?.trim().toLowerCase();
+            if (panel) {
+                const byPanel = onDash.filter((r) =>
+                    (r.title ?? '').toLowerCase().includes(panel)
+                );
+                if (byPanel.length >= 1) {
+                    return byPanel[0];
+                }
+            }
             return onDash[0];
         }
     }
     // Prefer exact title match when several partial matches exist.
     const exact = byTitle.find((r) => (r.title ?? '').trim().toLowerCase() === want);
     return exact ?? byTitle[0];
+}
+
+/** Locate a provisioned rule by panel title + dashboard UID (no rule name given). */
+function findRuleByPanel(
+    existing: ProvisionedRuleRow[],
+    panelTitle: string,
+    dashboardUid: string
+): ProvisionedRuleRow | undefined {
+    const panel = panelTitle.trim().toLowerCase();
+    const dash = dashboardUid.trim();
+    if (!panel || !dash) {
+        return undefined;
+    }
+    const onDash = existing.filter((r) => (r.annotations?.__dashboardUid__ ?? '') === dash);
+    const pool = onDash.length > 0 ? onDash : existing;
+    const defaultTitle = defaultAlertRuleTitle(panelTitle).trim().toLowerCase();
+    const exactDefault = pool.find((r) => (r.title ?? '').trim().toLowerCase() === defaultTitle);
+    if (exactDefault) {
+        return exactDefault;
+    }
+    const containing = pool.filter((r) => (r.title ?? '').toLowerCase().includes(panel));
+    if (containing.length === 1) {
+        return containing[0];
+    }
+    if (containing.length > 1) {
+        const exactPanel = containing.find(
+            (r) => (r.title ?? '').trim().toLowerCase() === panel
+        );
+        return exactPanel ?? containing[0];
+    }
+    return undefined;
 }
 
 /**
@@ -170,9 +211,15 @@ export async function runProgrammaticGrafanaAlertUpdate(
     request: GrafanaAlertUpdateRequest,
     _buildNumber: number
 ): Promise<ProgrammaticGrafanaAlertUpdateResult> {
-    const ruleTitle = request.ruleTitle.trim();
-    if (!ruleTitle) {
-        return { ok: false, error: 'Missing alert rule name. Include `alert rule named …` in the prompt.' };
+    const namedTitle = request.ruleTitle?.trim() ?? '';
+    const panelTitle = request.panelTitle?.trim() ?? '';
+    const dashboardUid = request.dashboardUid?.trim() ?? '';
+    if (!namedTitle && !(panelTitle && dashboardUid)) {
+        return {
+            ok: false,
+            error:
+                'Missing alert identity. Include `alert rule named …` or a panel title plus dashboard UID.',
+        };
     }
 
     let existing: ProvisionedRuleRow[];
@@ -185,15 +232,18 @@ export async function runProgrammaticGrafanaAlertUpdate(
         };
     }
 
-    const prior = findRuleByTitle(existing, ruleTitle, {
-        dashboardUid: request.dashboardUid,
-        panelTitle: request.panelTitle,
-    });
+    const prior = namedTitle
+        ? findRuleByTitle(existing, namedTitle, {
+              dashboardUid: request.dashboardUid,
+              panelTitle: request.panelTitle,
+          })
+        : findRuleByPanel(existing, panelTitle, dashboardUid);
+    const lookupLabel = namedTitle || panelTitle;
     if (!prior?.uid) {
         return {
             ok: false,
             error:
-                `Alert rule **${ruleTitle}** was not found. ` +
+                `Alert rule for **${lookupLabel}** was not found. ` +
                 `Create it first (include panel + dashboard UID), then re-run this update prompt.`,
         };
     }
@@ -209,6 +259,8 @@ export async function runProgrammaticGrafanaAlertUpdate(
             error: `Could not load alert rule \`${prior.uid}\`: ${extractErrorMessage(err)}`,
         };
     }
+
+    const ruleTitle = full.title?.trim() || namedTitle || panelTitle || 'alert';
 
     let contactPointName: string | undefined;
     let contactPointCreated = false;
@@ -417,8 +469,8 @@ export function formatGrafanaAlertUpdateReply(
         return (
             `### Could not update Grafana alert (build ${buildNumber})\n\n` +
             `${result.error ?? 'Unknown error'}\n\n` +
-            `Tip: name the existing rule exactly (\`alert rule named GraftAI Rule\`) and keep this ` +
-            `as a small follow-up — labels / annotations / contact point / evaluation group.`
+            `Tip: identify the rule with \`alert rule named …\` or a panel title + dashboard UID, ` +
+            `and keep this as a small follow-up — labels / annotations / contact point / evaluation group.`
         );
     }
 

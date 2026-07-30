@@ -77,6 +77,14 @@ describe('peerBandPanelAddParse', () => {
         expect(messageHasProgrammaticHandler(alertPrompt)).toBe(true);
     });
 
+    it('does not steal Add-description-to-alarm-titled prompts that mention Peer Band in the rule name', () => {
+        const alarmPrompt =
+            'Add a description to the alarm titled "Module 2 Pressure — Alert Test Peer Band ±2σ — outside ±2σ" on the dashboard with UID = afq7tc6hl1m9sb that says ". Description for Pressure Panel"';
+        expect(messageMentionsPeerBandPanelCreate(alarmPrompt)).toBe(false);
+        expect(parseAddPeerBandPanelRequest(alarmPrompt)).toBeNull();
+        expect(messageHasProgrammaticHandler(alarmPrompt)).toBe(true);
+    });
+
     it('parses Modules 1 and 3 through 8 peer lists', () => {
         expect(extractPeerModulesFromMessage('average of Modules 1 and 3 through 8', 2)).toEqual([
             1, 3, 4, 5, 6, 7, 8,

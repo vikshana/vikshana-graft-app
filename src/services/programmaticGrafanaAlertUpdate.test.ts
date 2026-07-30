@@ -178,4 +178,74 @@ describe('runProgrammaticGrafanaAlertUpdate', () => {
         expect(result.ok).toBe(false);
         expect(result.error).toMatch(/was not found/i);
     });
+
+    it('patches description when the alert is identified by panel title + dashboard UID', async () => {
+        const changePrompt =
+            'Change the alert for the panel titled Module 2 Pressure — Alert Test Peer Band ±2σ on the dashboard with the UID = afq7tc6hl1m9sb to have the description of "Alert on Module 2"';
+        let putBody: Record<string, unknown> | undefined;
+        mockFetch.mockImplementation((req: { url: string; method?: string; data?: unknown }) => {
+            if (
+                req.url.includes('/alert-rules') &&
+                (req.method ?? 'GET') === 'GET' &&
+                !/\/alert-rules\/[\w-]+$/.test(req.url)
+            ) {
+                return of({
+                    data: [
+                        {
+                            uid: 'rule-peer-band',
+                            title: 'Module 2 Pressure — Alert Test Peer Band ±2σ — outside ±2σ',
+                            folderUID: 'folder-1',
+                            ruleGroup: 'graft-afq7tc6hl1m9sb-3',
+                            annotations: {
+                                __dashboardUid__: 'afq7tc6hl1m9sb',
+                                __panelId__: '3',
+                                description: 'old description',
+                            },
+                        },
+                    ],
+                });
+            }
+            if (/\/alert-rules\/rule-peer-band$/.test(req.url) && (req.method ?? 'GET') === 'GET') {
+                return of({
+                    data: {
+                        uid: 'rule-peer-band',
+                        title: 'Module 2 Pressure — Alert Test Peer Band ±2σ — outside ±2σ',
+                        folderUID: 'folder-1',
+                        ruleGroup: 'graft-afq7tc6hl1m9sb-3',
+                        annotations: {
+                            __dashboardUid__: 'afq7tc6hl1m9sb',
+                            __panelId__: '3',
+                            description: 'old description',
+                        },
+                        condition: 'H',
+                        data: [],
+                        for: '1m',
+                        noDataState: 'NoData',
+                        execErrState: 'Alerting',
+                        orgId: 1,
+                    },
+                });
+            }
+            if (/\/alert-rules\/rule-peer-band$/.test(req.url) && req.method === 'PUT') {
+                putBody = req.data as Record<string, unknown>;
+                return of({
+                    data: {
+                        uid: 'rule-peer-band',
+                        title: 'Module 2 Pressure — Alert Test Peer Band ±2σ — outside ±2σ',
+                    },
+                });
+            }
+            return throwError(() => new Error(`unexpected url ${req.url} method ${req.method}`));
+        });
+
+        const req = parseGrafanaAlertUpdateRequest(changePrompt)!;
+        expect(req.ruleTitle).toBeUndefined();
+        expect(req.panelTitle).toBe('Module 2 Pressure — Alert Test Peer Band ±2σ');
+        const result = await runProgrammaticGrafanaAlertUpdate(req, 205);
+        expect(result.ok).toBe(true);
+        expect(result.description).toBe('Alert on Module 2');
+        const annotations = putBody?.annotations as Record<string, string>;
+        expect(annotations.description).toBe('Alert on Module 2');
+        expect(annotations.__dashboardUid__).toBe('afq7tc6hl1m9sb');
+    });
 });

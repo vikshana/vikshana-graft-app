@@ -117,11 +117,14 @@ function extractQuotedPanelTitle(text: string): string | undefined {
         // "on the panel "…""
         /\bon\s+(?:the\s+)?panel\s+"([^"]+)"/i,
         /\bon\s+(?:the\s+)?panel\s+'([^']+)'/i,
+        // Unquoted: "panel titled Module 2 Pressure — … on the dashboard …"
+        /\bpanel\s+titled\s+(.+?)\s+on\s+(?:the\s+)?dashboard\b/i,
+        /\bpanel\s+(?:named|called)\s+(.+?)\s+on\s+(?:the\s+)?dashboard\b/i,
     ];
     for (const re of patterns) {
         const m = text.match(re);
         if (m?.[1]?.trim()) {
-            return m[1].trim();
+            return m[1].trim().replace(/[.,;:]+$/, '');
         }
     }
     return undefined;
@@ -236,11 +239,12 @@ function toGrafanaDuration(amountRaw: string, unitRaw: string): string | undefin
 }
 
 function extractRuleTitle(text: string): string | undefined {
-    // Prefer "alert named X" / "alert rule named X" before contact-point "named".
+    // Prefer "alert/alarm named|titled X" before contact-point "named".
+    // Operators often say "alarm" for Grafana-managed alert rules.
     const patterns = [
-        /\b(?:grafana[- ]?managed\s+)?alert(?:\s+rule)?\s+named\s+"([^"]+)"/i,
-        /\b(?:grafana[- ]?managed\s+)?alert(?:\s+rule)?\s+named\s+'([^']+)'/i,
-        /\b(?:grafana[- ]?managed\s+)?alert(?:\s+rule)?\s+named\s+([A-Za-z0-9][A-Za-z0-9 ._-]*?)(?=\s+for\s+(?:the\s+)?panel\b|\s+on\s+the\s+dashboard\b|[.,;\n]|$)/i,
+        /\b(?:grafana[- ]?managed\s+)?(?:alert|alarm)(?:\s+rule)?\s+(?:named|titled|called)\s+"([^"]+)"/i,
+        /\b(?:grafana[- ]?managed\s+)?(?:alert|alarm)(?:\s+rule)?\s+(?:named|titled|called)\s+'([^']+)'/i,
+        /\b(?:grafana[- ]?managed\s+)?(?:alert|alarm)(?:\s+rule)?\s+(?:named|titled|called)\s+([A-Za-z0-9][A-Za-z0-9 ._-]*?)(?=\s+for\s+(?:the\s+)?panel\b|\s+on\s+the\s+dashboard\b|[.,;\n]|$)/i,
         /\balert\s+rule\s+(?:titled|called)\s+"([^"]+)"/i,
         /\balert\s+rule\s+(?:titled|called)\s+'([^']+)'/i,
         // "for the GraftAI Rule on the panel …"
@@ -356,20 +360,59 @@ function extractPendingFor(text: string): string | undefined {
 }
 
 function extractQuotedField(text: string, field: 'summary' | 'description'): string | undefined {
-    const re = new RegExp(
-        `\\b(?:make\\s+the\\s+|the\\s+|set\\s+(?:the\\s+)?)?${field}\\s+"([^"]+)"`,
-        'i'
-    );
-    const m = text.match(re);
-    if (m?.[1]?.trim()) {
-        return m[1].trim();
+    // "description of "X"" / "to have the description of "X"" / "make the summary "X"" / "description "X""
+    const patterns = [
+        new RegExp(
+            `\\b(?:to\\s+have\\s+(?:the\\s+)?)?(?:(?:make|have|set|change|add)\\s+(?:a\\s+|the\\s+)?)?(?:the\\s+)?${field}\\s+of\\s+"([^"]*)"`,
+            'i'
+        ),
+        new RegExp(
+            `\\b(?:to\\s+have\\s+(?:the\\s+)?)?(?:(?:make|have|set|change|add)\\s+(?:a\\s+|the\\s+)?)?(?:the\\s+)?${field}\\s+of\\s+'([^']*)'`,
+            'i'
+        ),
+        new RegExp(
+            `\\b(?:make\\s+the\\s+|the\\s+|set\\s+(?:the\\s+)?)?${field}\\s+"([^"]*)"`,
+            'i'
+        ),
+        new RegExp(
+            `\\b(?:make\\s+the\\s+|the\\s+|set\\s+(?:the\\s+)?)?${field}\\s+'([^']*)'`,
+            'i'
+        ),
+    ];
+    for (const re of patterns) {
+        const m = text.match(re);
+        if (m?.[1] != null && m[1].trim()) {
+            return m[1].trim();
+        }
     }
-    const single = new RegExp(
-        `\\b(?:make\\s+the\\s+|the\\s+|set\\s+(?:the\\s+)?)?${field}\\s+'([^']+)'`,
-        'i'
-    );
-    const m2 = text.match(single);
-    return m2?.[1]?.trim();
+    // "Add a description to the alarm titled … that says "X""
+    if (field === 'description' || field === 'summary') {
+        const withField =
+            text.match(
+                new RegExp(
+                    `\\b(?:add|set|make|change)\\s+(?:a\\s+|the\\s+)?${field}\\b[\\s\\S]*?\\bthat\\s+says\\s+"([^"]*)"`,
+                    'i'
+                )
+            ) ??
+            text.match(
+                new RegExp(
+                    `\\b(?:add|set|make|change)\\s+(?:a\\s+|the\\s+)?${field}\\b[\\s\\S]*?\\bthat\\s+says\\s+'([^']*)'`,
+                    'i'
+                )
+            );
+        if (withField?.[1] != null && withField[1].trim()) {
+            return withField[1].trim();
+        }
+        // Bare "that says" only for description (never steal into summary).
+        if (field === 'description') {
+            const says =
+                text.match(/\bthat\s+says\s+"([^"]*)"/i) ?? text.match(/\bthat\s+says\s+'([^']*)'/i);
+            if (says?.[1] != null && says[1].trim()) {
+                return says[1].trim();
+            }
+        }
+    }
+    return undefined;
 }
 
 function extractLabel(text: string): Record<string, string> | undefined {
@@ -431,8 +474,11 @@ function messageRestrictsExtraMetadata(text: string): boolean {
 }
 
 export interface GrafanaAlertUpdateRequest {
-    /** Existing rule title to update (required). */
-    ruleTitle: string;
+    /**
+     * Existing rule title to update.
+     * Optional when panelTitle + dashboardUid identify the rule instead.
+     */
+    ruleTitle?: string;
     /** Optional dashboard UID to disambiguate when several rules share the title. */
     dashboardUid?: string;
     /** Optional panel title to disambiguate / verify the linked panel. */
@@ -478,19 +524,54 @@ export function messageMentionsGrafanaAlertUpdate(message: string): boolean {
         return true;
     }
 
+    const hasExplicitUpdate =
+        /\b(update|edit|patch|modify|change)\s+(?:the\s+)?(?:grafana[- ]?managed\s+)?(?:alert|alarm)(?:\s+rule)?\b/i.test(
+            text
+        ) ||
+        (/\b(update|edit|patch)\b/i.test(text) &&
+            /\b(?:alert|alarm)(?:\s+rule)?\s+(?:named|titled|called)\b/i.test(text));
+
+    const hasPanelRef =
+        /\bpanel\s+(?:titled|named|called|of)\b/i.test(text) ||
+        /\bfor\s+(?:the\s+)?panel\b/i.test(text) ||
+        /\bon\s+(?:the\s+)?panel\b/i.test(text);
+    const hasMetadataPatch =
+        /\b(description|summary|label|annotation|notify|contact\s*point|evaluation\s+group|rule\s+group)\b/i.test(
+            text
+        );
+
+    // "Change the alert for the panel titled … to have the description of …"
+    // — identify the rule by panel + dashboard, not by "alert rule named".
+    if (
+        hasExplicitUpdate &&
+        hasPanelRef &&
+        hasMetadataPatch &&
+        !/\bcreate\b/i.test(text)
+    ) {
+        return true;
+    }
+
+    // "Add a description to the alarm titled … that says …"
+    // Do not steal full creates that also say "Make the summary/description …".
+    if (
+        /\b(add|set|make)\s+(?:a\s+|the\s+)?(description|summary|label|annotation)\b/i.test(text) &&
+        /\b(?:alert|alarm)(?:\s+rule)?\s+(?:named|titled|called)\b/i.test(text) &&
+        !(
+            /\bcreate\b/i.test(text) &&
+            (/\bpanel\s+titled\b/i.test(text) ||
+                /\bfor\s+(?:the\s+)?panel\b/i.test(text) ||
+                /\bgrafana[- ]?managed\s+alert\b/i.test(text))
+        )
+    ) {
+        return true;
+    }
+
     const hasNamedRule =
-        /\balert(?:\s+rule)?\s+named\s+/i.test(text) ||
+        /\b(?:alert|alarm)(?:\s+rule)?\s+(?:named|titled|called)\s+/i.test(text) ||
         /\balert\s+rule\s+(?:titled|called)\s+/i.test(text);
     if (!hasNamedRule) {
         return false;
     }
-
-    // "Update the alert rule named…" / "Modify the alert rule…" — NOT "Modify the panel queries".
-    const hasExplicitUpdate =
-        /\b(update|edit|patch|modify|change)\s+(?:the\s+)?(?:grafana[- ]?managed\s+)?alert(?:\s+rule)?\b/i.test(
-            text
-        ) ||
-        (/\b(update|edit|patch)\b/i.test(text) && /\balert(?:\s+rule)?\s+named\b/i.test(text));
 
     // Full create: "Create a Grafana-managed alert named X for the panel titled…"
     // Must NOT match when the prompt centers on Update of an existing rule —
@@ -498,7 +579,7 @@ export function messageMentionsGrafanaAlertUpdate(message: string): boolean {
     const isFullAlertCreateFromPanel =
         !hasExplicitUpdate &&
         /\bcreate\b/i.test(text) &&
-        /\b(grafana[- ]?managed\s+)?alert\b/i.test(text) &&
+        /\b(grafana[- ]?managed\s+)?(?:alert|alarm)\b/i.test(text) &&
         (/\bpanel\s+titled\b/i.test(text) ||
             /\bfor\s+(?:the\s+)?panel\b/i.test(text) ||
             /\bdashboard\s+with\s+uid\b/i.test(text));
@@ -526,23 +607,44 @@ export function parseGrafanaAlertUpdateRequest(message: string): GrafanaAlertUpd
         return null;
     }
     const ruleTitle = extractRuleTitle(text);
-    if (!ruleTitle) {
+    const panelTitle = extractQuotedPanelTitle(text);
+    const dashboardUid =
+        extractAllDashboardUids(text)[0] ?? extractDashboardUidFromMessage(text);
+    // Need either a rule name, or panel + dashboard to locate the existing rule.
+    if (!ruleTitle && !(panelTitle && dashboardUid)) {
+        return null;
+    }
+    // Require at least one patchable field so vague "change the alert…" is not empty.
+    const summary = extractQuotedField(text, 'summary');
+    const description = extractQuotedField(text, 'description');
+    const labels = extractLabel(text);
+    const customAnnotations = extractCustomAnnotation(text);
+    const contactPoint = extractContactPoint(text);
+    const ruleGroup = extractRuleGroup(text);
+    const hasPatch =
+        Boolean(summary) ||
+        Boolean(description) ||
+        Boolean(labels) ||
+        Boolean(customAnnotations) ||
+        Boolean(contactPoint) ||
+        Boolean(ruleGroup);
+    if (!hasPatch) {
         return null;
     }
     return {
         ruleTitle,
-        dashboardUid: extractAllDashboardUids(text)[0] ?? extractDashboardUidFromMessage(text),
-        panelTitle: extractQuotedPanelTitle(text),
-        contactPoint: extractContactPoint(text),
+        dashboardUid,
+        panelTitle,
+        contactPoint,
         contactPointEmail: extractContactPointEmail(text),
         createContactPoint: messageWantsNewContactPoint(text),
-        ruleGroup: extractRuleGroup(text),
+        ruleGroup,
         every: extractEvalInterval(text),
-        labels: extractLabel(text),
+        labels,
         restrictMetadata: messageRestrictsExtraMetadata(text),
-        summary: extractQuotedField(text, 'summary'),
-        description: extractQuotedField(text, 'description'),
-        customAnnotations: extractCustomAnnotation(text),
+        summary,
+        description,
+        customAnnotations,
     };
 }
 
