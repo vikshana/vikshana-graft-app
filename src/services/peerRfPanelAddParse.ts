@@ -9,7 +9,8 @@ export function peerRfPanelTitle(moduleNumber: number): string {
 /** Default (Module 5) title — kept for back-compat where no module is specified. */
 export const PEER_RF_PANEL_TITLE = peerRfPanelTitle(5);
 
-export const DEFAULT_PEER_RF_MODULE = 5;
+export const DEFAULT_PEER_RF_MODULE = 5; // example prompts / docs only — create path requires an explicit module
+
 
 export interface AddPeerRfPanelRequest {
     dashboardUid?: string;
@@ -30,8 +31,15 @@ export function messageMentionsAddPeerRfPanel(message: string): boolean {
     }
     return (
         (/\b(add|create|new)\b/i.test(text) && /\bpeer\s*rf\b/i.test(text)) ||
-        (/\brandomforest\s+vs\s+peers\b/i.test(text) && /\b(add|create|panel)\b/i.test(text)) ||
-        (/\bpeer\s+random\s*forest\b/i.test(text) && /\b(influx|panel|dashboard)\b/i.test(text))
+        (/\brandom\s*forest\s+vs\s+peers\b/i.test(text) && /\b(add|create|panel)\b/i.test(text)) ||
+        (/\bpeer\s+random\s*forest\b/i.test(text) && /\b(influx|panel|dashboard)\b/i.test(text)) ||
+        // "RandomForest anomaly detection" + module + peer modules
+        (/\brandom\s*forest\b/i.test(text) &&
+            /\bpeer\s+modules?\b/i.test(text) &&
+            /\b(add|create|panel)\b/i.test(text) &&
+            !/\bhistory\s+comparison\b/i.test(text) &&
+            !/\bown\s+history\b/i.test(text) &&
+            !/\bpeer\s*band\b/i.test(text))
     );
 }
 

@@ -162,13 +162,20 @@ export function clearActiveCloneIntent(): void {
 /** LLM-only message: forces save on Continue (never shown in chat bubble). */
 export function buildForcedCloneContinueLlmMessage(meta: CloneSessionMeta): string {
     const effective = getEffectiveCloneFieldsFromIntent(meta.intent);
-    const targetMachine =
-        effective.requestedMachine ?? meta.requestedMachine ?? '2505-200033';
-    const title =
-        effective.requestedTitle ?? meta.requestedTitle ?? targetMachine;
-    const sourceMachine =
-        effective.sourceMachineId ?? meta.sourceMachineId ?? '2103-176030';
-    const sourceUid = meta.sourceUid ?? 'idHkqdqnk';
+    const targetMachine = effective.requestedMachine ?? meta.requestedMachine;
+    const title = effective.requestedTitle ?? meta.requestedTitle ?? targetMachine;
+    const sourceMachine = effective.sourceMachineId ?? meta.sourceMachineId;
+    const sourceUid = meta.sourceUid;
+    // Require machines + title from intent/session — never invent Exsolve/Keysight ids.
+    // sourceUid may still be unresolved on the first Continue nudge; resolve via search.
+    if (!targetMachine || !sourceMachine || !title) {
+        return (
+            `Continue — MANDATORY save step for dashboard clone.\n\n` +
+            `Original request: ${meta.intent}\n` +
+            `Clone session is missing required fields (target machine / source machine / title). ` +
+            `Re-state the full clone request with those ids — do not invent machine ids or dashboard uids.\n`
+        );
+    }
     const chunkNote =
         meta.cloneChunkIndex != null &&
         meta.cloneTotalChunks != null &&
@@ -176,11 +183,15 @@ export function buildForcedCloneContinueLlmMessage(meta: CloneSessionMeta): stri
             ? `\nResume panel batch ${meta.cloneChunkIndex + 1}/${meta.cloneTotalChunks} (target uid=${meta.targetUid ?? 'from search'}).\n`
             : '\n';
 
+    const sourceStep = sourceUid
+        ? `1. get_dashboard_by_uid uid=${sourceUid} (template ${sourceMachine})\n`
+        : `1. search_dashboards for "${sourceMachine}" and get_dashboard_by_uid on the matching template dashboard (do not invent a uid)\n`;
+
     return (
         `Continue — MANDATORY save step for dashboard clone.\n\n` +
         `Original request: ${meta.intent}\n${chunkNote}` +
         `Required actions THIS turn (do not stop after lookup or summary):\n` +
-        `1. get_dashboard_by_uid uid=${sourceUid} (template ${sourceMachine})\n` +
+        sourceStep +
         `2. search_dashboards for "${title}"\n` +
         `3. Build dashboard JSON: copy all panels from step 1, title "${title}", ` +
         `replace every Prometheus/Loki machine label ${sourceMachine} → ${targetMachine}\n` +

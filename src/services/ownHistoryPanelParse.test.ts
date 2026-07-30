@@ -39,12 +39,11 @@ describe('ownHistoryPanelParse — target metric', () => {
         expect(req?.metricLabel).toBeUndefined();
     });
 
-    it('falls back to Module 5 when no target is named', () => {
+    it('does not invent Module 5 when no target is named', () => {
         const req = parseAddOwnHistoryPanelRequest(
             'Add a vs. Own History (±2σ) panel on the dashboard with UID = afq7tc6hl1m9sb.'
         );
-        expect(req?.moduleNumber).toBe(5);
-        expect(req?.metricLabel).toBeUndefined();
+        expect(req).toBeNull();
     });
 
     const alertTestPrompt =

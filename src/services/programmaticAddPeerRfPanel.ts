@@ -7,17 +7,55 @@ import { normalizeUpdateDashboardArgs } from './updateDashboardArgs';
 import { listDashboardPanels, type DashboardPanelEntry } from './panelDiscovery';
 import { repairInfluxFluxPanel, sanitizeInfluxFluxPanel } from './sanitizeInfluxFluxPanel';
 import type { AddPeerRfPanelRequest } from './peerRfPanelAddParse';
-import { DEFAULT_PEER_RF_MODULE, peerRfPanelTitle } from './peerRfPanelAddParse';
+import { peerRfPanelTitle } from './peerRfPanelAddParse';
 import { parseSearchHitsFromMcpText } from './dashboardSearchParse';
 import { isMachineId } from './dashboardCloneParse';
+import { inferMachineIdFromDashboardTitle } from './programmaticDashboardResolve';
+import { findAnyFluxReferencePanel, getPanelTargetList } from './fluxPeerBandFix';
 
 type PanelRecord = Record<string, unknown>;
+
+function datasourceUidOf(value: unknown): string | undefined {
+    if (value && typeof value === 'object' && 'uid' in (value as Record<string, unknown>)) {
+        const uid = (value as { uid?: unknown }).uid;
+        return typeof uid === 'string' && uid ? uid : undefined;
+    }
+    return typeof value === 'string' && value ? value : undefined;
+}
+
+function influxDatasourceUidFromDashboard(panels: unknown): string | undefined {
+    const fluxRef = findAnyFluxReferencePanel(Array.isArray(panels) ? panels : []);
+    if (fluxRef) {
+        const fromTarget = datasourceUidOf(fluxRef.targetA?.datasource);
+        if (fromTarget) {
+            return fromTarget;
+        }
+        const fromPanel = datasourceUidOf(fluxRef.panel.datasource);
+        if (fromPanel) {
+            return fromPanel;
+        }
+    }
+    const entries = listDashboardPanels(panels);
+    for (const e of entries) {
+        const panelDs = e.panel.datasource as { type?: string; uid?: string } | undefined;
+        if (panelDs && /influx/i.test(panelDs.type ?? '') && panelDs.uid) {
+            return panelDs.uid;
+        }
+        for (const target of getPanelTargetList(e.panel)) {
+            const ds = (target as PanelRecord).datasource as { type?: string; uid?: string } | undefined;
+            if (ds && /influx/i.test(ds.type ?? '') && ds.uid) {
+                return ds.uid;
+            }
+        }
+    }
+    return undefined;
+}
 
 /** Fixture-aligned panel template (queries use model=peer_rf), scoped to the requested module. */
 function buildPeerRfPanelTemplate(
     machineId: string,
     moduleNumber: number,
-    influxDatasourceUid = 'ffmk2neut49vkf'
+    influxDatasourceUid: string
 ): PanelRecord {
     const m = machineId.replace(/"/g, '\\"');
     const field = `Module${moduleNumber}_Current_A`;
@@ -85,6 +123,8 @@ export interface ProgrammaticAddPeerRfPanelResult {
     dashboardUid?: string;
     dashboardTitle?: string;
     panelTitle?: string;
+    machineId?: string;
+    moduleNumber?: number;
     version?: number;
 }
 
@@ -195,11 +235,6 @@ export async function runProgrammaticAddPeerRfPanel(
         return { ok: false, error: resolved.error, toolExecutions };
     }
 
-    const machineId =
-        request.machineId && isMachineId(request.machineId) ? request.machineId : '2406-176021';
-    const moduleNumber = request.moduleNumber ?? DEFAULT_PEER_RF_MODULE;
-    const panelTitle = peerRfPanelTitle(moduleNumber);
-
     const getStep = pendingTool('get_dashboard_by_uid');
     toolExecutions.push(getStep);
     const fetch = await callMcpTool(mcpClient, 'get_dashboard_by_uid', { uid: resolved.uid });
@@ -218,6 +253,37 @@ export async function runProgrammaticAddPeerRfPanel(
     const proposed = JSON.parse(JSON.stringify(baseline)) as Record<string, unknown>;
     const entries = listDashboardPanels(proposed.panels);
 
+    const machineId =
+        request.machineId && isMachineId(request.machineId)
+            ? request.machineId
+            : inferMachineIdFromDashboardTitle(dashboardTitle);
+    if (!machineId) {
+        return {
+            ok: false,
+            error:
+                'Could not determine machine id from the prompt or dashboard title ' +
+                `(got "${dashboardTitle ?? ''}"). Include the machine id (e.g. 2505-200033) or use a title like "2505-200033 / Keysight".`,
+            toolExecutions,
+            dashboardUid: resolved.uid,
+            dashboardTitle,
+        };
+    }
+
+    const moduleNumber = request.moduleNumber;
+    if (moduleNumber == null) {
+        return {
+            ok: false,
+            error:
+                'Which module should the peer-RF panel use? Name it in the prompt (e.g. Module 2 Current — RandomForest vs Peers).',
+            toolExecutions,
+            dashboardUid: resolved.uid,
+            dashboardTitle,
+            machineId,
+        };
+    }
+
+    const panelTitle = peerRfPanelTitle(moduleNumber);
+
     const existing = findPanelByTitleContains(entries, panelTitle);
     if (existing) {
         return {
@@ -226,12 +292,27 @@ export async function runProgrammaticAddPeerRfPanel(
             toolExecutions,
             dashboardUid: resolved.uid,
             dashboardTitle,
+            machineId,
+            moduleNumber,
         };
     }
 
     const peerRef = findModule5PeerBandPanel(entries);
+    const influxUid = influxDatasourceUidFromDashboard(proposed.panels);
+    if (!influxUid) {
+        return {
+            ok: false,
+            error:
+                'No Influx datasource UID found on this dashboard. Add or keep at least one working Influx/Flux panel, then retry.',
+            toolExecutions,
+            dashboardUid: resolved.uid,
+            dashboardTitle,
+            machineId,
+            moduleNumber,
+        };
+    }
 
-    const template = buildPeerRfPanelTemplate(machineId, moduleNumber);
+    const template = buildPeerRfPanelTemplate(machineId, moduleNumber, influxUid);
     const sanitized = sanitizeInfluxFluxPanel(template) as PanelRecord;
     const repaired = repairInfluxFluxPanel(sanitized, baseline.panels as unknown[] | undefined);
     const newPanel = repaired.panel as PanelRecord;
@@ -262,6 +343,8 @@ export async function runProgrammaticAddPeerRfPanel(
             toolExecutions,
             dashboardUid: resolved.uid,
             dashboardTitle,
+            machineId,
+            moduleNumber,
         };
     }
 
@@ -274,6 +357,8 @@ export async function runProgrammaticAddPeerRfPanel(
         dashboardUid: resolved.uid,
         dashboardTitle,
         panelTitle,
+        machineId,
+        moduleNumber,
         version,
     };
 }
@@ -286,12 +371,18 @@ export function formatAddPeerRfPanelReply(result: ProgrammaticAddPeerRfPanelResu
             `Ensure the ML exporter has run **peer-RF backfill** (\`model=peer_rf\` in Influx) before bands appear.`
         );
     }
+    const machineLine = result.machineId ? `- **Machine:** \`${result.machineId}\`\n` : '';
+    const field =
+        result.moduleNumber != null ? `Module${result.moduleNumber}_Current_A` : 'ModuleN_Current_A';
     return (
         `### Done (peer-RF panel added) (Graft build ${buildNumber})\n\n` +
         `- **Dashboard:** ${result.dashboardTitle ?? result.dashboardUid} (\`${result.dashboardUid}\`)\n` +
         `- **Panel:** ${result.panelTitle}\n` +
+        machineLine +
         (result.version != null ? `- **Version:** ${result.version}\n` : '') +
-        `\nHard-refresh (**Cmd+Shift+R**). Use the dashboard time picker for historical incidents. ` +
-        `Bands read \`ml_predictions\` where \`model=peer_rf\`. Compare with the **vs. Peer Band** Flux panel.`
+        `\nHard-refresh (**Cmd+Shift+R**). Queries filter Influx \`ml_predictions\` where \`model=peer_rf\` and \`field=${field}\`. ` +
+        `If the panel shows no data, the peer-RF exporter must have written bands for this machine/module — ` +
+        `run peer-RF backfill for \`${result.machineId ?? 'MACHINE'}\` / \`${field}\`, then refresh. ` +
+        `Compare with the **vs. Peer Band** Flux panel.`
     );
 }

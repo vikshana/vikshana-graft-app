@@ -6,6 +6,7 @@ import { normalizeUpdateDashboardArgs } from './updateDashboardArgs';
 import { listDashboardPanels, type DashboardPanelEntry } from './panelDiscovery';
 import { parseSearchHitsFromMcpText } from './dashboardSearchParse';
 import { isMachineId } from './dashboardCloneParse';
+import { inferMachineIdFromDashboardTitle } from './programmaticDashboardResolve';
 import { repairInfluxFluxPanel, sanitizeInfluxFluxPanel } from './sanitizeInfluxFluxPanel';
 import type { AddPeerBandPanelRequest } from './peerBandPanelAddParse';
 import { resolvePeerBandMetricFields } from './peerBandPanelAddParse';
@@ -60,13 +61,13 @@ function maxPanelId(entries: DashboardPanelEntry[]): number {
     return max;
 }
 
-function influxUidFromDashboard(panels: unknown): string {
+function influxUidFromDashboard(panels: unknown): string | undefined {
     const ref = findAnyFluxReferencePanel(Array.isArray(panels) ? panels : []);
     const uid = ref?.targetA?.datasource;
     if (uid && typeof uid === 'object' && 'uid' in (uid as Record<string, unknown>)) {
         return String((uid as { uid: string }).uid);
     }
-    return 'AGC54U-Vk';
+    return undefined;
 }
 
 async function resolveDashboard(
@@ -183,18 +184,24 @@ export async function runProgrammaticAddPeerBandPanel(
 
     const proposed = JSON.parse(JSON.stringify(loaded.dashboard)) as Record<string, unknown>;
     const entries = listDashboardPanels(proposed.panels);
-    const machineFromTitle =
-        typeof proposed.title === 'string'
-            ? proposed.title.match(/\b(\d{4}-\d+)\b/)?.[1] ??
-              proposed.title.match(/\b([A-Za-z0-9]+-[A-Za-z0-9]+)\b/)?.[1]
-            : undefined;
+    const dashboardTitle = typeof proposed.title === 'string' ? proposed.title : resolved.title;
     const machineId =
         request.machineId && isMachineId(request.machineId)
             ? request.machineId
-            : machineFromTitle && isMachineId(machineFromTitle)
-              ? machineFromTitle
-              : '2406-176021';
-    const dashboardTitle = typeof proposed.title === 'string' ? proposed.title : resolved.title;
+            : inferMachineIdFromDashboardTitle(
+                  typeof proposed.title === 'string' ? proposed.title : dashboardTitle
+              );
+    if (!machineId) {
+        return {
+            ok: false,
+            error:
+                'Could not determine machine id from the prompt or dashboard title ' +
+                `(got "${dashboardTitle ?? ''}"). Include the machine id or use a title like "2505-200033 / Keysight".`,
+            toolExecutions,
+            dashboardUid: resolved.uid,
+            dashboardTitle,
+        };
+    }
     const mod = request.moduleNumber;
     const peerModules =
         request.peerModules ?? [1, 2, 3, 4, 5, 6, 7, 8].filter((n) => n !== mod);
@@ -206,10 +213,22 @@ export async function runProgrammaticAddPeerBandPanel(
     const existing = entries.find((e) => e.title === title);
     const updatedExisting = Boolean(existing);
 
+    const influxUid = influxUidFromDashboard(proposed.panels);
+    if (!influxUid) {
+        return {
+            ok: false,
+            error:
+                'No Influx datasource UID found on this dashboard. Add or keep at least one working Influx/Flux panel, then retry.',
+            toolExecutions,
+            dashboardUid: resolved.uid,
+            dashboardTitle,
+        };
+    }
+
     const raw = buildPeerBandPanel({
         machineId,
         moduleNumber: mod,
-        influxDatasourceUid: influxUidFromDashboard(proposed.panels),
+        influxDatasourceUid: influxUid,
         panelTitle: title,
         peerModules,
         actualField: metric.actualField,

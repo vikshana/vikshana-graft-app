@@ -59,6 +59,7 @@ describe('runProgrammaticAddPeerRfPanel — module scope', () => {
         expect(blob).toContain('Module3_Current_A');
         expect(blob).not.toContain('Module5_Current_A');
         expect(blob).toContain('Module 3 (Actual)');
+        expect(blob).toContain('2505-200033');
     });
 
     it('defaults to Module 5 when no module is given', async () => {
@@ -67,6 +68,24 @@ describe('runProgrammaticAddPeerRfPanel — module scope', () => {
             dashboardUid: 'afq7tc6hl1m9sb',
             machineId: '2505-200033',
         });
-        expect(result.panelTitle).toBe('Module 5 Current — RandomForest vs Peers (Influx)');
+        expect(result.ok).toBe(false);
+        expect(result.error).toMatch(/Which module/i);
+    });
+
+    it('uses machine id from Keysight dashboard title when request omits machineId', async () => {
+        const capture: { saved?: { panels?: SavedPanel[] } } = {};
+        const result = await runProgrammaticAddPeerRfPanel(client(capture), {
+            dashboardUid: 'afq7tc6hl1m9sb',
+            moduleNumber: 2,
+        });
+        expect(result.ok).toBe(true);
+        expect(result.machineId).toBe('2505-200033');
+        const added = capture.saved?.panels?.find((p) => p.title?.includes('RandomForest vs Peers'));
+        const blob = JSON.stringify(added);
+        expect(blob).toContain('2505-200033');
+        expect(blob).not.toContain('2406-176021');
+        expect(blob).toContain('Module2_Current_A');
+        expect(added?.targets?.length).toBe(4);
+        expect(added?.targets?.every((t) => Boolean(t.query))).toBe(true);
     });
 });

@@ -133,7 +133,7 @@ export function parseAddOwnHistoryPanelRequest(message: string): AddOwnHistoryPa
         }
     }
     if (moduleNumber == null && metricLabel == null) {
-        // No explicit target phrase — fall back to a bare "module N", else legacy default (5).
+        // No explicit target phrase — require a bare "module N" (do not invent Module 5).
         const modMatch = text.match(/\bmodule\s*(\d+)\b/i);
         if (modMatch?.[1]) {
             const n = parseInt(modMatch[1], 10);
@@ -142,7 +142,7 @@ export function parseAddOwnHistoryPanelRequest(message: string): AddOwnHistoryPa
             }
         }
         if (moduleNumber == null) {
-            moduleNumber = 5;
+            return null;
         }
     }
     // Prefer module number embedded in an explicit panel title (e.g. "Module 1 Current — …").

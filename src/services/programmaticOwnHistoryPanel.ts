@@ -6,6 +6,7 @@ import { normalizeUpdateDashboardArgs } from './updateDashboardArgs';
 import { listDashboardPanels, type DashboardPanelEntry } from './panelDiscovery';
 import { parseSearchHitsFromMcpText } from './dashboardSearchParse';
 import { isMachineId } from './dashboardCloneParse';
+import { inferMachineIdFromDashboardTitle } from './programmaticDashboardResolve';
 import { repairInfluxFluxPanel, sanitizeInfluxFluxPanel } from './sanitizeInfluxFluxPanel';
 import type {
     AddOwnHistoryPanelRequest,
@@ -222,13 +223,13 @@ function maxPanelId(entries: DashboardPanelEntry[]): number {
     return max;
 }
 
-function influxUidFromDashboard(panels: unknown): string {
+function influxUidFromDashboard(panels: unknown): string | undefined {
     const ref = findAnyFluxReferencePanel(Array.isArray(panels) ? panels : []);
     const uid = ref?.targetA?.datasource;
     if (uid && typeof uid === 'object' && 'uid' in (uid as Record<string, unknown>)) {
         return String((uid as { uid: string }).uid);
     }
-    return 'AGC54U-Vk';
+    return undefined;
 }
 
 function adaptOwnHistoryPanel(template: PanelRecord, fromModule: number, toModule: number): PanelRecord {
@@ -339,17 +340,24 @@ export async function runProgrammaticAddOwnHistoryPanel(
 
     const proposed = JSON.parse(JSON.stringify(loaded.dashboard)) as Record<string, unknown>;
     const entries = listDashboardPanels(proposed.panels);
-    const machineFromTitle =
-        typeof proposed.title === 'string'
-            ? proposed.title.match(/\b(\d{4}-\d+)\b/)?.[1]
-            : undefined;
+    const dashboardTitle = typeof proposed.title === 'string' ? proposed.title : resolved.title;
     const machineId =
         request.machineId && isMachineId(request.machineId)
             ? request.machineId
-            : machineFromTitle && isMachineId(machineFromTitle)
-              ? machineFromTitle
-              : '2406-176021';
-    const dashboardTitle = typeof proposed.title === 'string' ? proposed.title : resolved.title;
+            : inferMachineIdFromDashboardTitle(
+                  typeof proposed.title === 'string' ? proposed.title : dashboardTitle
+              );
+    if (!machineId) {
+        return {
+            ok: false,
+            error:
+                'Could not determine machine id from the prompt or dashboard title ' +
+                `(got "${dashboardTitle ?? ''}"). Include the machine id or use a title like "2505-200033 / Keysight".`,
+            toolExecutions,
+            dashboardUid: resolved.uid,
+            dashboardTitle,
+        };
+    }
 
     let title: string;
     let raw: PanelRecord;
@@ -377,16 +385,38 @@ export async function runProgrammaticAddOwnHistoryPanel(
                 dashboardTitle,
             };
         }
+        const influxUid = source.datasourceUid ?? influxUidFromDashboard(proposed.panels);
+        if (!influxUid) {
+            return {
+                ok: false,
+                error:
+                    'No Influx datasource UID found on this dashboard. Add or keep at least one working Influx/Flux panel, then retry.',
+                toolExecutions,
+                dashboardUid: resolved.uid,
+                dashboardTitle,
+            };
+        }
         raw = buildOwnHistoryPanelForSignal({
             machineId: source.machine ?? machineId,
             field: source.field,
             title,
             signalName: request.metricLabel,
             unit: source.unit ?? 'none',
-            influxDatasourceUid: source.datasourceUid ?? influxUidFromDashboard(proposed.panels),
+            influxDatasourceUid: influxUid,
         });
     } else {
-        const mod = request.moduleNumber ?? 5;
+        const mod = request.moduleNumber;
+        if (mod == null) {
+            return {
+                ok: false,
+                error:
+                    'Which module should the own-history panel use? Name it in the prompt (e.g. Module 2 Current — vs. Own History).',
+                toolExecutions,
+                dashboardUid: resolved.uid,
+                dashboardTitle,
+                machineId,
+            };
+        }
         title = request.panelTitle?.trim() || canonicalOwnHistoryTitle(mod);
         if (entries.some((e) => e.title === title)) {
             return { ok: false, error: `Panel "${title}" already exists.`, toolExecutions, dashboardUid: resolved.uid, dashboardTitle };
@@ -403,7 +433,18 @@ export async function runProgrammaticAddOwnHistoryPanel(
                 dashboardTitle,
             };
         }
-        raw = buildOwnHistoryPanel(machineId, mod, influxUidFromDashboard(proposed.panels), title);
+        const influxUid = influxUidFromDashboard(proposed.panels);
+        if (!influxUid) {
+            return {
+                ok: false,
+                error:
+                    'No Influx datasource UID found on this dashboard. Add or keep at least one working Influx/Flux panel, then retry.',
+                toolExecutions,
+                dashboardUid: resolved.uid,
+                dashboardTitle,
+            };
+        }
+        raw = buildOwnHistoryPanel(machineId, mod, influxUid, title);
     }
     const sanitized = sanitizeInfluxFluxPanel(raw) as PanelRecord;
     const repaired = repairInfluxFluxPanel(sanitized, proposed.panels as unknown[] | undefined);

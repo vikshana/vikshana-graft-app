@@ -8,7 +8,7 @@ import { listDashboardPanels, type DashboardPanelEntry } from './panelDiscovery'
 import { isMachineId } from './dashboardCloneParse';
 import type { AddHistoryComparisonPanelRequest } from './historyComparisonPanelAddParse';
 import { resolveHistoryComparisonSignal } from './historyComparisonPanelAddParse';
-import { resolveDashboardUid } from './programmaticDashboardResolve';
+import { resolveDashboardUid, inferMachineIdFromDashboardTitle } from './programmaticDashboardResolve';
 import { findPrometheusTemplatePanel } from './instrumentationMetricDiscovery';
 import { getPanelTargetList } from './fluxPeerBandFix';
 import {
@@ -194,14 +194,6 @@ async function resolveDashboard(
     );
 }
 
-function machineIdFromDashboardTitle(title: string | undefined, fallback: string): string {
-    if (!title) {
-        return fallback;
-    }
-    const m = title.match(/\b(\d{4}-\d+)\b/);
-    return m?.[1] ?? fallback;
-}
-
 export async function runProgrammaticAddHistoryComparisonPanel(
     mcpClient: McpClient,
     request: AddHistoryComparisonPanelRequest
@@ -266,9 +258,30 @@ export async function runProgrammaticAddHistoryComparisonPanel(
     const machineId =
         request.machineId && isMachineId(request.machineId)
             ? request.machineId
-            : machineIdFromDashboardTitle(dashboardTitle, '2406-176021');
+            : inferMachineIdFromDashboardTitle(dashboardTitle);
+    if (!machineId) {
+        return {
+            ok: false,
+            error:
+                'Could not determine machine id from the prompt or dashboard title ' +
+                `(got "${dashboardTitle ?? ''}"). Include the machine id or use a title like "2505-200033 / Keysight".`,
+            toolExecutions,
+            dashboardUid: resolved.uid,
+            dashboardTitle,
+        };
+    }
 
     const promUid = promUidFromDashboard(proposed.panels);
+    if (!promUid) {
+        return {
+            ok: false,
+            error:
+                'No Prometheus datasource UID found on this dashboard. Keep at least one working Prometheus panel, then retry.',
+            toolExecutions,
+            dashboardUid: resolved.uid,
+            dashboardTitle,
+        };
+    }
     const newPanel = buildHistoryComparisonPanel(machineId, signal, promUid);
     newPanel.id = maxPanelId(entries) + 1;
     newPanel.gridPos =

@@ -357,7 +357,7 @@ export function formatDashboardMetricPanelsReply(
             `- Machine: **${result.machineId ?? '?'}**\n` +
             `- Prometheus datasource: \`${result.prometheusDatasourceUid ?? '?'}\`\n` +
             `- Discovered **${result.metricsDiscovered ?? 0}** metric(s) (${formatPrometheusDiscoveryLine(result)}); existing stat/gauge panels already cover them (${result.panelsSkipped ?? 0} skipped).\n` +
-            `- If you expected more metrics, verify Prometheus has series with \`machine="${result.machineId ?? '2505-200033'}"\`.\n\n` +
+            `- If you expected more metrics, verify Prometheus has series with \`machine="${result.machineId ?? '<MACHINE_ID>'}"\`.\n\n` +
             `Hard-refresh the dashboard (**Cmd+Shift+R**).`
         );
     }

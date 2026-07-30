@@ -213,8 +213,18 @@ export async function discoverInstrumentationMetrics(
     prometheusDatasourceUid?: string;
     discoveryError?: string;
 }> {
-    const machineId =
-        opts.machineId ?? inferMachineIdFromDashboardTitle(opts.dashboardTitle) ?? '2505-200033';
+    const machineId = opts.machineId ?? inferMachineIdFromDashboardTitle(opts.dashboardTitle);
+    if (!machineId) {
+        return {
+            metrics: [],
+            machineId: '',
+            prometheusNames: 0,
+            prometheusFields: 0,
+            prometheusDatasourceUid: opts.prometheusDatasourceUid,
+            discoveryError:
+                'Could not determine machine id from the dashboard title. Include the machine id in the title (e.g. "2505-200033 / Keysight") or pass machineId.',
+        };
+    }
 
     const promUid =
         opts.prometheusDatasourceUid ??

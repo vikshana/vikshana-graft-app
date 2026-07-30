@@ -12,7 +12,8 @@ import {
     canonicalLiveHistoryComparisonTitleForLabel,
 } from './modulePanelTitles';
 
-export const DEFAULT_HISTORY_COMPARISON_MODULE = 5;
+export const DEFAULT_HISTORY_COMPARISON_MODULE = 5; // example prompts only — parse requires explicit module/metric
+
 
 export interface HistoryComparisonSignal {
     /** Prometheus machine_metrics field tag. */
@@ -240,9 +241,9 @@ export function parseAddHistoryComparisonPanelRequest(message: string): AddHisto
             }
         }
     }
-    // Only default Module 5 when the operator did not name another signal.
     if (moduleNumber == null && metricLabel == null) {
-        moduleNumber = DEFAULT_HISTORY_COMPARISON_MODULE;
+        // Do not invent Module 5 — require an explicit module or metric label.
+        return null;
     }
 
     const signal = resolveHistoryComparisonSignal({ moduleNumber, metricLabel });
