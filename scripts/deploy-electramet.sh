@@ -327,9 +327,21 @@ if [[ "${DO_RESTART}" -eq 1 ]]; then
   log "Restarting Grafana container on EC2"
   ssh -i "${GRAFT_SSH_KEY}" -o StrictHostKeyChecking=accept-new "${GRAFT_EC2_HOST}" \
     'docker restart grafana'
+  log "Waiting for Grafana to accept API requests"
+  ssh -i "${GRAFT_SSH_KEY}" -o StrictHostKeyChecking=accept-new "${GRAFT_EC2_HOST}" \
+    'for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+       if docker exec grafana curl -sk -o /dev/null -w "%{http_code}" https://127.0.0.1:3000/api/health 2>/dev/null | grep -q 200; then
+         exit 0
+       fi
+       sleep 2
+     done
+     exit 0'
 else
   log "Skipping Grafana restart (--no-restart). Hard-refresh the browser to load new JS."
 fi
+
+log "Aligning Grafana Influx DS + peer-RF control with data_bridge"
+bash "${SCRIPT_DIR}/sync-grafana-influx-to-bridge.sh" --remote || log "WARN: influx/peer-RF sync failed (non-fatal)"
 
 verify_remote_build "${BUILD_NUM}"
 

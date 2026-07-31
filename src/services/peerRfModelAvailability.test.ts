@@ -71,7 +71,7 @@ describe('peerRfModelAvailability', () => {
             moduleNumber: 2,
             field: 'Module2_Current_A',
         });
-        expect(text).toContain('peer_rf_config.json');
+        expect(text).toContain('auto-enrolls');
         expect(text).toContain('2505-200033');
         expect(text).toContain('will **not** create placeholder');
         expect(text).toContain('vs. Peer Band');

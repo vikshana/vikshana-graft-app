@@ -22,13 +22,23 @@
 
 ### Graft chat UX
 
-1. Create peer-RF → probe Influx → if missing, **explain** (no empty panel)
-2. Reply: **Enroll peer-RF for MACHINE and create the panel**
-3. Graft enrolls via plugin proxy, queues backfill; creates panel when bands appear (or tells you to retry after backfill)
+1. Create peer-RF → probe Influx via Grafana DS
+2. If bands missing and peer-RF control is configured → **auto-enroll** + poll backfill (~60s) + re-probe (no magic enroll phrase)
+3. Create panel only when bands are visible; otherwise explain (including datasource mismatch if exporter finished but Grafana still empty)
+
+### Ops: keep Influx aligned
+
+Grafana’s Influx datasource URL **must** match `data_bridge` `INFLUX_HOST`. Deploy runs:
+
+```bash
+./scripts/sync-grafana-influx-to-bridge.sh --remote
+```
+
+(also re-applies `peerRfControlUrl` + token after Grafana recreates.)
 
 ## Ops checklist (EC2)
 
 1. Set on `data_bridge`: `PEER_RF_CONTROL_TOKEN=<secret>`, publish/map **8001**
 2. Sync exporter code (not config): `./scripts/sync-exporter-electramet.sh`
-3. In Grafana → Graft plugin config: Control API URL + token → Save
-4. As Admin, enroll from chat
+3. Graft settings (or deploy sync script): Control API URL `http://172.17.0.1:8001` + token
+4. As Admin, create peer-RF from chat — enroll happens automatically when needed

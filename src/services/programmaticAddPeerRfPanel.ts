@@ -16,8 +16,63 @@ import { resolveInfluxDatasourceUid } from './prometheusDiscovery';
 import {
     formatPeerRfUnavailableExplanation,
     probePeerRfModelAvailability,
+    type PeerRfAvailabilityResult,
 } from './peerRfModelAvailability';
-import { enrollPeerRfMachine } from './peerRfEnrollApi';
+import {
+    enrollPeerRfMachine,
+    fetchPeerRfControlHealth,
+    fetchPeerRfMachineStatus,
+} from './peerRfEnrollApi';
+
+const PEER_RF_BAND_WAIT_MS = 60_000;
+const PEER_RF_BAND_POLL_MS = 4_000;
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Re-probe Influx (and optionally wait on exporter backfill) until bands appear or timeout. */
+async function waitForPeerRfBands(opts: {
+    influxDatasourceUid: string;
+    machineId: string;
+    moduleNumber: number;
+    timeoutMs?: number;
+}): Promise<{ availability: PeerRfAvailabilityResult; backfillFinished: boolean; statusNote: string }> {
+    const timeoutMs = opts.timeoutMs ?? PEER_RF_BAND_WAIT_MS;
+    const deadline = Date.now() + timeoutMs;
+    let availability = await probePeerRfModelAvailability(opts);
+    let backfillFinished = false;
+    let statusNote = '';
+
+    while (!availability.available && Date.now() < deadline) {
+        const status = await fetchPeerRfMachineStatus(opts.machineId);
+        if (status.backfill?.running === false && status.backfill?.finishedAt) {
+            backfillFinished = true;
+            availability = await probePeerRfModelAvailability(opts);
+            statusNote = status.backfill.error
+                ? `Exporter backfill finished with error: ${status.backfill.error}`
+                : 'Exporter backfill finished.';
+            break;
+        }
+        if (status.backfill?.running) {
+            statusNote = 'Exporter backfill still running.';
+        }
+        await sleep(PEER_RF_BAND_POLL_MS);
+        availability = await probePeerRfModelAvailability(opts);
+    }
+
+    if (!availability.available && !statusNote) {
+        const status = await fetchPeerRfMachineStatus(opts.machineId);
+        if (status.backfill?.running) {
+            statusNote = 'Exporter backfill still running.';
+        } else if (status.backfill?.finishedAt) {
+            backfillFinished = true;
+            statusNote = 'Exporter backfill finished.';
+        }
+    }
+
+    return { availability, backfillFinished, statusNote };
+}
 
 type PanelRecord = Record<string, unknown>;
 
@@ -332,61 +387,69 @@ export async function runProgrammaticAddPeerRfPanel(
     });
 
     let enrollNote = '';
-    if (!availability.available && request.enrollIfMissing) {
-        const enrolled = await enrollPeerRfMachine(machineId, { backfill: true });
-        if (!enrolled.ok) {
-            return {
-                ok: false,
-                unavailableReason: 'peer_rf_missing',
-                error:
-                    formatPeerRfUnavailableExplanation({
-                        machineId,
-                        moduleNumber,
-                        field,
-                        probeError: availability.probeError,
-                    }) +
-                    `\n\n**Enroll via Graft failed:** ${enrolled.error ?? 'unknown'}` +
-                    (enrolled.status === 403
-                        ? '\n(Grafana **Admin** role is required for peer-RF enroll.)'
-                        : '') +
-                    (enrolled.status === 503 || /not configured/i.test(enrolled.error ?? '')
-                        ? '\nConfigure **peerRfControlUrl** + **peerRfControlToken** in Graft plugin settings.'
-                        : ''),
-                toolExecutions,
-                dashboardUid: resolved.uid,
-                dashboardTitle,
+    if (!availability.available) {
+        const health = await fetchPeerRfControlHealth();
+        const controlReady = Boolean(health.ok || health.controlConfigured);
+        const shouldEnroll = Boolean(request.enrollIfMissing || controlReady);
+
+        if (shouldEnroll && controlReady) {
+            const enrolled = await enrollPeerRfMachine(machineId, { backfill: true });
+            if (!enrolled.ok) {
+                return {
+                    ok: false,
+                    unavailableReason: 'peer_rf_missing',
+                    error:
+                        formatPeerRfUnavailableExplanation({
+                            machineId,
+                            moduleNumber,
+                            field,
+                            probeError: availability.probeError,
+                        }) +
+                        `\n\n**Auto-enroll via Graft failed:** ${enrolled.error ?? 'unknown'}` +
+                        (enrolled.status === 403
+                            ? '\n(Grafana **Admin** role is required for peer-RF enroll.)'
+                            : '') +
+                        (enrolled.status === 503 || /not configured/i.test(enrolled.error ?? '')
+                            ? '\nConfigure **peerRfControlUrl** + **peerRfControlToken** in Graft plugin settings.'
+                            : ''),
+                    toolExecutions,
+                    dashboardUid: resolved.uid,
+                    dashboardTitle,
+                    machineId,
+                    moduleNumber,
+                    panelTitle,
+                };
+            }
+            enrollNote =
+                `Auto-enrolled \`${machineId}\` in peer-RF` +
+                (enrolled.alreadyEnrolled ? ' (already present)' : '') +
+                (enrolled.backfillQueued ? '; backfill queued' : '') +
+                '. ';
+
+            const waited = await waitForPeerRfBands({
+                influxDatasourceUid: influxUid,
                 machineId,
                 moduleNumber,
-                panelTitle,
-            };
-        }
-        enrollNote =
-            `Enrolled \`${machineId}\` in peer-RF config` +
-            (enrolled.alreadyEnrolled ? ' (already present)' : '') +
-            (enrolled.backfillQueued ? '; backfill queued' : '') +
-            '. ';
-        // Short wait then re-probe — full backfill can take minutes; create only if bands already exist.
-        await new Promise((r) => setTimeout(r, 2500));
-        availability = await probePeerRfModelAvailability({
-            influxDatasourceUid: influxUid,
-            machineId,
-            moduleNumber,
-        });
-        if (!availability.available) {
-            return {
-                ok: false,
-                unavailableReason: 'peer_rf_missing',
-                error:
-                    `${enrollNote}` +
-                    `Backfill is running (or still catching up). Influx does not yet have \`model=peer_rf\` for \`${field}\`.\n\n` +
-                    `Wait for the exporter backfill to finish, then re-run the create prompt (without needing enroll again).`,
-                toolExecutions,
-                dashboardUid: resolved.uid,
-                dashboardTitle,
-                machineId,
-                moduleNumber,
-                panelTitle,
-            };
+            });
+            availability = waited.availability;
+
+            if (!availability.available) {
+                const mismatchHint = waited.backfillFinished
+                    ? `\n\n**Likely datasource mismatch:** the exporter reports backfill finished, but Grafana’s Influx datasource still has no \`ml_predictions\` for this field. ` +
+                      `Grafana Influx URL must match the data bridge \`INFLUX_HOST\` (deploy runs \`scripts/sync-grafana-influx-to-bridge.sh\`).`
+                    : `\n\n${waited.statusNote || 'Backfill is still catching up.'} Re-run the same create prompt once bands exist — enroll is already done.`;
+                return {
+                    ok: false,
+                    unavailableReason: 'peer_rf_missing',
+                    error: `${enrollNote}Influx does not yet have \`model=peer_rf\` for \`${field}\`.${mismatchHint}`,
+                    toolExecutions,
+                    dashboardUid: resolved.uid,
+                    dashboardTitle,
+                    machineId,
+                    moduleNumber,
+                    panelTitle,
+                };
+            }
         }
     }
 

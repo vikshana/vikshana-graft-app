@@ -6,10 +6,14 @@ interface SavedPanel {
 }
 
 const fetchMock = jest.fn();
+const getMock = jest.fn();
+const postMock = jest.fn();
 
 jest.mock('@grafana/runtime', () => ({
     getBackendSrv: () => ({
         fetch: (...args: unknown[]) => fetchMock(...args),
+        get: (...args: unknown[]) => getMock(...args),
+        post: (...args: unknown[]) => postMock(...args),
     }),
 }));
 
@@ -25,6 +29,8 @@ function ofData<T>(data: T) {
 
 /** Default: peer_rf bands exist so create can proceed. */
 function mockPeerRfAvailable(available: boolean) {
+    getMock.mockResolvedValue({ ok: false, controlConfigured: false });
+    postMock.mockResolvedValue({});
     fetchMock.mockImplementation((opts: { url: string }) => {
         if (opts.url.includes('/api/datasources/uid/')) {
             return ofData({ jsonData: { defaultBucket: 'powertechdata' } });
@@ -189,10 +195,57 @@ describe('runProgrammaticAddPeerRfPanel — module scope', () => {
         });
         expect(result.ok).toBe(false);
         expect(result.unavailableReason).toBe('peer_rf_missing');
-        expect(result.error).toContain('peer_rf_config.json');
+        expect(result.error).toMatch(/peer-RF|ml_predictions|auto-enrolls/i);
         expect(capture.saved).toBeUndefined();
         const reply = formatAddPeerRfPanelReply(result, 209);
         expect(reply).toContain('Peer-RF model not available');
         expect(reply).toContain('No panel was created');
+    });
+
+    it('auto-enrolls when control is configured and bands appear after wait', async () => {
+        let probeCount = 0;
+        getMock.mockImplementation(async (url: string) => {
+            if (url.includes('/peer-rf/health')) {
+                return { ok: true, controlConfigured: true };
+            }
+            if (url.includes('/peer-rf/machines/')) {
+                return {
+                    enrolled: true,
+                    backfill: { running: false, finishedAt: '2026-07-31T20:00:00Z' },
+                };
+            }
+            return {};
+        });
+        postMock.mockResolvedValue({
+            ok: true,
+            machineId: '2505-200033',
+            alreadyEnrolled: true,
+            backfillQueued: true,
+        });
+        fetchMock.mockImplementation((opts: { url: string }) => {
+            if (opts.url.includes('/api/datasources/uid/')) {
+                return ofData({ jsonData: { defaultBucket: 'powertechdata' } });
+            }
+            if (opts.url.includes('/api/ds/query')) {
+                probeCount += 1;
+                return ofData({
+                    results: {
+                        A: {
+                            frames: [{ data: { values: [[probeCount >= 2 ? 8 : 0]] } }],
+                        },
+                    },
+                });
+            }
+            return ofData({});
+        });
+
+        const capture: { saved?: { panels?: SavedPanel[] } } = {};
+        const result = await runProgrammaticAddPeerRfPanel(client(capture), {
+            dashboardUid: 'afq7tc6hl1m9sb',
+            moduleNumber: 2,
+        });
+        expect(postMock).toHaveBeenCalled();
+        expect(result.ok).toBe(true);
+        expect(capture.saved?.panels?.some((p) => p.title?.includes('RandomForest vs Peers'))).toBe(true);
     });
 });

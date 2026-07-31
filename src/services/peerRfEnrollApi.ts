@@ -20,6 +20,21 @@ export interface PeerRfControlHealth {
     error?: string;
 }
 
+export interface PeerRfMachineStatus {
+    ok?: boolean;
+    enrolled?: boolean;
+    machineId?: string;
+    backfill?: {
+        running?: boolean;
+        machineId?: string;
+        error?: string | null;
+        startedAt?: string | null;
+        finishedAt?: string | null;
+    };
+    targets?: Array<{ target: string; peerFeatures?: string[] }>;
+    error?: string;
+}
+
 export async function fetchPeerRfControlHealth(): Promise<PeerRfControlHealth> {
     try {
         return await getBackendSrv().get<PeerRfControlHealth>(`${BASE}/peer-rf/health`, {
@@ -29,6 +44,32 @@ export async function fetchPeerRfControlHealth(): Promise<PeerRfControlHealth> {
         return {
             ok: false,
             error: e instanceof Error ? e.message : String(e),
+        };
+    }
+}
+
+/** Machine enroll + backfill status via Graft plugin backend (Admin). */
+export async function fetchPeerRfMachineStatus(machineId: string): Promise<PeerRfMachineStatus> {
+    const id = machineId.trim();
+    if (!id) {
+        return { ok: false, error: 'machineId required' };
+    }
+    try {
+        const data = await getBackendSrv().get<PeerRfMachineStatus>(
+            `${BASE}/peer-rf/machines/${encodeURIComponent(id)}`,
+            { showErrorAlert: false }
+        );
+        return { ok: true, ...(data as object) } as PeerRfMachineStatus;
+    } catch (e: unknown) {
+        const err = e as { status?: number; data?: { message?: string; error?: string }; message?: string };
+        return {
+            ok: false,
+            machineId: id,
+            error:
+                err?.data?.error ||
+                err?.data?.message ||
+                err?.message ||
+                (e instanceof Error ? e.message : String(e)),
         };
     }
 }
