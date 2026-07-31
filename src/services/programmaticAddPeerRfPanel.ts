@@ -13,6 +13,10 @@ import { isMachineId } from './dashboardCloneParse';
 import { inferMachineIdFromDashboardTitle } from './programmaticDashboardResolve';
 import { findAnyFluxReferencePanel, getPanelTargetList } from './fluxPeerBandFix';
 import { resolveInfluxDatasourceUid } from './prometheusDiscovery';
+import {
+    formatPeerRfUnavailableExplanation,
+    probePeerRfModelAvailability,
+} from './peerRfModelAvailability';
 
 type PanelRecord = Record<string, unknown>;
 
@@ -121,6 +125,8 @@ function buildPeerRfPanelTemplate(
 export interface ProgrammaticAddPeerRfPanelResult {
     ok: boolean;
     error?: string;
+    /** When set, reply should explain missing exporter config — not a generic save failure. */
+    unavailableReason?: 'peer_rf_missing';
     toolExecutions: ToolExecution[];
     dashboardUid?: string;
     dashboardTitle?: string;
@@ -317,6 +323,31 @@ export async function runProgrammaticAddPeerRfPanel(
         };
     }
 
+    const field = `Module${moduleNumber}_Current_A`;
+    const availability = await probePeerRfModelAvailability({
+        influxDatasourceUid: influxUid,
+        machineId,
+        moduleNumber,
+    });
+    if (!availability.available) {
+        return {
+            ok: false,
+            unavailableReason: 'peer_rf_missing',
+            error: formatPeerRfUnavailableExplanation({
+                machineId,
+                moduleNumber,
+                field,
+                probeError: availability.probeError,
+            }),
+            toolExecutions,
+            dashboardUid: resolved.uid,
+            dashboardTitle,
+            machineId,
+            moduleNumber,
+            panelTitle,
+        };
+    }
+
     const template = buildPeerRfPanelTemplate(machineId, moduleNumber, influxUid);
     const sanitized = sanitizeInfluxFluxPanel(template) as PanelRecord;
     const repaired = repairInfluxFluxPanel(sanitized, baseline.panels as unknown[] | undefined);
@@ -370,10 +401,19 @@ export async function runProgrammaticAddPeerRfPanel(
 
 export function formatAddPeerRfPanelReply(result: ProgrammaticAddPeerRfPanelResult, buildNumber: number): string {
     if (!result.ok) {
+        if (result.unavailableReason === 'peer_rf_missing') {
+            return (
+                `### Peer-RF model not available (Graft build ${buildNumber})\n\n` +
+                `${result.error ?? 'Peer-RF bands are missing in Influx.'}\n\n` +
+                `- **Dashboard:** ${result.dashboardTitle ?? result.dashboardUid ?? '?'} (\`${result.dashboardUid ?? ''}\`)\n` +
+                (result.machineId ? `- **Machine:** \`${result.machineId}\`\n` : '') +
+                (result.panelTitle ? `- **Requested panel:** ${result.panelTitle}\n` : '') +
+                `\nNo panel was created (no placeholder queries).`
+            );
+        }
         return (
             `### Could not add peer-RF panel (Graft build ${buildNumber})\n\n` +
-            `${result.error ?? 'Unknown error'}\n\n` +
-            `Ensure the ML exporter has run **peer-RF backfill** (\`model=peer_rf\` in Influx) before bands appear.`
+            `${result.error ?? 'Unknown error'}\n`
         );
     }
     const machineLine = result.machineId ? `- **Machine:** \`${result.machineId}\`\n` : '';
@@ -386,8 +426,6 @@ export function formatAddPeerRfPanelReply(result: ProgrammaticAddPeerRfPanelResu
         machineLine +
         (result.version != null ? `- **Version:** ${result.version}\n` : '') +
         `\nHard-refresh (**Cmd+Shift+R**). Queries filter Influx \`ml_predictions\` where \`model=peer_rf\` and \`field=${field}\`. ` +
-        `If the panel shows no data, the peer-RF exporter must have written bands for this machine/module — ` +
-        `run peer-RF backfill for \`${result.machineId ?? 'MACHINE'}\` / \`${field}\`, then refresh. ` +
         `Compare with the **vs. Peer Band** Flux panel.`
     );
 }

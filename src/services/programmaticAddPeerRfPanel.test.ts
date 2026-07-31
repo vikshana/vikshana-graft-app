@@ -1,8 +1,45 @@
-import { runProgrammaticAddPeerRfPanel } from './programmaticAddPeerRfPanel';
+import { runProgrammaticAddPeerRfPanel, formatAddPeerRfPanelReply } from './programmaticAddPeerRfPanel';
 
 interface SavedPanel {
     title?: string;
     targets?: Array<{ query?: string }>;
+}
+
+const fetchMock = jest.fn();
+
+jest.mock('@grafana/runtime', () => ({
+    getBackendSrv: () => ({
+        fetch: (...args: unknown[]) => fetchMock(...args),
+    }),
+}));
+
+function ofData<T>(data: T) {
+    return {
+        subscribe(observer: { next: (v: unknown) => void; complete: () => void }) {
+            observer.next({ data });
+            observer.complete();
+            return { unsubscribe() {} };
+        },
+    };
+}
+
+/** Default: peer_rf bands exist so create can proceed. */
+function mockPeerRfAvailable(available: boolean) {
+    fetchMock.mockImplementation((opts: { url: string }) => {
+        if (opts.url.includes('/api/datasources/uid/')) {
+            return ofData({ jsonData: { defaultBucket: 'powertechdata' } });
+        }
+        if (opts.url.includes('/api/ds/query')) {
+            return ofData({
+                results: {
+                    A: {
+                        frames: [{ data: { values: [[available ? 12 : 0]] } }],
+                    },
+                },
+            });
+        }
+        return ofData({});
+    });
 }
 
 function fluxRef(title: string, field: string) {
@@ -63,6 +100,11 @@ function client(
 }
 
 describe('runProgrammaticAddPeerRfPanel — module scope', () => {
+    beforeEach(() => {
+        fetchMock.mockReset();
+        mockPeerRfAvailable(true);
+    });
+
     it('creates a panel for the requested module (3), not Module 5', async () => {
         const capture: { saved?: { panels?: SavedPanel[] } } = {};
         const result = await runProgrammaticAddPeerRfPanel(client(capture), {
@@ -80,7 +122,7 @@ describe('runProgrammaticAddPeerRfPanel — module scope', () => {
         expect(blob).toContain('2505-200033');
     });
 
-    it('defaults to Module 5 when no module is given', async () => {
+    it('requires an explicit module (does not invent Module 5)', async () => {
         const capture: { saved?: { panels?: SavedPanel[] } } = {};
         const result = await runProgrammaticAddPeerRfPanel(client(capture), {
             dashboardUid: 'afq7tc6hl1m9sb',
@@ -136,5 +178,21 @@ describe('runProgrammaticAddPeerRfPanel — module scope', () => {
         expect(blob).toContain('2505-200033');
         expect(blob).toContain('Module2_Current_A');
         expect(added?.targets?.length).toBe(4);
+    });
+
+    it('explains and does not save when peer_rf bands are missing for the machine', async () => {
+        mockPeerRfAvailable(false);
+        const capture: { saved?: { panels?: SavedPanel[] } } = {};
+        const result = await runProgrammaticAddPeerRfPanel(client(capture), {
+            dashboardUid: 'afq7tc6hl1m9sb',
+            moduleNumber: 2,
+        });
+        expect(result.ok).toBe(false);
+        expect(result.unavailableReason).toBe('peer_rf_missing');
+        expect(result.error).toContain('peer_rf_config.json');
+        expect(capture.saved).toBeUndefined();
+        const reply = formatAddPeerRfPanelReply(result, 209);
+        expect(reply).toContain('Peer-RF model not available');
+        expect(reply).toContain('No panel was created');
     });
 });
