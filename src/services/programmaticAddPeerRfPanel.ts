@@ -12,6 +12,7 @@ import { parseSearchHitsFromMcpText } from './dashboardSearchParse';
 import { isMachineId } from './dashboardCloneParse';
 import { inferMachineIdFromDashboardTitle } from './programmaticDashboardResolve';
 import { findAnyFluxReferencePanel, getPanelTargetList } from './fluxPeerBandFix';
+import { resolveInfluxDatasourceUid } from './prometheusDiscovery';
 
 type PanelRecord = Record<string, unknown>;
 
@@ -23,6 +24,7 @@ function datasourceUidOf(value: unknown): string | undefined {
     return typeof value === 'string' && value ? value : undefined;
 }
 
+/** Prefer a Flux panel on this dashboard; otherwise leave undefined for Grafana list_datasources. */
 function influxDatasourceUidFromDashboard(panels: unknown): string | undefined {
     const fluxRef = findAnyFluxReferencePanel(Array.isArray(panels) ? panels : []);
     if (fluxRef) {
@@ -298,12 +300,15 @@ export async function runProgrammaticAddPeerRfPanel(
     }
 
     const peerRef = findModule5PeerBandPanel(entries);
-    const influxUid = influxDatasourceUidFromDashboard(proposed.panels);
+    const influxUid =
+        influxDatasourceUidFromDashboard(proposed.panels) ??
+        (await resolveInfluxDatasourceUid(mcpClient, proposed.panels, toolExecutions));
     if (!influxUid) {
         return {
             ok: false,
             error:
-                'No Influx datasource UID found on this dashboard. Add or keep at least one working Influx/Flux panel, then retry.',
+                'No Influx datasource found (dashboard panels or Grafana datasources). ' +
+                'Configure an InfluxDB datasource in Grafana, or add a working Flux panel on this dashboard, then retry.',
             toolExecutions,
             dashboardUid: resolved.uid,
             dashboardTitle,

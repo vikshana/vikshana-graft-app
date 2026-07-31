@@ -23,17 +23,35 @@ function fluxRef(title: string, field: string) {
     };
 }
 
-function client(capture: { saved?: { panels?: SavedPanel[] } }) {
+function client(
+    capture: { saved?: { panels?: SavedPanel[] } },
+    opts?: { panels?: unknown[]; listDatasources?: Array<{ uid: string; type: string; name: string }> }
+) {
     const dashboard = {
         uid: 'afq7tc6hl1m9sb',
         title: '2505-200033 / Keysight',
         version: 7,
-        panels: [fluxRef('Module 5 Current — vs. Peer Band (Modules 1–4,6–8 Avg ± 2σ)', 'Module5_Current_A')],
+        panels: opts?.panels ?? [fluxRef('Module 5 Current — vs. Peer Band (Modules 1–4,6–8 Avg ± 2σ)', 'Module5_Current_A')],
     };
     return {
         callTool: jest.fn(async ({ name, arguments: args }: { name: string; arguments: unknown }) => {
             if (name === 'get_dashboard_by_uid') {
                 return { content: [{ type: 'text', text: JSON.stringify({ dashboard }) }] };
+            }
+            if (name === 'list_datasources') {
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(
+                                opts?.listDatasources ?? [
+                                    { uid: 'prom-1', type: 'prometheus', name: 'Prometheus' },
+                                    { uid: 'influx-from-grafana', type: 'influxdb', name: 'InfluxDB' },
+                                ]
+                            ),
+                        },
+                    ],
+                };
             }
             if (name === 'update_dashboard') {
                 capture.saved = (args as { dashboard?: { panels?: SavedPanel[] } }).dashboard;
@@ -87,5 +105,36 @@ describe('runProgrammaticAddPeerRfPanel — module scope', () => {
         expect(blob).toContain('Module2_Current_A');
         expect(added?.targets?.length).toBe(4);
         expect(added?.targets?.every((t) => Boolean(t.query))).toBe(true);
+    });
+
+    it('resolves Influx via list_datasources when Keysight has only Prometheus panels', async () => {
+        const capture: { saved?: { panels?: SavedPanel[] } } = {};
+        const result = await runProgrammaticAddPeerRfPanel(
+            client(capture, {
+                panels: [
+                    {
+                        id: 1,
+                        title: 'Pressure',
+                        type: 'timeseries',
+                        datasource: { type: 'prometheus', uid: 'prom-1' },
+                        targets: [
+                            {
+                                refId: 'A',
+                                datasource: { type: 'prometheus', uid: 'prom-1' },
+                                expr: 'machine_metrics{machine="2505-200033",field="Pressure1_psi"}',
+                            },
+                        ],
+                    },
+                ],
+            }),
+            { dashboardUid: 'afq7tc6hl1m9sb', moduleNumber: 2 }
+        );
+        expect(result.ok).toBe(true);
+        const added = capture.saved?.panels?.find((p) => p.title?.includes('RandomForest vs Peers'));
+        const blob = JSON.stringify(added);
+        expect(blob).toContain('influx-from-grafana');
+        expect(blob).toContain('2505-200033');
+        expect(blob).toContain('Module2_Current_A');
+        expect(added?.targets?.length).toBe(4);
     });
 });

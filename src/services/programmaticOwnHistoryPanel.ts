@@ -7,6 +7,7 @@ import { listDashboardPanels, type DashboardPanelEntry } from './panelDiscovery'
 import { parseSearchHitsFromMcpText } from './dashboardSearchParse';
 import { isMachineId } from './dashboardCloneParse';
 import { inferMachineIdFromDashboardTitle } from './programmaticDashboardResolve';
+import { resolveInfluxDatasourceUid } from './prometheusDiscovery';
 import { repairInfluxFluxPanel, sanitizeInfluxFluxPanel } from './sanitizeInfluxFluxPanel';
 import type {
     AddOwnHistoryPanelRequest,
@@ -385,12 +386,16 @@ export async function runProgrammaticAddOwnHistoryPanel(
                 dashboardTitle,
             };
         }
-        const influxUid = source.datasourceUid ?? influxUidFromDashboard(proposed.panels);
+        const influxUid =
+            source.datasourceUid ??
+            influxUidFromDashboard(proposed.panels) ??
+            (await resolveInfluxDatasourceUid(mcpClient, proposed.panels, toolExecutions));
         if (!influxUid) {
             return {
                 ok: false,
                 error:
-                    'No Influx datasource UID found on this dashboard. Add or keep at least one working Influx/Flux panel, then retry.',
+                    'No Influx datasource found (dashboard panels or Grafana datasources). ' +
+                    'Configure an InfluxDB datasource in Grafana, or add a working Flux panel on this dashboard, then retry.',
                 toolExecutions,
                 dashboardUid: resolved.uid,
                 dashboardTitle,
@@ -433,12 +438,15 @@ export async function runProgrammaticAddOwnHistoryPanel(
                 dashboardTitle,
             };
         }
-        const influxUid = influxUidFromDashboard(proposed.panels);
+        const influxUid =
+            influxUidFromDashboard(proposed.panels) ??
+            (await resolveInfluxDatasourceUid(mcpClient, proposed.panels, toolExecutions));
         if (!influxUid) {
             return {
                 ok: false,
                 error:
-                    'No Influx datasource UID found on this dashboard. Add or keep at least one working Influx/Flux panel, then retry.',
+                    'No Influx datasource found (dashboard panels or Grafana datasources). ' +
+                    'Configure an InfluxDB datasource in Grafana, or add a working Flux panel on this dashboard, then retry.',
                 toolExecutions,
                 dashboardUid: resolved.uid,
                 dashboardTitle,

@@ -123,6 +123,105 @@ function prometheusUidFromPanelBlob(panel: Record<string, unknown>): string | un
     return undefined;
 }
 
+function influxUidFromPanelBlob(panel: Record<string, unknown>): string | undefined {
+    const checkDs = (ds: unknown): string | undefined => {
+        if (ds && typeof ds === 'object') {
+            const obj = ds as { uid?: string; type?: string };
+            if (
+                typeof obj.uid === 'string' &&
+                obj.uid &&
+                (/influx/i.test(obj.type ?? '') || !obj.type)
+            ) {
+                // Prefer typed influx; uid-only refs are accepted when the panel has Flux queries.
+                if (/influx/i.test(obj.type ?? '')) {
+                    return obj.uid;
+                }
+            }
+        }
+        return undefined;
+    };
+
+    const top = checkDs(panel.datasource);
+    if (top) {
+        return top;
+    }
+
+    const targets = panel.targets;
+    if (!Array.isArray(targets)) {
+        return undefined;
+    }
+    for (const t of targets) {
+        if (!t || typeof t !== 'object') {
+            continue;
+        }
+        const target = t as Record<string, unknown>;
+        const query = typeof target.query === 'string' ? target.query : '';
+        const isFlux = /\bfrom\s*\(\s*bucket:/i.test(query);
+        const ds = target.datasource ?? panel.datasource;
+        if (ds && typeof ds === 'object') {
+            const obj = ds as { uid?: string; type?: string };
+            if (typeof obj.uid === 'string' && obj.uid) {
+                if (/influx/i.test(obj.type ?? '') || (isFlux && !obj.type)) {
+                    return obj.uid;
+                }
+                // Flux on a mislabeled datasource (seen in fixtures) — still use its uid.
+                if (isFlux && obj.uid) {
+                    return obj.uid;
+                }
+            }
+        } else if (typeof ds === 'string' && ds && isFlux) {
+            return ds;
+        }
+    }
+    return undefined;
+}
+
+/** Resolve Influx datasource UID from dashboard Flux panels or list_datasources (no hard-coded uid). */
+export async function resolveInfluxDatasourceUid(
+    mcpClient: McpClient,
+    panels: unknown,
+    toolExecutions?: ToolExecution[]
+): Promise<string | undefined> {
+    const panelList = Array.isArray(panels) ? panels : [];
+    const entries = listDashboardPanels(panelList);
+    for (const entry of entries) {
+        const uid = influxUidFromPanelBlob(entry.panel);
+        if (uid) {
+            return uid;
+        }
+    }
+
+    const listStep: ToolExecution = { name: 'list_datasources', status: 'pending' };
+    toolExecutions?.push(listStep);
+    const list = await callMcpTool(mcpClient, 'list_datasources', {});
+    if (toolExecutions?.length) {
+        toolExecutions[toolExecutions.length - 1] = {
+            ...listStep,
+            status: list.ok ? 'success' : 'error',
+            error: list.error,
+            summary: list.summary,
+        };
+    }
+    if (list.ok) {
+        const hits = parseDatasourceList(list.text);
+        const preferred =
+            hits.find((d) => /influx/i.test(d.type ?? '') && /influx/i.test(d.name ?? '')) ??
+            hits.find((d) => /influx/i.test(d.type ?? ''));
+        if (preferred?.uid) {
+            return preferred.uid;
+        }
+    }
+
+    for (const name of ['InfluxDB', 'Influx', 'influxdb', 'influx']) {
+        const uid = await tryDatasourceByName(mcpClient, name, toolExecutions);
+        if (uid) {
+            return uid;
+        }
+    }
+
+    return undefined;
+}
+
 /** Resolve Prometheus datasource UID from dashboard panels or list_datasources. */
 export async function resolvePrometheusDatasourceUid(
     mcpClient: McpClient,

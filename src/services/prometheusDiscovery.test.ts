@@ -2,6 +2,7 @@ import {
     extractMetricNamesFromPrometheusQueryText,
     machineMetricsFieldSelectors,
     machinePrometheusSelectors,
+    resolveInfluxDatasourceUid,
 } from './prometheusDiscovery';
 
 describe('prometheusDiscovery', () => {
@@ -33,5 +34,33 @@ describe('prometheusDiscovery', () => {
         const text =
             '[{"metric":{"__name__":"Pressure1_psi","machine":"2505-200033"},"value":[1710000000,"12"]}]';
         expect(extractMetricNamesFromPrometheusQueryText(text)).toEqual(['Pressure1_psi']);
+    });
+
+    it('resolveInfluxDatasourceUid falls back to list_datasources when panels are Prometheus-only', async () => {
+        const mcp = {
+            callTool: jest.fn(async ({ name }: { name: string }) => {
+                if (name === 'list_datasources') {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: JSON.stringify([
+                                    { uid: 'p1', type: 'prometheus', name: 'Prometheus' },
+                                    { uid: 'i1', type: 'influxdb', name: 'InfluxDB' },
+                                ]),
+                            },
+                        ],
+                    };
+                }
+                throw new Error(name);
+            }),
+        };
+        const uid = await resolveInfluxDatasourceUid(mcp, [
+            {
+                datasource: { type: 'prometheus', uid: 'p1' },
+                targets: [{ expr: 'up' }],
+            },
+        ]);
+        expect(uid).toBe('i1');
     });
 });
