@@ -244,6 +244,16 @@ export const REGRESSION_CASES: RegressionCase[] = [
         expectLlmIntent: 'programmatic',
     },
     {
+        id: 'peer-rf-module2-operator-wording',
+        failure:
+            'Operator Module 2 RandomForest vs Peers prompt (titled panel + peer modules) must route to peer-rf-create, not History Comparison or empty-band success',
+        prompt:
+            'Create a machine learning panel titled "Module 2 Current — RandomForest vs Peers" on the dashboard with UID afq7tc6hl1m9sb. Compare Module 2 Current against the peer modules using a RandomForest anomaly detection model. Plot the Module 2 Actual values and the RandomForest anomaly score or prediction. If a RandomForest model is not available, explain what additional configuration or data is required instead of creating placeholder queries',
+        expectHandler: 'peer-rf-create',
+        expectProgrammatic: true,
+        expectLlmIntent: 'programmatic',
+    },
+    {
         id: 'rf-bare-pressure-clarify',
         failure:
             'Random Forest for bare pressure fell through to Module 5 ML guidance instead of clarifying',

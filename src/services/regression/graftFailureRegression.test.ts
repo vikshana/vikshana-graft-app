@@ -220,12 +220,16 @@ function assertHandlerRouting(c: RegressionCase): void {
             expect(messageMentionsPeerBandPanelCreate(prompt)).toBe(false);
             expect(messageMentionsAddPeerRfPanel(prompt)).toBe(false);
             break;
-        case 'peer-rf-create':
+        case 'peer-rf-create': {
             expect(messageMentionsAddPeerRfPanel(prompt)).toBe(true);
-            expect(parseAddPeerRfPanelRequest(prompt)?.moduleNumber).toBe(3);
+            const peerReq = parseAddPeerRfPanelRequest(prompt);
+            expect(peerReq?.moduleNumber).toBeGreaterThanOrEqual(1);
+            expect(peerReq?.moduleNumber).toBeLessThanOrEqual(8);
+            expect(peerReq?.dashboardUid).toBe('afq7tc6hl1m9sb');
             expect(messageMentionsPredictiveAnalyticsPanel(prompt)).toBe(false);
             expect(messageMentionsPeerBandPanelCreate(prompt)).toBe(false);
             break;
+        }
         case 'history-comparison-clarify': {
             expect(messageNeedsHistoryComparisonSignalClarification(prompt)).toBe(true);
             expect(parseAddHistoryComparisonPanelRequest(prompt)).toBeNull();
@@ -245,8 +249,8 @@ function assertHandlerRouting(c: RegressionCase): void {
 
 describe('graft historical failure regression', () => {
     describe('fixture catalog', () => {
-        it('documents twenty known failure patterns', () => {
-            expect(REGRESSION_CASES).toHaveLength(20);
+        it('documents known failure patterns', () => {
+            expect(REGRESSION_CASES).toHaveLength(21);
             const ids = REGRESSION_CASES.map((c) => c.id);
             expect(new Set(ids).size).toBe(ids.length);
         });
