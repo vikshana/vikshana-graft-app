@@ -104,6 +104,9 @@ func NewApp(_ context.Context, settings backend.AppInstanceSettings) (instancemg
 func (a *App) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/settings", a.handleSettings)
 	mux.HandleFunc("/chat-history", a.handleChatHistory)
+	mux.HandleFunc("/peer-rf/health", a.handlePeerRfHealth)
+	mux.HandleFunc("/peer-rf/machines", a.handlePeerRfMachines)
+	mux.HandleFunc("/peer-rf/machines/", a.handlePeerRfMachineStatus)
 	mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"message": "ok"}`))

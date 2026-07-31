@@ -1,52 +1,34 @@
-# Plan: Graft / Grafana can enroll machines in peer-RF exporter config
+# Peer-RF enroll via Graft plugin backend proxy
 
-## Today
+## Shipped pieces
 
-- Peer-RF training is owned by the ML **data bridge** (`peer_rf_config.json` + `bridge_peer_rf.py`).
-- Graft can only read Grafana (dashboards / datasources / `/api/ds/query`).
-- Graft now **probes** Influx for `ml_predictions{model=peer_rf}` and **explains** when missing — it does not create empty band panels.
+### Exporter (`promql-anomaly-detection`)
 
-## Goal
+- `bridge_peer_rf.py`: `enroll_peer_rf_machine`, `reload_peer_rf_config`, `backfill_peer_rf_machine`
+- `bridge_peer_rf_api.py`: HTTP control API on **port 8001**
+  - `GET /health`
+  - `GET /peer-rf/machines`
+  - `GET /peer-rf/machines/{id}`
+  - `POST /peer-rf/machines` `{ "machineId", "backfill": true }`
+- Auth: `Authorization: Bearer $PEER_RF_CONTROL_TOKEN` (API disabled if token unset)
+- `sync-exporter-electramet.sh` **skips** overwriting live `peer_rf_config.json` unless `SYNC_PEER_RF_CONFIG=1`
 
-When an operator asks Graft to create a peer-RF panel for a machine that is not enrolled, Graft (or Grafana) should be able to **request enrollment** and optionally trigger backfill — without SSH or editing JSON by hand.
+### Graft backend
 
-## Recommended approach (phased)
+- `POST/GET /api/plugins/vikshana-graft-app/resources/peer-rf/machines`
+- `GET .../peer-rf/health`
+- Proxies to exporter; requires Grafana **Admin** role
+- Settings: `jsonData.peerRfControlUrl`, `secureJsonData.peerRfControlToken`
 
-### Phase 1 — Read-only API on the exporter (safe)
+### Graft chat UX
 
-Expose on the data-bridge host (or a small sidecar):
+1. Create peer-RF → probe Influx → if missing, **explain** (no empty panel)
+2. Reply: **Enroll peer-RF for MACHINE and create the panel**
+3. Graft enrolls via plugin proxy, queues backfill; creates panel when bands appear (or tells you to retry after backfill)
 
-- `GET /peer-rf/machines` → list enrolled machine ids + targets
-- `GET /peer-rf/machines/{id}/status` → last train time, backfill complete?, point counts
+## Ops checklist (EC2)
 
-Graft uses this (via Grafana plugin backend proxy or a Grafana datasource) to make explanations precise (“machine not enrolled” vs “enrolled but backfill incomplete”).
-
-### Phase 2 — Controlled write API
-
-- `POST /peer-rf/machines` body: `{ "machineId": "2505-200033", "targets": "modules-1-8-current" }`
-  - Validates machine has Module1–8 current history in Influx
-  - Appends to `peer_rf_config.json` (atomic write + backup)
-  - Optionally queues backfill job
-- Auth: Grafana service account token or shared secret; **admin-only**
-- Graft plugin backend route: `/a/vikshana-graft-app/peer-rf/enroll` → proxies to exporter write API (keeps token off the browser)
-
-### Phase 3 — Graft UX
-
-On peer-RF create when probe fails:
-
-1. Explain (current behavior)
-2. If operator is admin and Phase 2 exists: offer **“Enroll this machine and backfill”**
-3. Poll status until bands exist, then create the panel
-
-## Non-goals
-
-- Graft must not invent peer-RF predictions client-side.
-- Do not hard-code machine lists in the Graft frontend; the exporter remains source of truth.
-
-## Ownership
-
-| Piece | Repo |
-|-------|------|
-| Config + train/backfill | `promql-anomaly-detection` / data bridge |
-| Probe + explain + later enroll UX | `vikshana-graft-app` |
-| Auth / network | Grafana plugin backend + exporter HTTP |
+1. Set on `data_bridge`: `PEER_RF_CONTROL_TOKEN=<secret>`, publish/map **8001**
+2. Sync exporter code (not config): `./scripts/sync-exporter-electramet.sh`
+3. In Grafana → Graft plugin config: Control API URL + token → Save
+4. As Admin, enroll from chat

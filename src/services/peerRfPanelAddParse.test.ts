@@ -13,6 +13,7 @@ describe('peerRfPanelAddParse', () => {
             dashboardTitle: undefined,
             machineId: undefined,
             moduleNumber: 5,
+            enrollIfMissing: false,
         });
         expect(messageMentionsAddPeerRfPanel(prompt)).toBe(true);
     });

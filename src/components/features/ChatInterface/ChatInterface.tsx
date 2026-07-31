@@ -103,6 +103,8 @@ import {
   parseAddPeerRfPanelRequest,
   messageMentionsAddPeerRfPanel,
 } from '../../../services/peerRfPanelAddParse';
+import { messageRequestsPeerRfEnroll } from '../../../services/peerRfEnrollApi';
+import { findMachineIdsInText } from '../../../services/dashboardCloneParse';
 import {
   formatHistoryComparisonSignalClarification,
   messageMentionsPredictiveAnalyticsPanel,
@@ -2497,8 +2499,29 @@ export const ChatInterface = () => {
         }
         return;
       }
-      const addPeerRfRequest = parseAddPeerRfPanelRequest(content);
-      if (messageMentionsAddPeerRfPanel(content) && !addPeerRfRequest) {
+      const addPeerRfRequest = (() => {
+        const direct = parseAddPeerRfPanelRequest(content);
+        if (direct) {
+          if (messageRequestsPeerRfEnroll(content)) {
+            return { ...direct, enrollIfMissing: true };
+          }
+          return direct;
+        }
+        if (!messageRequestsPeerRfEnroll(content)) {
+          return null;
+        }
+        const prior =
+          [...priorUserMessages]
+            .reverse()
+            .map((m) => parseAddPeerRfPanelRequest(m))
+            .find((r) => r != null) ?? null;
+        if (!prior) {
+          return null;
+        }
+        const enrollMachine = findMachineIdsInText(content)[0] ?? prior.machineId;
+        return { ...prior, machineId: enrollMachine, enrollIfMissing: true };
+      })();
+      if (messageMentionsAddPeerRfPanel(content) && !addPeerRfRequest && !messageRequestsPeerRfEnroll(content)) {
         finalContent =
           `### Need clarification\n\n` +
           formatAddPeerRfPanelExamplePrompt(extractDashboardUidFromMessage(content) ?? '6gawrgawrgragg');

@@ -1,6 +1,7 @@
 import { userWantsBulkPeerBandFix, messageMentionsPeerBandPanelsButNotBulkFix } from './bulkPeerBandFixParse';
 import { messageDescribesUnsupportedAdminRequest } from './adminCapabilityParse';
 import { messageMentionsAddPeerRfPanel, parseAddPeerRfPanelRequest } from './peerRfPanelAddParse';
+import { messageRequestsPeerRfEnroll } from './peerRfEnrollApi';
 import {
     messageMentionsPeerBandPanelCreate,
     parseAddPeerBandPanelRequest,
@@ -134,6 +135,7 @@ export function messageHasProgrammaticHandler(message: string, contextDashboardU
         parseDashboardRebuildRequest(text) != null ||
         parseAddPeerRfPanelRequest(text) != null ||
         messageMentionsAddPeerRfPanel(text) ||
+        messageRequestsPeerRfEnroll(text) ||
         parseAddPeerBandPanelRequest(text) != null ||
         messageMentionsPeerBandPanelCreate(text) ||
         messageMentionsPeerBandPanelsButNotBulkFix(text) ||

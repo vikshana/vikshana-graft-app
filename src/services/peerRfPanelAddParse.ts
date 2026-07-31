@@ -18,6 +18,8 @@ export interface AddPeerRfPanelRequest {
     machineId?: string;
     /** Module whose current is modeled from its peers (defaults to 5 when unspecified). */
     moduleNumber?: number;
+    /** When peer_rf is missing, call Graft backend enroll + queue backfill, then create. */
+    enrollIfMissing?: boolean;
 }
 
 function normalizeMessageQuotes(text: string): string {
@@ -64,7 +66,10 @@ export function parseAddPeerRfPanelRequest(message: string): AddPeerRfPanelReque
     if (!dashboardUid && !dashboardTitle && !machineId) {
         return null;
     }
-    return { dashboardUid, dashboardTitle, machineId, moduleNumber };
+    const enrollIfMissing =
+        /\benroll\b/i.test(text) ||
+        (/\bset\s*up\b/i.test(text) && /\bpeer\s*[- ]?\s*rf\b/i.test(text));
+    return { dashboardUid, dashboardTitle, machineId, moduleNumber, enrollIfMissing };
 }
 
 export function formatAddPeerRfPanelExamplePrompt(dashboardUid = '6gawrgawrgragg'): string {

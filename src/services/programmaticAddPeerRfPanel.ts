@@ -17,6 +17,7 @@ import {
     formatPeerRfUnavailableExplanation,
     probePeerRfModelAvailability,
 } from './peerRfModelAvailability';
+import { enrollPeerRfMachine } from './peerRfEnrollApi';
 
 type PanelRecord = Record<string, unknown>;
 
@@ -324,11 +325,71 @@ export async function runProgrammaticAddPeerRfPanel(
     }
 
     const field = `Module${moduleNumber}_Current_A`;
-    const availability = await probePeerRfModelAvailability({
+    let availability = await probePeerRfModelAvailability({
         influxDatasourceUid: influxUid,
         machineId,
         moduleNumber,
     });
+
+    let enrollNote = '';
+    if (!availability.available && request.enrollIfMissing) {
+        const enrolled = await enrollPeerRfMachine(machineId, { backfill: true });
+        if (!enrolled.ok) {
+            return {
+                ok: false,
+                unavailableReason: 'peer_rf_missing',
+                error:
+                    formatPeerRfUnavailableExplanation({
+                        machineId,
+                        moduleNumber,
+                        field,
+                        probeError: availability.probeError,
+                    }) +
+                    `\n\n**Enroll via Graft failed:** ${enrolled.error ?? 'unknown'}` +
+                    (enrolled.status === 403
+                        ? '\n(Grafana **Admin** role is required for peer-RF enroll.)'
+                        : '') +
+                    (enrolled.status === 503 || /not configured/i.test(enrolled.error ?? '')
+                        ? '\nConfigure **peerRfControlUrl** + **peerRfControlToken** in Graft plugin settings.'
+                        : ''),
+                toolExecutions,
+                dashboardUid: resolved.uid,
+                dashboardTitle,
+                machineId,
+                moduleNumber,
+                panelTitle,
+            };
+        }
+        enrollNote =
+            `Enrolled \`${machineId}\` in peer-RF config` +
+            (enrolled.alreadyEnrolled ? ' (already present)' : '') +
+            (enrolled.backfillQueued ? '; backfill queued' : '') +
+            '. ';
+        // Short wait then re-probe — full backfill can take minutes; create only if bands already exist.
+        await new Promise((r) => setTimeout(r, 2500));
+        availability = await probePeerRfModelAvailability({
+            influxDatasourceUid: influxUid,
+            machineId,
+            moduleNumber,
+        });
+        if (!availability.available) {
+            return {
+                ok: false,
+                unavailableReason: 'peer_rf_missing',
+                error:
+                    `${enrollNote}` +
+                    `Backfill is running (or still catching up). Influx does not yet have \`model=peer_rf\` for \`${field}\`.\n\n` +
+                    `Wait for the exporter backfill to finish, then re-run the create prompt (without needing enroll again).`,
+                toolExecutions,
+                dashboardUid: resolved.uid,
+                dashboardTitle,
+                machineId,
+                moduleNumber,
+                panelTitle,
+            };
+        }
+    }
+
     if (!availability.available) {
         return {
             ok: false,

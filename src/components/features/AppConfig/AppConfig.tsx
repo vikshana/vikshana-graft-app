@@ -11,6 +11,7 @@ import {
   Field,
   FieldSet,
   FileUpload,
+  Input,
   useStyles2,
 } from '@grafana/ui';
 import { css } from '@emotion/css';
@@ -25,6 +26,8 @@ import { promptLibraryService } from '../../../services/promptLibrary';
  */
 type AppPluginSettings = {
   promptLibrary?: CategoryDef[];
+  /** Base URL for data_bridge peer-RF control API (e.g. http://data_bridge:8001). */
+  peerRfControlUrl?: string;
 };
 
 /**
@@ -32,6 +35,8 @@ type AppPluginSettings = {
  */
 type State = {
   promptLibrary: CategoryDef[];
+  peerRfControlUrl: string;
+  peerRfControlToken: string;
 };
 
 export interface AppConfigProps extends PluginConfigPageProps<AppPluginMeta<AppPluginSettings>> { }
@@ -41,6 +46,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
   const { enabled, pinned, jsonData } = plugin.meta;
   const [state, setState] = useState<State>({
     promptLibrary: jsonData?.promptLibrary || [],
+    peerRfControlUrl: jsonData?.peerRfControlUrl || '',
+    peerRfControlToken: '',
   });
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'success' | 'error' | null>(null);
@@ -122,7 +129,11 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         pinned,
         jsonData: {
           promptLibrary: state.promptLibrary,
+          peerRfControlUrl: state.peerRfControlUrl.trim() || undefined,
         },
+        secureJsonData: state.peerRfControlToken.trim()
+          ? { peerRfControlToken: state.peerRfControlToken.trim() }
+          : undefined,
       });
 
       // Update the promptLibraryService with the new prompts
@@ -149,8 +160,34 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         <a href="/plugins/grafana-llm-app" style={{ textDecoration: 'underline' }}>
           Grafana LLM Plugin
         </a>
-        . This page only configures the Prompt Library.
+        . This page configures the Prompt Library and optional peer-RF exporter control.
       </Alert>
+
+      <FieldSet label="Peer-RF exporter control (optional)" className={s.marginTop}>
+        <Field
+          label="Control API URL"
+          description="Data bridge peer-RF control base URL (e.g. http://data_bridge:8001 or http://172.x.x.x:8001). Used by Graft to enroll machines."
+        >
+          <Input
+            type="text"
+            value={state.peerRfControlUrl}
+            onChange={(e) => setState({ ...state, peerRfControlUrl: e.currentTarget.value })}
+            placeholder="http://data_bridge:8001"
+          />
+        </Field>
+        <Field
+          label="Control API token"
+          description="Bearer token matching PEER_RF_CONTROL_TOKEN on the data bridge. Stored encrypted (secureJsonData)."
+        >
+          <Input
+            type="password"
+            value={state.peerRfControlToken}
+            onChange={(e) => setState({ ...state, peerRfControlToken: e.currentTarget.value })}
+            placeholder={jsonData?.peerRfControlUrl ? '(unchanged if left blank)' : 'PEER_RF_CONTROL_TOKEN'}
+            autoComplete="new-password"
+          />
+        </Field>
+      </FieldSet>
 
       {/* Prompt Library Configuration */}
       <FieldSet label="Prompt Library Configuration" className={s.marginTop}>
@@ -215,7 +252,10 @@ const getStyles = (theme: GrafanaTheme2) => ({
 });
 
 
-const updatePlugin = async (pluginId: string, data: Partial<PluginMeta>) => {
+const updatePlugin = async (
+  pluginId: string,
+  data: Partial<PluginMeta> & { secureJsonData?: Record<string, string> }
+) => {
   const response = await getBackendSrv().fetch({
     url: `/api/plugins/${pluginId}/settings`,
     method: 'POST',
