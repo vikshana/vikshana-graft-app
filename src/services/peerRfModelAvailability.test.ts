@@ -1,6 +1,7 @@
 import {
     formatPeerRfUnavailableExplanation,
     probePeerRfModelAvailability,
+    rankInfluxDatasourcesForPeerRf,
 } from './peerRfModelAvailability';
 
 const fetchMock = jest.fn();
@@ -75,5 +76,14 @@ describe('peerRfModelAvailability', () => {
         expect(text).toContain('2505-200033');
         expect(text).toContain('will **not** create placeholder');
         expect(text).toContain('vs. Peer Band');
+    });
+
+    it('ranks remote Influx ahead of docker-local influxdb:8086', () => {
+        const ranked = rankInfluxDatasourcesForPeerRf([
+            { uid: 'local', url: 'https://influxdb:8086', isDefault: true },
+            { uid: 'remote', url: 'https://52.35.251.91:8086' },
+        ]);
+        expect(ranked[0]).toBe('remote');
+        expect(ranked[1]).toBe('local');
     });
 });

@@ -16,6 +16,7 @@ import { resolveInfluxDatasourceUid } from './prometheusDiscovery';
 import {
     formatPeerRfUnavailableExplanation,
     probePeerRfModelAvailability,
+    resolveInfluxUidWithPeerRfBands,
     type PeerRfAvailabilityResult,
 } from './peerRfModelAvailability';
 import {
@@ -362,9 +363,17 @@ export async function runProgrammaticAddPeerRfPanel(
     }
 
     const peerRef = findModule5PeerBandPanel(entries);
-    const influxUid =
+    const preferredInfluxUid =
         influxDatasourceUidFromDashboard(proposed.panels) ??
         (await resolveInfluxDatasourceUid(mcpClient, proposed.panels, toolExecutions));
+
+    const field = `Module${moduleNumber}_Current_A`;
+    const resolvedInflux = await resolveInfluxUidWithPeerRfBands({
+        preferredUid: preferredInfluxUid,
+        machineId,
+        moduleNumber,
+    });
+    let influxUid = resolvedInflux.influxDatasourceUid;
     if (!influxUid) {
         return {
             ok: false,
@@ -379,12 +388,7 @@ export async function runProgrammaticAddPeerRfPanel(
         };
     }
 
-    const field = `Module${moduleNumber}_Current_A`;
-    let availability = await probePeerRfModelAvailability({
-        influxDatasourceUid: influxUid,
-        machineId,
-        moduleNumber,
-    });
+    let availability = resolvedInflux.availability;
 
     let enrollNote = '';
     if (!availability.available) {
@@ -434,9 +438,22 @@ export async function runProgrammaticAddPeerRfPanel(
             availability = waited.availability;
 
             if (!availability.available) {
+                // Re-rank datasources after backfill — local Influx may still be empty.
+                const again = await resolveInfluxUidWithPeerRfBands({
+                    preferredUid: influxUid,
+                    machineId,
+                    moduleNumber,
+                });
+                if (again.availability.available && again.influxDatasourceUid) {
+                    availability = again.availability;
+                    influxUid = again.influxDatasourceUid;
+                }
+            }
+
+            if (!availability.available) {
                 const mismatchHint = waited.backfillFinished
                     ? `\n\n**Likely datasource mismatch:** the exporter reports backfill finished, but Grafana’s Influx datasource still has no \`ml_predictions\` for this field. ` +
-                      `Grafana Influx URL must match the data bridge \`INFLUX_HOST\` (deploy runs \`scripts/sync-grafana-influx-to-bridge.sh\`).`
+                      `Use the Influx DS that points at the data bridge \`INFLUX_HOST\` (not docker-local \`influxdb:8086\`). Deploy runs \`scripts/sync-grafana-influx-to-bridge.sh\` across orgs.`
                     : `\n\n${waited.statusNote || 'Backfill is still catching up.'} Re-run the same create prompt once bands exist — enroll is already done.`;
                 return {
                     ok: false,

@@ -33,6 +33,105 @@ async function grafanaPost<T>(url: string, data: unknown): Promise<T> {
     return res.data;
 }
 
+/** List Influx datasources in the active org (includes URL for preferring bridge-backed hosts). */
+export async function listInfluxDatasources(): Promise<
+    Array<{ uid: string; name?: string; url?: string; isDefault?: boolean }>
+> {
+    try {
+        const list = await grafanaGet<Array<Record<string, unknown>>>('/api/datasources');
+        if (!Array.isArray(list)) {
+            return [];
+        }
+        return list
+            .filter((d) => /influx/i.test(String(d.type ?? '')))
+            .map((d) => ({
+                uid: String(d.uid ?? ''),
+                name: typeof d.name === 'string' ? d.name : undefined,
+                url: typeof d.url === 'string' ? d.url : undefined,
+                isDefault: Boolean(d.isDefault),
+            }))
+            .filter((d) => Boolean(d.uid));
+    } catch {
+        return [];
+    }
+}
+
+/** Prefer bridge/remote Influx over docker-local `influxdb:8086` (often lacks ml_predictions). */
+export function rankInfluxDatasourcesForPeerRf(
+    candidates: Array<{ uid: string; url?: string; isDefault?: boolean }>,
+    preferredUid?: string
+): string[] {
+    const scored = candidates.map((c, index) => {
+        const url = (c.url || '').toLowerCase();
+        let score = 0;
+        if (preferredUid && c.uid === preferredUid) {
+            score += 50;
+        }
+        if (url.includes('influxdb:8086') || url.includes('://influxdb/')) {
+            score -= 40;
+        } else if (url.startsWith('http')) {
+            score += 20;
+        }
+        if (c.isDefault) {
+            score += 5;
+        }
+        return { uid: c.uid, score, index };
+    });
+    scored.sort((a, b) => b.score - a.score || a.index - b.index);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const s of scored) {
+        if (!seen.has(s.uid)) {
+            seen.add(s.uid);
+            out.push(s.uid);
+        }
+    }
+    return out;
+}
+
+/**
+ * Pick an Influx UID that already has peer_rf bands when possible.
+ * Tries ranked datasources (dashboard preference first, then remote over local).
+ */
+export async function resolveInfluxUidWithPeerRfBands(opts: {
+    preferredUid?: string;
+    machineId: string;
+    moduleNumber: number;
+}): Promise<{ influxDatasourceUid?: string; availability: PeerRfAvailabilityResult }> {
+    const listed = await listInfluxDatasources();
+    const ranked = rankInfluxDatasourcesForPeerRf(listed, opts.preferredUid);
+    const tryOrder =
+        ranked.length > 0
+            ? ranked
+            : opts.preferredUid
+              ? [opts.preferredUid]
+              : [];
+
+    let last: PeerRfAvailabilityResult = {
+        available: false,
+        machineId: opts.machineId,
+        field: `Module${opts.moduleNumber}_Current_A`,
+        influxDatasourceUid: opts.preferredUid ?? '',
+    };
+
+    for (const uid of tryOrder) {
+        const availability = await probePeerRfModelAvailability({
+            influxDatasourceUid: uid,
+            machineId: opts.machineId,
+            moduleNumber: opts.moduleNumber,
+        });
+        last = availability;
+        if (availability.available) {
+            return { influxDatasourceUid: uid, availability };
+        }
+    }
+
+    return {
+        influxDatasourceUid: tryOrder[0] ?? opts.preferredUid,
+        availability: last,
+    };
+}
+
 /** Resolve Influx bucket from Grafana datasource settings (no hard-coded bucket). */
 export async function resolveInfluxBucketForDatasource(datasourceUid: string): Promise<string | undefined> {
     try {

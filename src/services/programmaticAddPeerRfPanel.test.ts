@@ -32,6 +32,17 @@ function mockPeerRfAvailable(available: boolean) {
     getMock.mockResolvedValue({ ok: false, controlConfigured: false });
     postMock.mockResolvedValue({});
     fetchMock.mockImplementation((opts: { url: string }) => {
+        if (opts.url === '/api/datasources' || opts.url.endsWith('/api/datasources')) {
+            return ofData([
+                {
+                    type: 'influxdb',
+                    uid: 'ffmk2neut49vkf',
+                    name: 'InfluxDB',
+                    url: 'https://52.35.251.91:8086',
+                    isDefault: true,
+                },
+            ]);
+        }
         if (opts.url.includes('/api/datasources/uid/')) {
             return ofData({ jsonData: { defaultBucket: 'powertechdata' } });
         }
@@ -180,7 +191,7 @@ describe('runProgrammaticAddPeerRfPanel — module scope', () => {
         expect(result.ok).toBe(true);
         const added = capture.saved?.panels?.find((p) => p.title?.includes('RandomForest vs Peers'));
         const blob = JSON.stringify(added);
-        expect(blob).toContain('influx-from-grafana');
+        expect(blob).toContain('ffmk2neut49vkf');
         expect(blob).toContain('2505-200033');
         expect(blob).toContain('Module2_Current_A');
         expect(added?.targets?.length).toBe(4);
@@ -223,15 +234,27 @@ describe('runProgrammaticAddPeerRfPanel — module scope', () => {
             backfillQueued: true,
         });
         fetchMock.mockImplementation((opts: { url: string }) => {
+            if (opts.url === '/api/datasources' || opts.url.endsWith('/api/datasources')) {
+                return ofData([
+                    {
+                        type: 'influxdb',
+                        uid: 'ffmk2neut49vkf',
+                        name: 'InfluxDB',
+                        url: 'https://52.35.251.91:8086',
+                        isDefault: true,
+                    },
+                ]);
+            }
             if (opts.url.includes('/api/datasources/uid/')) {
                 return ofData({ jsonData: { defaultBucket: 'powertechdata' } });
             }
             if (opts.url.includes('/api/ds/query')) {
                 probeCount += 1;
+                // Unavailable until enroll path re-probes (probeCount grows past initial resolve).
                 return ofData({
                     results: {
                         A: {
-                            frames: [{ data: { values: [[probeCount >= 2 ? 8 : 0]] } }],
+                            frames: [{ data: { values: [[probeCount >= 3 ? 8 : 0]] } }],
                         },
                     },
                 });
