@@ -288,26 +288,25 @@ export function formatPeerRfUnavailableExplanation(opts: {
 }): string {
     const { machineId, moduleNumber, field, probeError } = opts;
     const lines = [
-        `No **peer-RF** RandomForest bands were found in Influx for machine \`${machineId}\` / \`${field}\` (\`ml_predictions\` where \`model=peer_rf\`).`,
+        `RandomForest vs Peers needs predicted bands for machine **${machineId}**, Module ${moduleNumber} Current.`,
+        `Those bands are not in Grafana’s Influx yet (field \`${field}\`).`,
         ``,
-        `The Actual series can exist without peer-RF — peer-RF is trained by the ML exporter, not by Grafana panels.`,
+        `Live Actual values can already exist — the peer RandomForest model is built separately by the ML exporter, not by the dashboard panel.`,
         ``,
-        `**What Graft needs:**`,
-        `1. Peer-RF bands in the **same Influx** Grafana queries (\`ml_predictions\` / \`model=peer_rf\` for \`${field}\`).`,
-        `2. Machine \`${machineId}\` enrolled in the exporter (\`peer_rf_config.json\`) with backfill enabled.`,
+        `**What has to be true:**`,
+        `1. This machine is enrolled for peer RandomForest (Graft does this automatically on create when control is configured).`,
+        `2. A first-time history fill (“backfill”) has finished and written predictions Grafana can query.`,
         ``,
-        `When Graft peer-RF control is configured, a create prompt **auto-enrolls** the machine and waits briefly for bands — no separate enroll phrase required.`,
+        `Until that fill is visible, Graft will **not** add a panel with empty placeholder queries (they would only show Module ${moduleNumber} Actual).`,
         ``,
-        `If enroll/backfill already finished but this probe is still empty, Grafana’s Influx datasource URL likely does not match the data bridge \`INFLUX_HOST\` (fix with \`scripts/sync-grafana-influx-to-bridge.sh\`).`,
+        `**You can still do without waiting:**`,
+        `- Create a **Peer Band (±2σ)** panel or alert — compares modules statistically, no RandomForest fill needed.`,
+        `- Create an **Own History** panel or alert — uses that machine’s own past bands.`,
         ``,
-        `Until bands are visible via Grafana, Graft will **not** create placeholder band queries (they would only show Module ${moduleNumber} Actual).`,
-        ``,
-        `**Alternatives that work without peer-RF:**`,
-        `- **vs. Peer Band (±2σ)** — Flux mean/stddev across peer modules (no ML exporter).`,
-        `- **History Comparison** — live Prometheus RandomForest (\`machine_metric_*\`) when that exporter covers this machine.`,
+        `If enroll/fill already finished and this is still empty, Grafana’s Influx URL may not match the data bridge (ops: \`scripts/sync-grafana-influx-to-bridge.sh\`).`,
     ];
     if (probeError) {
-        lines.push(``, `_Probe note:_ ${probeError}`);
+        lines.push(``, `_Technical note:_ ${probeError}`);
     }
     return lines.join('\n');
 }

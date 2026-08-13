@@ -184,6 +184,8 @@ export interface ProgrammaticAddPeerRfPanelResult {
     error?: string;
     /** When set, reply should explain missing exporter config — not a generic save failure. */
     unavailableReason?: 'peer_rf_missing';
+    /** Why bands were missing after enroll/probe (drives plain-English headline). */
+    unavailableKind?: 'backfill_pending' | 'datasource_mismatch' | 'not_configured';
     toolExecutions: ToolExecution[];
     dashboardUid?: string;
     dashboardTitle?: string;
@@ -402,6 +404,7 @@ export async function runProgrammaticAddPeerRfPanel(
                 return {
                     ok: false,
                     unavailableReason: 'peer_rf_missing',
+                    unavailableKind: 'not_configured',
                     error:
                         formatPeerRfUnavailableExplanation({
                             machineId,
@@ -409,12 +412,12 @@ export async function runProgrammaticAddPeerRfPanel(
                             field,
                             probeError: availability.probeError,
                         }) +
-                        `\n\n**Auto-enroll via Graft failed:** ${enrolled.error ?? 'unknown'}` +
+                        `\n\n**Could not start setup automatically:** ${enrolled.error ?? 'unknown'}` +
                         (enrolled.status === 403
-                            ? '\n(Grafana **Admin** role is required for peer-RF enroll.)'
+                            ? '\n(You need a Grafana **Admin** role for this.)'
                             : '') +
                         (enrolled.status === 503 || /not configured/i.test(enrolled.error ?? '')
-                            ? '\nConfigure **peerRfControlUrl** + **peerRfControlToken** in Graft plugin settings.'
+                            ? '\nOps: set **peerRfControlUrl** and **peerRfControlToken** in Graft plugin settings.'
                             : ''),
                     toolExecutions,
                     dashboardUid: resolved.uid,
@@ -424,11 +427,11 @@ export async function runProgrammaticAddPeerRfPanel(
                     panelTitle,
                 };
             }
-            enrollNote =
-                `Auto-enrolled \`${machineId}\` in peer-RF` +
-                (enrolled.alreadyEnrolled ? ' (already present)' : '') +
-                (enrolled.backfillQueued ? '; backfill queued' : '') +
-                '. ';
+            enrollNote = enrolled.alreadyEnrolled
+                ? `Machine **${machineId}** was already set up for peer RandomForest.` +
+                  (enrolled.backfillQueued ? ' A history fill was (re)queued.' : '')
+                : `I started peer RandomForest setup for machine **${machineId}.**` +
+                  (enrolled.backfillQueued ? ' A first-time history fill was queued.' : '');
 
             const waited = await waitForPeerRfBands({
                 influxDatasourceUid: influxUid,
@@ -452,13 +455,16 @@ export async function runProgrammaticAddPeerRfPanel(
 
             if (!availability.available) {
                 const mismatchHint = waited.backfillFinished
-                    ? `\n\n**Likely datasource mismatch:** the exporter reports backfill finished, but Grafana’s Influx datasource still has no \`ml_predictions\` for this field. ` +
-                      `Use the Influx DS that points at the data bridge \`INFLUX_HOST\` (not docker-local \`influxdb:8086\`). Deploy runs \`scripts/sync-grafana-influx-to-bridge.sh\` across orgs.`
-                    : `\n\n${waited.statusNote || 'Backfill is still catching up.'} Re-run the same create prompt once bands exist — enroll is already done.`;
+                    ? `\n\nThe history fill reports finished, but Grafana still cannot see Module ${moduleNumber} predictions. ` +
+                      `That usually means Grafana’s Influx datasource is pointed at the wrong host (not the data bridge). Ask ops to run \`scripts/sync-grafana-influx-to-bridge.sh\`.`
+                    : `\n\nThe history fill is still running (first time for a machine can take up to a couple of hours). ` +
+                      `Ask again with the same request once it finishes — setup is already done, you do not need to enroll again.\n\n` +
+                      `**While you wait:** Peer Band (±2σ) and Own History panels/alerts do **not** need this fill and can be created now.`;
                 return {
                     ok: false,
                     unavailableReason: 'peer_rf_missing',
-                    error: `${enrollNote}Influx does not yet have \`model=peer_rf\` for \`${field}\`.${mismatchHint}`,
+                    unavailableKind: waited.backfillFinished ? 'datasource_mismatch' : 'backfill_pending',
+                    error: `${enrollNote}\n\nPredicted RandomForest bands for Module ${moduleNumber} (\`${field}\`) are not visible in Grafana yet.${mismatchHint}`,
                     toolExecutions,
                     dashboardUid: resolved.uid,
                     dashboardTitle,
@@ -474,6 +480,7 @@ export async function runProgrammaticAddPeerRfPanel(
         return {
             ok: false,
             unavailableReason: 'peer_rf_missing',
+            unavailableKind: 'not_configured',
             error: formatPeerRfUnavailableExplanation({
                 machineId,
                 moduleNumber,
@@ -543,30 +550,33 @@ export async function runProgrammaticAddPeerRfPanel(
 export function formatAddPeerRfPanelReply(result: ProgrammaticAddPeerRfPanelResult, buildNumber: number): string {
     if (!result.ok) {
         if (result.unavailableReason === 'peer_rf_missing') {
+            const headline =
+                result.unavailableKind === 'backfill_pending'
+                    ? `### RandomForest vs Peers is still preparing (Graft build ${buildNumber})`
+                    : result.unavailableKind === 'datasource_mismatch'
+                      ? `### RandomForest data not visible to Grafana yet (Graft build ${buildNumber})`
+                      : `### RandomForest vs Peers is not ready yet (Graft build ${buildNumber})`;
             return (
-                `### Peer-RF model not available (Graft build ${buildNumber})\n\n` +
-                `${result.error ?? 'Peer-RF bands are missing in Influx.'}\n\n` +
+                `${headline}\n\n` +
+                `${result.error ?? 'Predicted peer RandomForest bands are not available yet.'}\n\n` +
                 `- **Dashboard:** ${result.dashboardTitle ?? result.dashboardUid ?? '?'} (\`${result.dashboardUid ?? ''}\`)\n` +
                 (result.machineId ? `- **Machine:** \`${result.machineId}\`\n` : '') +
                 (result.panelTitle ? `- **Requested panel:** ${result.panelTitle}\n` : '') +
-                `\nNo panel was created (no placeholder queries).`
+                `\n**No panel was added** — Graft will not create empty placeholder charts.`
             );
         }
         return (
-            `### Could not add peer-RF panel (Graft build ${buildNumber})\n\n` +
+            `### Could not add RandomForest vs Peers panel (Graft build ${buildNumber})\n\n` +
             `${result.error ?? 'Unknown error'}\n`
         );
     }
     const machineLine = result.machineId ? `- **Machine:** \`${result.machineId}\`\n` : '';
-    const field =
-        result.moduleNumber != null ? `Module${result.moduleNumber}_Current_A` : 'ModuleN_Current_A';
     return (
-        `### Done (peer-RF panel added) (Graft build ${buildNumber})\n\n` +
+        `### Done — RandomForest vs Peers panel added (Graft build ${buildNumber})\n\n` +
         `- **Dashboard:** ${result.dashboardTitle ?? result.dashboardUid} (\`${result.dashboardUid}\`)\n` +
         `- **Panel:** ${result.panelTitle}\n` +
         machineLine +
         (result.version != null ? `- **Version:** ${result.version}\n` : '') +
-        `\nHard-refresh (**Cmd+Shift+R**). Queries filter Influx \`ml_predictions\` where \`model=peer_rf\` and \`field=${field}\`. ` +
-        `Compare with the **vs. Peer Band** Flux panel.`
+        `\nHard-refresh (**Cmd+Shift+R**), open the dashboard, and confirm Module Actual plus Expected / Upper / Lower.`
     );
 }

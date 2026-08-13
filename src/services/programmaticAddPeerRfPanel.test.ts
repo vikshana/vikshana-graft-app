@@ -206,11 +206,11 @@ describe('runProgrammaticAddPeerRfPanel — module scope', () => {
         });
         expect(result.ok).toBe(false);
         expect(result.unavailableReason).toBe('peer_rf_missing');
-        expect(result.error).toMatch(/peer-RF|ml_predictions|auto-enrolls/i);
+        expect(result.error).toMatch(/RandomForest|Peer Band|Own History/i);
         expect(capture.saved).toBeUndefined();
         const reply = formatAddPeerRfPanelReply(result, 209);
-        expect(reply).toContain('Peer-RF model not available');
-        expect(reply).toContain('No panel was created');
+        expect(reply).toContain('RandomForest vs Peers is not ready yet');
+        expect(reply).toContain('No panel was added');
     });
 
     it('auto-enrolls when control is configured and bands appear after wait', async () => {

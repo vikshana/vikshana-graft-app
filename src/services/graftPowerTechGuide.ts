@@ -11,7 +11,7 @@ export function buildPowerTechOperatorGuide(): string {
         '- Historical / incident windows: Influx Flux on the same datasource as working peer-band panels — `r.machine` + `r._field`, ML bands from `ml_predictions` (not Prometheus).',
         '- Peer ±2σ in Grafana: Flux mean/stddev across peer module currents — not the same as RandomForest.',
         '- **vs. Own History (± 2σ)**: single-module rolling 1h mean ± 2σ on ModuleN_Current_A (Influx) — not ML, not peers.',
-        '- Peer-RF bands: `ml_predictions` with tag `model=peer_rf` and `field=ModuleN_Current_A` per module. Before creating a peer-RF panel, Graft probes Influx; if bands are missing it **explains** (exporter `peer_rf_config.json` + backfill) and does **not** save placeholder queries.',
+        '- Peer RandomForest vs Peers: Graft probes Influx for predictions before creating a panel. If a first-time history fill is still running, it explains in plain English and does **not** save empty charts. Peer Band (±2σ) and Own History panels/alerts do not need that fill.',
         '- **History Comparison (historical / Influx)** = module vs its own past (Influx backfill). Legacy title `RandomForest ML (Influx)` means the same — rename and sort it directly under live History Comparison, before Peer Band.',
         '',
         '**Flux panels**',
