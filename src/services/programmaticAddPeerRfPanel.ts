@@ -39,27 +39,36 @@ async function waitForPeerRfBands(opts: {
     moduleNumber: number;
     timeoutMs?: number;
     pollMs?: number;
-}): Promise<{ availability: PeerRfAvailabilityResult; backfillFinished: boolean; statusNote: string }> {
+}): Promise<{
+    availability: PeerRfAvailabilityResult;
+    backfillFinished: boolean;
+    backfillError?: string;
+    statusNote: string;
+}> {
     const timeoutMs = opts.timeoutMs ?? PEER_RF_BAND_WAIT_MS;
     const pollMs = opts.pollMs ?? PEER_RF_BAND_POLL_MS;
     const deadline = Date.now() + timeoutMs;
     let availability = await probePeerRfModelAvailability(opts);
     let backfillFinished = false;
+    let backfillError: string | undefined;
     let statusNote = '';
 
     while (!availability.available && Date.now() < deadline) {
         const status = await fetchPeerRfMachineStatus(opts.machineId);
         if (status.backfill?.running === false && status.backfill?.finishedAt) {
             backfillFinished = true;
-            statusNote = status.backfill.error
-                ? `Exporter backfill finished with error: ${status.backfill.error}`
-                : 'Exporter backfill finished.';
+            if (status.backfill.error) {
+                backfillError = status.backfill.error;
+                statusNote = `Exporter backfill finished with error: ${status.backfill.error}`;
+            } else {
+                statusNote = 'Exporter backfill finished.';
+            }
             availability = await probePeerRfModelAvailability(opts);
             if (availability.available) {
                 break;
             }
             // Hard failure from exporter — no point waiting for Influx lag.
-            if (status.backfill.error) {
+            if (backfillError) {
                 break;
             }
             // Keep polling until timeout: bands can lag finishedAt (Influx write delay).
@@ -76,13 +85,16 @@ async function waitForPeerRfBands(opts: {
             statusNote = 'Exporter backfill still running.';
         } else if (status.backfill?.finishedAt) {
             backfillFinished = true;
-            statusNote = status.backfill.error
-                ? `Exporter backfill finished with error: ${status.backfill.error}`
-                : 'Exporter backfill finished.';
+            if (status.backfill.error) {
+                backfillError = status.backfill.error;
+                statusNote = `Exporter backfill finished with error: ${status.backfill.error}`;
+            } else {
+                statusNote = 'Exporter backfill finished.';
+            }
         }
     }
 
-    return { availability, backfillFinished, statusNote };
+    return { availability, backfillFinished, backfillError, statusNote };
 }
 
 type PanelRecord = Record<string, unknown>;
@@ -195,7 +207,7 @@ export interface ProgrammaticAddPeerRfPanelResult {
     /** When set, reply should explain missing exporter config — not a generic save failure. */
     unavailableReason?: 'peer_rf_missing';
     /** Why bands were missing after enroll/probe (drives plain-English headline). */
-    unavailableKind?: 'backfill_pending' | 'datasource_mismatch' | 'not_configured';
+    unavailableKind?: 'backfill_pending' | 'backfill_failed' | 'datasource_mismatch' | 'not_configured';
     toolExecutions: ToolExecution[];
     dashboardUid?: string;
     dashboardTitle?: string;
@@ -494,17 +506,32 @@ export async function runProgrammaticAddPeerRfPanel(
             }
 
             if (!availability.available) {
-                const mismatchHint = waited.backfillFinished
-                    ? `\n\nThe history fill reports finished, but Grafana still cannot see Module ${moduleNumber} predictions. ` +
-                      `That usually means Grafana’s Influx datasource is pointed at the wrong host (not the data bridge). Ask ops to run \`scripts/sync-grafana-influx-to-bridge.sh\`.`
-                    : `\n\nThe history fill is still running (first time for a machine can take up to a couple of hours). ` +
-                      `Ask again with the same request once it finishes — setup is already done, you do not need to enroll again.\n\n` +
-                      `**While you wait:** Peer Band (±2σ) and Own History panels/alerts do **not** need this fill and can be created now.`;
+                let unavailableKind: NonNullable<ProgrammaticAddPeerRfPanelResult['unavailableKind']>;
+                let hint: string;
+                if (waited.backfillError) {
+                    unavailableKind = 'backfill_failed';
+                    hint =
+                        `\n\nThe history fill **failed** on the ML exporter:\n\n> ${waited.backfillError}\n\n` +
+                        `Fix that exporter error (or ask ops), then re-run the same create prompt. ` +
+                        `This is not a Grafana Influx URL mismatch.\n\n` +
+                        `**Meanwhile:** Peer Band (±2σ) and Own History panels/alerts do **not** need this fill and can be created now.`;
+                } else if (waited.backfillFinished) {
+                    unavailableKind = 'datasource_mismatch';
+                    hint =
+                        `\n\nThe history fill reports finished, but Grafana still cannot see Module ${moduleNumber} predictions. ` +
+                        `That usually means Grafana’s Influx datasource is pointed at the wrong host (not the data bridge). Ask ops to run \`scripts/sync-grafana-influx-to-bridge.sh\`.`;
+                } else {
+                    unavailableKind = 'backfill_pending';
+                    hint =
+                        `\n\nThe history fill is still running (first time for a machine can take up to a couple of hours). ` +
+                        `Ask again with the same request once it finishes — setup is already done, you do not need to enroll again.\n\n` +
+                        `**While you wait:** Peer Band (±2σ) and Own History panels/alerts do **not** need this fill and can be created now.`;
+                }
                 return {
                     ok: false,
                     unavailableReason: 'peer_rf_missing',
-                    unavailableKind: waited.backfillFinished ? 'datasource_mismatch' : 'backfill_pending',
-                    error: `${enrollNote}\n\nPredicted RandomForest bands for Module ${moduleNumber} (\`${field}\`) are not visible in Grafana yet.${mismatchHint}`,
+                    unavailableKind,
+                    error: `${enrollNote}\n\nPredicted RandomForest bands for Module ${moduleNumber} (\`${field}\`) are not visible in Grafana yet.${hint}`,
                     toolExecutions,
                     dashboardUid: resolved.uid,
                     dashboardTitle,
@@ -647,9 +674,11 @@ export function formatAddPeerRfPanelReply(result: ProgrammaticAddPeerRfPanelResu
             const headline =
                 result.unavailableKind === 'backfill_pending'
                     ? `### RandomForest vs Peers is still preparing (Graft build ${buildNumber})`
-                    : result.unavailableKind === 'datasource_mismatch'
-                      ? `### RandomForest data not visible to Grafana yet (Graft build ${buildNumber})`
-                      : `### RandomForest vs Peers is not ready yet (Graft build ${buildNumber})`;
+                    : result.unavailableKind === 'backfill_failed'
+                      ? `### RandomForest history fill failed (Graft build ${buildNumber})`
+                      : result.unavailableKind === 'datasource_mismatch'
+                        ? `### RandomForest data not visible to Grafana yet (Graft build ${buildNumber})`
+                        : `### RandomForest vs Peers is not ready yet (Graft build ${buildNumber})`;
             return (
                 `${headline}\n\n` +
                 `${result.error ?? 'Predicted peer RandomForest bands are not available yet.'}\n\n` +

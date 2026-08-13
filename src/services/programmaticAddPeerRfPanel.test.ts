@@ -341,4 +341,62 @@ describe('runProgrammaticAddPeerRfPanel — module scope', () => {
         expect(result.unavailableKind).toBeUndefined();
         jest.useRealTimers();
     });
+
+    it('reports backfill_failed (not datasource mismatch) when exporter backfill errors', async () => {
+        postMock.mockResolvedValue({
+            ok: true,
+            machineId: '2505-200033',
+            alreadyEnrolled: true,
+            backfillQueued: true,
+        });
+        getMock.mockImplementation(async (url: string) => {
+            if (url.includes('/peer-rf/health')) {
+                return { ok: true, controlConfigured: true };
+            }
+            if (url.includes('/peer-rf/machines/')) {
+                return {
+                    enrolled: true,
+                    backfill: {
+                        running: false,
+                        finishedAt: '2026-07-31T20:00:00Z',
+                        error: 'peer training failed: not enough history',
+                    },
+                };
+            }
+            return {};
+        });
+        fetchMock.mockImplementation((opts: { url: string }) => {
+            if (opts.url === '/api/datasources' || opts.url.endsWith('/api/datasources')) {
+                return ofData([
+                    {
+                        type: 'influxdb',
+                        uid: 'ffmk2neut49vkf',
+                        name: 'InfluxDB',
+                        url: 'https://52.35.251.91:8086',
+                        isDefault: true,
+                    },
+                ]);
+            }
+            if (opts.url.includes('/api/datasources/uid/')) {
+                return ofData({ jsonData: { defaultBucket: 'powertechdata' } });
+            }
+            if (opts.url.includes('/api/ds/query')) {
+                return ofData({ results: { A: { frames: [{ data: { values: [[0]] } }] } } });
+            }
+            return ofData({});
+        });
+
+        const capture: { saved?: { panels?: SavedPanel[] } } = {};
+        const result = await runProgrammaticAddPeerRfPanel(client(capture), {
+            dashboardUid: 'afq7tc6hl1m9sb',
+            moduleNumber: 2,
+        });
+        expect(result.ok).toBe(false);
+        expect(result.unavailableKind).toBe('backfill_failed');
+        expect(result.error).toMatch(/not enough history/i);
+        expect(result.error).not.toMatch(/sync-grafana-influx/i);
+        const reply = formatAddPeerRfPanelReply(result, 213);
+        expect(reply).toContain('history fill failed');
+        expect(capture.saved).toBeUndefined();
+    });
 });
