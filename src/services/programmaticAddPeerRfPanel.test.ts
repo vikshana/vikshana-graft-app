@@ -109,6 +109,10 @@ function client(
             }
             if (name === 'update_dashboard') {
                 capture.saved = (args as { dashboard?: { panels?: SavedPanel[] } }).dashboard;
+                if (capture.saved?.panels) {
+                    dashboard.panels = capture.saved.panels as typeof dashboard.panels;
+                    dashboard.version = 8;
+                }
                 return { content: [{ type: 'text', text: JSON.stringify({ uid: dashboard.uid, version: 8 }) }] };
             }
             throw new Error(`unexpected tool ${name}`);
@@ -214,6 +218,71 @@ describe('runProgrammaticAddPeerRfPanel — module scope', () => {
     });
 
     it('auto-enrolls when control is configured and bands appear after wait', async () => {
+        let enrolled = false;
+        getMock.mockImplementation(async (url: string) => {
+            if (url.includes('/peer-rf/health')) {
+                return { ok: true, controlConfigured: true };
+            }
+            if (url.includes('/peer-rf/machines/')) {
+                return {
+                    enrolled: true,
+                    backfill: { running: false, finishedAt: '2026-07-31T20:00:00Z' },
+                };
+            }
+            return {};
+        });
+        postMock.mockImplementation(async () => {
+            enrolled = true;
+            return {
+                ok: true,
+                machineId: '2505-200033',
+                alreadyEnrolled: true,
+                backfillQueued: true,
+            };
+        });
+        fetchMock.mockImplementation((opts: { url: string }) => {
+            if (opts.url === '/api/datasources' || opts.url.endsWith('/api/datasources')) {
+                return ofData([
+                    {
+                        type: 'influxdb',
+                        uid: 'ffmk2neut49vkf',
+                        name: 'InfluxDB',
+                        url: 'https://52.35.251.91:8086',
+                        isDefault: true,
+                    },
+                ]);
+            }
+            if (opts.url.includes('/api/datasources/uid/')) {
+                return ofData({ jsonData: { defaultBucket: 'powertechdata' } });
+            }
+            if (opts.url.includes('/api/ds/query')) {
+                // Bands appear only after enroll (simulates Influx lag past finishedAt).
+                return ofData({
+                    results: {
+                        A: {
+                            frames: [{ data: { values: [[enrolled ? 8 : 0]] } }],
+                        },
+                    },
+                });
+            }
+            return ofData({});
+        });
+
+        const capture: { saved?: { panels?: SavedPanel[] } } = {};
+        const mcp = client(capture);
+        const result = await runProgrammaticAddPeerRfPanel(mcp, {
+            dashboardUid: 'afq7tc6hl1m9sb',
+            moduleNumber: 2,
+        });
+        expect(postMock).toHaveBeenCalled();
+        expect(result.ok).toBe(true);
+        expect(capture.saved?.panels?.some((p) => p.title?.includes('RandomForest vs Peers'))).toBe(true);
+        const getCalls = (mcp.callTool as jest.Mock).mock.calls.filter((c) => c[0]?.name === 'get_dashboard_by_uid');
+        expect(getCalls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('keeps polling after backfill finishedAt until bands appear (does not mislabel mismatch)', async () => {
+        jest.useFakeTimers();
         let probeCount = 0;
         getMock.mockImplementation(async (url: string) => {
             if (url.includes('/peer-rf/health')) {
@@ -231,7 +300,7 @@ describe('runProgrammaticAddPeerRfPanel — module scope', () => {
             ok: true,
             machineId: '2505-200033',
             alreadyEnrolled: true,
-            backfillQueued: true,
+            backfillQueued: false,
         });
         fetchMock.mockImplementation((opts: { url: string }) => {
             if (opts.url === '/api/datasources' || opts.url.endsWith('/api/datasources')) {
@@ -250,11 +319,10 @@ describe('runProgrammaticAddPeerRfPanel — module scope', () => {
             }
             if (opts.url.includes('/api/ds/query')) {
                 probeCount += 1;
-                // Unavailable until enroll path re-probes (probeCount grows past initial resolve).
                 return ofData({
                     results: {
                         A: {
-                            frames: [{ data: { values: [[probeCount >= 3 ? 8 : 0]] } }],
+                            frames: [{ data: { values: [[probeCount >= 6 ? 8 : 0]] } }],
                         },
                     },
                 });
@@ -263,12 +331,14 @@ describe('runProgrammaticAddPeerRfPanel — module scope', () => {
         });
 
         const capture: { saved?: { panels?: SavedPanel[] } } = {};
-        const result = await runProgrammaticAddPeerRfPanel(client(capture), {
+        const pending = runProgrammaticAddPeerRfPanel(client(capture), {
             dashboardUid: 'afq7tc6hl1m9sb',
             moduleNumber: 2,
         });
-        expect(postMock).toHaveBeenCalled();
+        await jest.advanceTimersByTimeAsync(30_000);
+        const result = await pending;
         expect(result.ok).toBe(true);
-        expect(capture.saved?.panels?.some((p) => p.title?.includes('RandomForest vs Peers'))).toBe(true);
+        expect(result.unavailableKind).toBeUndefined();
+        jest.useRealTimers();
     });
 });

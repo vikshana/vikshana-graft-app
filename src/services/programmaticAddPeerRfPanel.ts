@@ -38,8 +38,10 @@ async function waitForPeerRfBands(opts: {
     machineId: string;
     moduleNumber: number;
     timeoutMs?: number;
+    pollMs?: number;
 }): Promise<{ availability: PeerRfAvailabilityResult; backfillFinished: boolean; statusNote: string }> {
     const timeoutMs = opts.timeoutMs ?? PEER_RF_BAND_WAIT_MS;
+    const pollMs = opts.pollMs ?? PEER_RF_BAND_POLL_MS;
     const deadline = Date.now() + timeoutMs;
     let availability = await probePeerRfModelAvailability(opts);
     let backfillFinished = false;
@@ -49,16 +51,22 @@ async function waitForPeerRfBands(opts: {
         const status = await fetchPeerRfMachineStatus(opts.machineId);
         if (status.backfill?.running === false && status.backfill?.finishedAt) {
             backfillFinished = true;
-            availability = await probePeerRfModelAvailability(opts);
             statusNote = status.backfill.error
                 ? `Exporter backfill finished with error: ${status.backfill.error}`
                 : 'Exporter backfill finished.';
-            break;
-        }
-        if (status.backfill?.running) {
+            availability = await probePeerRfModelAvailability(opts);
+            if (availability.available) {
+                break;
+            }
+            // Hard failure from exporter — no point waiting for Influx lag.
+            if (status.backfill.error) {
+                break;
+            }
+            // Keep polling until timeout: bands can lag finishedAt (Influx write delay).
+        } else if (status.backfill?.running) {
             statusNote = 'Exporter backfill still running.';
         }
-        await sleep(PEER_RF_BAND_POLL_MS);
+        await sleep(pollMs);
         availability = await probePeerRfModelAvailability(opts);
     }
 
@@ -68,7 +76,9 @@ async function waitForPeerRfBands(opts: {
             statusNote = 'Exporter backfill still running.';
         } else if (status.backfill?.finishedAt) {
             backfillFinished = true;
-            statusNote = 'Exporter backfill finished.';
+            statusNote = status.backfill.error
+                ? `Exporter backfill finished with error: ${status.backfill.error}`
+                : 'Exporter backfill finished.';
         }
     }
 
@@ -206,6 +216,36 @@ function finishTool(step: ToolExecution, outcome: { ok: boolean; error?: string;
 function findPanelByTitleContains(entries: DashboardPanelEntry[], needle: string): DashboardPanelEntry | undefined {
     const n = needle.toLowerCase();
     return entries.find((e) => e.title.toLowerCase().includes(n));
+}
+
+/** Post-save check — panel present with peer_rf Flux targets (not empty placeholder). */
+function verifyPeerRfPanel(
+    panel: PanelRecord | undefined,
+    expectedTitle: string,
+    machineId: string,
+    field: string
+): string | undefined {
+    if (!panel) {
+        return `Save reported success but panel "${expectedTitle}" is missing from the dashboard.`;
+    }
+    const targets = getPanelTargetList(panel);
+    if (targets.length < 4) {
+        return (
+            `Panel "${expectedTitle}" has ${targets.length} query target(s); ` +
+            `expected 4 (Actual, Upper, Lower, Expected).`
+        );
+    }
+    const blob = JSON.stringify(targets);
+    if (!blob.includes('peer_rf') || !blob.includes('ml_predictions')) {
+        return `Panel "${expectedTitle}" is missing peer RandomForest Flux filters (model=peer_rf).`;
+    }
+    if (!blob.includes(machineId)) {
+        return `Panel "${expectedTitle}" does not reference machine \`${machineId}\`.`;
+    }
+    if (!blob.includes(field)) {
+        return `Panel "${expectedTitle}" does not reference field \`${field}\`.`;
+    }
+    return undefined;
 }
 
 function maxPanelId(entries: DashboardPanelEntry[]): number {
@@ -533,7 +573,61 @@ export async function runProgrammaticAddPeerRfPanel(
     }
 
     const versionMatch = saveResult.text?.match(/"version"\s*:\s*(\d+)/);
-    const version = versionMatch ? Number(versionMatch[1]) : undefined;
+    let version = versionMatch ? Number(versionMatch[1]) : undefined;
+
+    const verifyStep = pendingTool('get_dashboard_by_uid');
+    toolExecutions.push(verifyStep);
+    const verifyFetch = await callMcpTool(mcpClient, 'get_dashboard_by_uid', { uid: resolved.uid });
+    toolExecutions[toolExecutions.length - 1] = finishTool(verifyStep, verifyFetch);
+    if (!verifyFetch.ok) {
+        return {
+            ok: false,
+            error: `Save appeared to succeed but verification failed: ${verifyFetch.error ?? 'reload failed'}`,
+            toolExecutions,
+            dashboardUid: resolved.uid,
+            dashboardTitle,
+            machineId,
+            moduleNumber,
+            panelTitle,
+        };
+    }
+    const verified = extractDashboardFromGetByUid(verifyFetch.text);
+    if (!verified?.dashboard) {
+        return {
+            ok: false,
+            error: 'Save appeared to succeed but verification could not parse the dashboard.',
+            toolExecutions,
+            dashboardUid: resolved.uid,
+            dashboardTitle,
+            machineId,
+            moduleNumber,
+            panelTitle,
+        };
+    }
+    if (typeof verified.dashboard.version === 'number') {
+        version = verified.dashboard.version;
+    }
+    const verifiedEntries = listDashboardPanels(verified.dashboard.panels);
+    const verifiedPanel = findPanelByTitleContains(verifiedEntries, panelTitle);
+    const verifyError = verifyPeerRfPanel(
+        verifiedPanel?.panel as PanelRecord | undefined,
+        panelTitle,
+        machineId,
+        field
+    );
+    if (verifyError) {
+        return {
+            ok: false,
+            error: verifyError,
+            toolExecutions,
+            dashboardUid: resolved.uid,
+            dashboardTitle,
+            machineId,
+            moduleNumber,
+            panelTitle,
+            version,
+        };
+    }
 
     return {
         ok: true,
