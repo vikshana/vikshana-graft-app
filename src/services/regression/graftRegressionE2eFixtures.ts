@@ -128,6 +128,38 @@ export function e2eDashboardRowWithPanelsExpectContains(rowTitle: string): strin
     return ['Row and panels created', rowTitle];
 }
 
+/** Sandbox Skywater-MN — RF vs Peers panel lives here, not on the Keysight E2E clone. */
+export const SANDBOX_SKYWATER_DASHBOARD_UID = 'idHkqdqnk';
+
+export function e2eGrafanaAlertCreatePrompt(ruleTitle: string): string {
+    return (
+        `Create a Grafana-managed alert named "${ruleTitle}" for the panel titled ` +
+        `"Module 2 Current — RandomForest vs Peers" on the dashboard with UID ${SANDBOX_SKYWATER_DASHBOARD_UID}. ` +
+        `Configure the alert to trigger when the RandomForest model identifies Module 2 Current as anomalous compared with its peer modules. ` +
+        `The anomalous condition must remain true for longer than 1 minute before the alert fires. ` +
+        `Do not invent an arbitrary RandomForest threshold. ` +
+        `Configure the alert to notify the Alex Test Email contact point.`
+    );
+}
+
+export const E2E_GRAFANA_ALERT_CREATE_RULE_TITLE = 'Graft E2E RF vs Peers';
+
+export function e2eGrafanaAlertCreateExpectContains(ruleTitle: string): string[] {
+    return [ruleTitle, SANDBOX_SKYWATER_DASHBOARD_UID, 'Alex Test Email', 'RandomForest vs Peers'];
+}
+
+export const E2E_GRAFANA_ALERT_CREATE_EXPECT_NOT_CONTAINS = [
+    'Need clarification',
+    'Own History',
+    'typical Own History layout',
+] as const;
+
+export function extractAlertRuleUidFromReply(reply: string, ruleTitle: string): string | undefined {
+    const escaped = ruleTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = reply.match(new RegExp(`${escaped}[^\\n]*?\\(\`?([A-Za-z0-9_-]{8,})\`?\\)`));
+    return match?.[1];
+}
+
 /** Default titles from multi-panel create programmatic path (Keysight regression). */
 export const E2E_MULTI_PANEL_DEFAULT_TITLES = [
     'Gauge Panel',

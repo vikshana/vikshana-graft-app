@@ -16,10 +16,14 @@
  *        GRAFANA_ADMIN_USER=<username> GRAFANA_ADMIN_PASSWORD=<password>
  */
 import {
+    E2E_GRAFANA_ALERT_CREATE_EXPECT_NOT_CONTAINS,
     E2E_REGRESSION_CASES,
     E2E_MULTI_PANEL_DEFAULT_TITLES,
     e2eDashboardRowWithPanelsExpectContains,
     e2eDashboardRowWithPanelsPrompt,
+    e2eGrafanaAlertCreateExpectContains,
+    e2eGrafanaAlertCreatePrompt,
+    E2E_GRAFANA_ALERT_CREATE_RULE_TITLE,
     e2ePanelCreateExpectContains,
     e2ePanelCreatePrompt,
     e2ePanelRemovePrompt,
@@ -219,6 +223,28 @@ test.describe('Graft regression E2E (mutating)', () => {
         });
 
         assertReplyExpectations(reply, removeCase.expectReplyContains, removeCase.expectReplyNotContains);
+        await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
+    });
+
+    test('alert-create-peer-rf-module2', async ({ page }) => {
+        test.setTimeout(210_000);
+
+        const ruleTitle = E2E_GRAFANA_ALERT_CREATE_RULE_TITLE;
+        const prompt = e2eGrafanaAlertCreatePrompt(ruleTitle);
+
+        await openFreshGraftChat(page);
+        const startCopyCount = await sendGraftPrompt(page, prompt);
+        const reply = await waitForAssistantReply(page, {
+            timeoutMs: 180_000,
+            startCopyCount,
+        });
+
+        expect(reply, reply.slice(0, 400)).toMatch(/grafana alert (created|updated)/i);
+        assertReplyExpectations(
+            reply,
+            e2eGrafanaAlertCreateExpectContains(ruleTitle),
+            [...E2E_GRAFANA_ALERT_CREATE_EXPECT_NOT_CONTAINS]
+        );
         await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
     });
 });

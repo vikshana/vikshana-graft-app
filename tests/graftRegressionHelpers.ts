@@ -159,3 +159,14 @@ export async function removeE2ePanelsIfPresent(
         ).toBe(true);
     }
 }
+
+export async function deleteGrafanaAlertRuleIfPresent(page: Page, ruleUid: string): Promise<void> {
+    const response = await page.request.delete(
+        `/api/v1/provisioning/alert-rules/${encodeURIComponent(ruleUid)}`,
+        { headers: { 'X-Disable-Provenance': 'true' } }
+    );
+    expect(
+        [204, 404].includes(response.status()),
+        `Could not delete alert rule ${ruleUid}: HTTP ${response.status()}`
+    ).toBe(true);
+}
