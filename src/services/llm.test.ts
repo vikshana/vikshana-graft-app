@@ -145,7 +145,7 @@ describe('needsDashboardContinueNudge', () => {
 
 describe('buildContinuationUserMessage', () => {
     it('adds clone instructions for visual copy requests', () => {
-        const msg = buildContinuationUserMessage('Create a visual copy of dashboard X for machine Y');
+        const msg = buildContinuationUserMessage(cloneUser);
         // Fresh clone continuations route to the directive forced-clone message,
         // which mandates the save and forbids asking the user questions.
         expect(msg).toContain('MANDATORY save');

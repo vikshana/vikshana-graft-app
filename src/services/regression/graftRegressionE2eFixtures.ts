@@ -1,5 +1,14 @@
 import { KEYSIGHT_DASHBOARD_UID, REGRESSION_CASES, type RegressionCase } from './graftRegressionFixtures';
 
+/** Live sandbox Keysight UID (Jest fixtures still use historical `cfo0wckufbdhce`). */
+export function e2eDashboardUid(): string {
+    return process.env.GRAFANA_E2E_DASHBOARD_UID?.trim() || KEYSIGHT_DASHBOARD_UID;
+}
+
+function withE2eDashboardUid(prompt: string): string {
+    return prompt.split(KEYSIGHT_DASHBOARD_UID).join(e2eDashboardUid());
+}
+
 export type E2eRegressionMode = 'read-only' | 'mutating';
 
 export interface E2eRegressionCase {
@@ -28,7 +37,7 @@ function toE2eCase(
     overrides: Partial<E2eRegressionCase> & Pick<E2eRegressionCase, 'e2eEnabled' | 'e2eMode'>
 ): E2eRegressionCase {
     const base = caseById(id);
-    return {
+    const merged: E2eRegressionCase = {
         id: base.id,
         prompt: base.prompt,
         replyTimeoutMs: DEFAULT_REPLY_TIMEOUT_MS,
@@ -36,6 +45,8 @@ function toE2eCase(
         expectReplyNotContains: base.expectReplyNotContains,
         ...overrides,
     };
+    merged.prompt = withE2eDashboardUid(merged.prompt);
+    return merged;
 }
 
 /** Playwright E2E metadata derived from historical Jest regression cases. */
@@ -85,15 +96,15 @@ export const E2E_REGRESSION_CASES: E2eRegressionCase[] = [
 ];
 
 export function e2ePanelCreatePrompt(panelName: string): string {
-    return `Create a bar chart panel called "${panelName}" for Keysight.`;
+    return `Create a bar chart panel called "${panelName}" on dashboard UID = ${e2eDashboardUid()}.`;
 }
 
 export function e2ePanelRenamePrompt(sourceName: string, targetName: string): string {
-    return `Rename the "${sourceName}" panel to "${targetName}" on dashboard UID = ${KEYSIGHT_DASHBOARD_UID}.`;
+    return `Rename the "${sourceName}" panel to "${targetName}" on dashboard UID = ${e2eDashboardUid()}.`;
 }
 
 export function e2ePanelRemovePrompt(panelName: string): string {
-    return `Remove the panel named "${panelName}" from dashboard UID = ${KEYSIGHT_DASHBOARD_UID}.`;
+    return `Remove the panel named "${panelName}" from dashboard UID = ${e2eDashboardUid()}.`;
 }
 
 export function e2ePanelRenameExpectContains(targetName: string): string[] {
@@ -105,7 +116,7 @@ export function e2ePanelCreateExpectContains(panelName: string): string[] {
 }
 
 export function e2eDashboardRowWithPanelsPrompt(rowTitle: string): string {
-    return `Create a dashboard row called "${rowTitle}" and add two panels to it for dashboard with UID = ${KEYSIGHT_DASHBOARD_UID}.`;
+    return `Create a dashboard row called "${rowTitle}" and add two panels to it for dashboard with UID = ${e2eDashboardUid()}.`;
 }
 
 export function e2eDashboardRowWithPanelsExpectContains(rowTitle: string): string[] {
