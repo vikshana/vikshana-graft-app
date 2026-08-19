@@ -30,4 +30,11 @@ describe('peerRfPanelAddParse', () => {
         expect(peerRfPanelTitle(3)).toBe('Module 3 Current — RandomForest vs Peers (Influx)');
         expect(peerRfPanelTitle(5)).toBe('Module 5 Current — RandomForest vs Peers (Influx)');
     });
+
+    it('does not treat RandomForest vs Peers alert create as panel create', () => {
+        const prompt =
+            'Create a Grafana-managed alert for the panel titled "Module 2 Current — RandomForest vs Peers" on the dashboard with UID idHkqdqnk. Compare Module 2 Current against its peer modules. Configure the alert to notify the Alex Test Email contact point.';
+        expect(messageMentionsAddPeerRfPanel(prompt)).toBe(false);
+        expect(parseAddPeerRfPanelRequest(prompt)).toBeNull();
+    });
 });

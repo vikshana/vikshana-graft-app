@@ -194,9 +194,10 @@ function assertHandlerRouting(c: RegressionCase): void {
         }
         case 'grafana-alert-create':
             expect(messageMentionsGrafanaAlertCreate(prompt)).toBe(true);
-            expect(parseGrafanaAlertCreateRequest(prompt)?.panelTitle).toContain('Peer Band');
+            expect(parseGrafanaAlertCreateRequest(prompt)?.panelTitle).toBeTruthy();
             expect(messageMentionsGrafanaAlertUpdate(prompt)).toBe(false);
             expect(messageMentionsPeerBandPanelCreate(prompt)).toBe(false);
+            expect(messageMentionsAddPeerRfPanel(prompt)).toBe(false);
             expect(messageDescribesPanelCreate(prompt)).toBe(false);
             break;
         case 'grafana-alert-update':
@@ -250,7 +251,7 @@ function assertHandlerRouting(c: RegressionCase): void {
 describe('graft historical failure regression', () => {
     describe('fixture catalog', () => {
         it('documents known failure patterns', () => {
-            expect(REGRESSION_CASES).toHaveLength(21);
+            expect(REGRESSION_CASES).toHaveLength(22);
             const ids = REGRESSION_CASES.map((c) => c.id);
             expect(new Set(ids).size).toBe(ids.length);
         });

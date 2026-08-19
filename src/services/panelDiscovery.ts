@@ -72,6 +72,7 @@ export function normalizePanelTitleForMatch(title: string): string {
     return title
         .trim()
         .replace(/^["']|["']$/g, '')
+        .replace(/[—–−-]+/g, '-')
         .replace(/\s+/g, ' ')
         .toLowerCase();
 }
@@ -126,10 +127,11 @@ function stripPanelWordSuffix(title: string): string {
 }
 
 /**
- * Panel lookup for remove/delete — exact match first, then prefix match when the user
- * omits words (e.g. "Cartridge Happiness Panel" → "Cartridge Happiness Score").
+ * Exact title first, then prefix match when the user omits a suffix
+ * (e.g. "RandomForest vs Peers" → "RandomForest vs Peers (Influx)",
+ * or "Cartridge Happiness Panel" → "Cartridge Happiness Score").
  */
-export function findPanelForRemoval(
+export function findPanelByTitleRelaxed(
     entries: DashboardPanelEntry[],
     title: string
 ): DashboardPanelEntry | undefined {
@@ -158,6 +160,17 @@ export function findPanelForRemoval(
         )[0];
     }
     return undefined;
+}
+
+/**
+ * Panel lookup for remove/delete — exact match first, then prefix match when the user
+ * omits words (e.g. "Cartridge Happiness Panel" → "Cartridge Happiness Score").
+ */
+export function findPanelForRemoval(
+    entries: DashboardPanelEntry[],
+    title: string
+): DashboardPanelEntry | undefined {
+    return findPanelByTitleRelaxed(entries, title);
 }
 
 /** Resolve a panel node from dashboard.panels tree by listDashboardPanels path indices. */

@@ -118,6 +118,75 @@ describe('grafanaAlertBuild', () => {
         expect(c?.lowerRefId).toBe('D');
     });
 
+    const peerRfPanel = {
+        id: 88,
+        type: 'timeseries',
+        title: 'Module 2 Current — RandomForest vs Peers (Influx)',
+        datasource: { uid: 'influx-uid', type: 'influxdb' },
+        targets: [
+            {
+                refId: 'A',
+                datasource: { uid: 'influx-uid', type: 'influxdb' },
+                legendFormat: 'Module 2 (Actual)',
+                query:
+                    'from(bucket: v.bucket)\n  |> filter(fn: (r) => r.machine == "2103-176030" and r._field == "Module2_Current_A")\n  |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: "Module 2 (Actual)" }))',
+                rawQuery: true,
+            },
+            {
+                refId: 'B',
+                datasource: { uid: 'influx-uid', type: 'influxdb' },
+                legendFormat: 'Upper Bound (Peer RF)',
+                query:
+                    'from(bucket: v.bucket)\n  |> filter(fn: (r) => r._measurement == "ml_predictions")\n  |> filter(fn: (r) => r.model == "peer_rf")\n  |> filter(fn: (r) => r._field == "upper")\n  |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: "Upper Bound (Peer RF)" }))',
+                rawQuery: true,
+            },
+            {
+                refId: 'C',
+                datasource: { uid: 'influx-uid', type: 'influxdb' },
+                legendFormat: 'Lower Bound (Peer RF)',
+                query:
+                    'from(bucket: v.bucket)\n  |> filter(fn: (r) => r._measurement == "ml_predictions")\n  |> filter(fn: (r) => r.model == "peer_rf")\n  |> filter(fn: (r) => r._field == "lower")\n  |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: "Lower Bound (Peer RF)" }))',
+                rawQuery: true,
+            },
+            {
+                refId: 'D',
+                datasource: { uid: 'influx-uid', type: 'influxdb' },
+                legendFormat: 'Expected (Peer RF)',
+                query:
+                    'from(bucket: v.bucket)\n  |> filter(fn: (r) => r._measurement == "ml_predictions")\n  |> filter(fn: (r) => r.model == "peer_rf")\n  |> filter(fn: (r) => r._field == "expected")\n  |> map(fn: (r) => ({ _time: r._time, _value: r._value, _field: "Expected (Peer RF)" }))',
+                rawQuery: true,
+            },
+        ],
+    };
+
+    it('classifies peer-RF Actual/Upper/Lower as A/B/C (not Own History A/C/D)', () => {
+        const c = classifyActualUpperLowerTargets(peerRfPanel);
+        expect(c?.actualRefId).toBe('A');
+        expect(c?.upperRefId).toBe('B');
+        expect(c?.lowerRefId).toBe('C');
+        const built = buildBandBreachAlertQueries(peerRfPanel);
+        expect('error' in built).toBe(false);
+        if ('error' in built) {
+            return;
+        }
+        expect(String(built.data[1].model.query)).toContain('peer_rf');
+        expect(String(built.data[1].model.query)).toContain('upper');
+    });
+
+    it('explains when a peer-RF panel has Actual+Expected but no model bands', () => {
+        const incomplete = {
+            ...peerRfPanel,
+            targets: [peerRfPanel.targets[0], peerRfPanel.targets[3]],
+        };
+        const built = buildBandBreachAlertQueries(incomplete);
+        expect('error' in built).toBe(true);
+        if (!('error' in built)) {
+            return;
+        }
+        expect(built.error).toMatch(/will not invent a RandomForest threshold/i);
+        expect(built.error).toMatch(/Upper Bound/i);
+    });
+
     it('builds Reduce Last + Math breach queries with rewritten Flux', () => {
         const built = buildBandBreachAlertQueries(ownHistoryPanel);
         expect('error' in built).toBe(false);

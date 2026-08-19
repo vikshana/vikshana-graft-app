@@ -1,5 +1,6 @@
 import { extractAllDashboardUids, extractDashboardUidFromMessage } from './dashboardMentionParse';
 import { extractRequestedDashboardTitle, findMachineIdsInText } from './dashboardCloneParse';
+import { messageMentionsGrafanaAlertCreate, messageMentionsGrafanaAlertUpdate } from './grafanaAlertParse';
 
 /** Peer-RF predicts ONE module's current from its peer modules, so the panel is module-scoped. */
 export function peerRfPanelTitle(moduleNumber: number): string {
@@ -29,6 +30,9 @@ function normalizeMessageQuotes(text: string): string {
 export function messageMentionsAddPeerRfPanel(message: string): boolean {
     const text = normalizeMessageQuotes(message.trim());
     if (!text) {
+        return false;
+    }
+    if (messageMentionsGrafanaAlertCreate(text) || messageMentionsGrafanaAlertUpdate(text)) {
         return false;
     }
     return (

@@ -40,10 +40,22 @@ describe('grafanaAlertParse', () => {
         expect(req?.pendingFor).toBe('1m');
     });
 
-    it('does not treat Alert Test Own History panel create as alert rule create', () => {
-        expect(messageMentionsGrafanaAlertCreate(PANEL_CREATE_WITH_ALERT_TEST_TITLE)).toBe(false);
-        expect(parseGrafanaAlertCreateRequest(PANEL_CREATE_WITH_ALERT_TEST_TITLE)).toBeNull();
-        expect(parseAddOwnHistoryPanelRequest(PANEL_CREATE_WITH_ALERT_TEST_TITLE)?.moduleNumber).toBe(1);
+    it('parses RandomForest vs Peers alert create (operator wording, truncated UID)', () => {
+        const prompt =
+            'Create a Grafana-managed alert for the panel titled "Module 2 Current — RandomForest vs Peers" on the dashboard with UID idHkqdqnk. Inspect the existing panel queries and determine how the RandomForest model identifies anomalous behavior. Use the existing RandomForest anomaly score, prediction, or anomaly classification from the panel as the basis for the alert. Configure the alert to trigger when the RandomForest model identifies Module 2 Current as anomalous compared with its peer modules. The anomalous condition must remain true for longer than 1 minute before the alert fires.Modify the panel queries as needed so they are compatible with Grafana Alerting. Do not invent an arbitrary RandomForest threshold or fake model output. If the panel does not contain sufficient RandomForest output to determine whether Module 2 is anomalous, explain what is missing instead of creating an invalid alert. Configure the alert to notify the Alex Test Email contact point.';
+        expect(messageMentionsGrafanaAlertCreate(prompt)).toBe(true);
+        const req = parseGrafanaAlertCreateRequest(prompt);
+        expect(req?.dashboardUid).toBe('idHkqdqnk');
+        expect(req?.panelTitle).toBe('Module 2 Current — RandomForest vs Peers');
+        expect(req?.contactPoint).toBe('Alex Test Email');
+        expect(req?.peerRfAlert).toBe(true);
+        expect(req?.pendingFor).toBe('1m');
+        expect(req?.conditionSummary).toMatch(/RandomForest vs Peers/i);
+        expect(messageHasProgrammaticHandler(prompt)).toBe(true);
+        const guidance = formatGrafanaAlertGuidanceReply(req!, 213, 'Panel titled **Module 2 Current — RandomForest vs Peers** was not found');
+        expect(guidance).toContain('RandomForest vs Peers alert');
+        expect(guidance).not.toContain('typical Own History layout');
+        expect(guidance).toMatch(/will \*\*not\*\* invent/i);
     });
 
     // Production: alert-for-existing Peer Band panel was mis-routed as panel create → "already exists".

@@ -97,13 +97,16 @@ function targetLabel(target: PanelRecord): string {
     return fieldMap?.[1] ?? '';
 }
 
-function scoreTargetRole(label: string, query: string): 'actual' | 'upper' | 'lower' | 'mean' | null {
+function scoreTargetRole(label: string, query: string): 'actual' | 'upper' | 'lower' | 'mean' | 'expected' | null {
     const blob = `${label}\n${query}`.toLowerCase();
-    if (/\bupper\b/.test(blob) || /upper\s*bound/.test(blob)) {
+    if (/\bupper\b/.test(blob) || /upper\s*bound/.test(blob) || /r\._field\s*==\s*"upper"/.test(blob)) {
         return 'upper';
     }
-    if (/\blower\b/.test(blob) || /lower\s*bound/.test(blob)) {
+    if (/\blower\b/.test(blob) || /lower\s*bound/.test(blob) || /r\._field\s*==\s*"lower"/.test(blob)) {
         return 'lower';
+    }
+    if (/\bexpected\b/.test(blob) || /r\._field\s*==\s*"expected"/.test(blob)) {
+        return 'expected';
     }
     if (/\bmean\b/.test(blob) || /historical\s+mean/.test(blob)) {
         return 'mean';
@@ -114,9 +117,16 @@ function scoreTargetRole(label: string, query: string): 'actual' | 'upper' | 'lo
     return null;
 }
 
+export function panelLooksLikePeerRf(panel: PanelRecord): boolean {
+    const title = typeof panel.title === 'string' ? panel.title : '';
+    const blob = `${title}\n${JSON.stringify(panel.targets ?? [])}`.toLowerCase();
+    return blob.includes('peer_rf') || /random\s*forest\s+vs\s+peers/.test(blob);
+}
+
 /**
  * Pick Actual / Upper Bound / Lower Bound targets from an Own History (±2σ) panel.
  * Prefers legendFormat / Flux _field labels; falls back to A / C / D when those refIds exist.
+ * Peer-RF panels use A=Actual, B=Upper, C=Lower (D=Expected) — never invent a threshold from Expected alone.
  */
 export function classifyActualUpperLowerTargets(panel: PanelRecord): ClassifiedBoundTargets | null {
     const targets = getPanelTargetList(panel);
@@ -124,6 +134,7 @@ export function classifyActualUpperLowerTargets(panel: PanelRecord): ClassifiedB
         return null;
     }
 
+    const peerRf = panelLooksLikePeerRf(panel);
     let actual: PanelRecord | undefined;
     let upper: PanelRecord | undefined;
     let lower: PanelRecord | undefined;
@@ -148,11 +159,20 @@ export function classifyActualUpperLowerTargets(panel: PanelRecord): ClassifiedB
     if (!actual) {
         actual = byRef('A');
     }
-    if (!upper) {
-        upper = byRef('C');
-    }
-    if (!lower) {
-        lower = byRef('D');
+    if (peerRf) {
+        if (!upper) {
+            upper = byRef('B');
+        }
+        if (!lower) {
+            lower = byRef('C');
+        }
+    } else {
+        if (!upper) {
+            upper = byRef('C');
+        }
+        if (!lower) {
+            lower = byRef('D');
+        }
     }
 
     if (!actual || !upper || !lower) {
@@ -164,8 +184,8 @@ export function classifyActualUpperLowerTargets(panel: PanelRecord): ClassifiedB
         upper,
         lower,
         actualRefId: String(actual.refId ?? 'A'),
-        upperRefId: String(upper.refId ?? 'C'),
-        lowerRefId: String(lower.refId ?? 'D'),
+        upperRefId: String(upper.refId ?? (peerRf ? 'B' : 'C')),
+        lowerRefId: String(lower.refId ?? (peerRf ? 'C' : 'D')),
     };
 }
 
@@ -272,6 +292,15 @@ export function buildBandBreachAlertQueries(
 ): BuiltBandBreachAlert | { error: string } {
     const classified = classifyActualUpperLowerTargets(panel);
     if (!classified) {
+        if (panelLooksLikePeerRf(panel)) {
+            return {
+                error:
+                    'This RandomForest vs Peers panel does not have enough model output to tell whether Module Current is anomalous. ' +
+                    'Graft needs the panel’s existing **Upper Bound (Peer RF)** and **Lower Bound (Peer RF)** series ' +
+                    '(`ml_predictions` / `model=peer_rf`). Expected/prediction alone is not an anomaly classification — ' +
+                    'Graft will not invent a RandomForest threshold. Recreate the RandomForest vs Peers panel so those bands exist, then retry.',
+            };
+        }
         return {
             error:
                 'Could not find Actual, Upper Bound, and Lower Bound queries on the panel. ' +

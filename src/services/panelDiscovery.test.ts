@@ -47,6 +47,13 @@ describe('findPanelForRemoval', () => {
             'Cartridge Happiness Score'
         );
     });
+
+    it('maps RandomForest vs Peers to the (Influx) panel title', () => {
+        const entries = listDashboardPanels([
+            { id: 9, title: 'Module 2 Current — RandomForest vs Peers (Influx)', type: 'timeseries' },
+        ]);
+        expect(findPanelForRemoval(entries, 'Module 2 Current — RandomForest vs Peers')?.panelId).toBe(9);
+    });
 });
 
 describe('removePanelAtPath', () => {

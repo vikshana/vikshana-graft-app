@@ -196,6 +196,16 @@ export const REGRESSION_CASES: RegressionCase[] = [
         expectLlmIntent: 'programmatic',
     },
     {
+        id: 'alert-create-peer-rf-module2',
+        failure:
+            'RandomForest vs Peers alert create dumped Own History UI steps instead of creating (truncated UID + omitted (Influx) suffix)',
+        prompt:
+            'Create a Grafana-managed alert for the panel titled "Module 2 Current — RandomForest vs Peers" on the dashboard with UID idHkqdqnk. Inspect the existing panel queries and determine how the RandomForest model identifies anomalous behavior. Use the existing RandomForest anomaly score, prediction, or anomaly classification from the panel as the basis for the alert. Configure the alert to trigger when the RandomForest model identifies Module 2 Current as anomalous compared with its peer modules. The anomalous condition must remain true for longer than 1 minute before the alert fires.Modify the panel queries as needed so they are compatible with Grafana Alerting. Alert queries must return alert-compatible numeric time series and should return only _time and _value where required. Do not retain _field labels if they cause long-series data errors. Use the appropriate Reduce expression with the Last function on the RandomForest model output before evaluating the alert condition. Do not invent an arbitrary RandomForest threshold or fake model output. Use the anomaly threshold or classification already defined by the existing RandomForest panel/model. If the panel does not contain sufficient RandomForest output to determine whether Module 2 is anomalous, explain what is missing instead of creating an invalid alert. Configure the alert to notify the Alex Test Email contact point.',
+        expectHandler: 'grafana-alert-create',
+        expectProgrammatic: true,
+        expectLlmIntent: 'programmatic',
+    },
+    {
         id: 'alert-update-description-by-panel',
         failure:
             'Change alert description by panel title was mis-routed to LLM dashboard save',

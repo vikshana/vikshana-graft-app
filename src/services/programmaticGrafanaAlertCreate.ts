@@ -11,7 +11,7 @@ import {
     parseEvalIntervalSeconds,
     reconcilePendingWithEvalInterval,
 } from './grafanaAlertBuild';
-import { findPanelByStrictTitle, listDashboardPanels } from './panelDiscovery';
+import { findPanelByTitleRelaxed, listDashboardPanels } from './panelDiscovery';
 
 const PROVISION_HEADERS = {
     'X-Disable-Provenance': 'true',
@@ -117,9 +117,91 @@ async function grafanaPut<T>(url: string, data: unknown): Promise<T> {
     return res.data;
 }
 
-interface DashboardApiResponse {
-    dashboard?: Record<string, unknown>;
-    meta?: { folderUid?: string; folderTitle?: string };
+interface SearchHit {
+    uid?: string;
+    title?: string;
+    type?: string;
+}
+
+const MIN_UID_PREFIX_LEN = 8;
+
+async function loadDashboardByUidOrPrefix(
+    requestedUid: string
+): Promise<{ dashResp: DashboardApiResponse; resolvedUid: string } | { error: string }> {
+    try {
+        const dashResp = await grafanaGet<DashboardApiResponse>(
+            `/api/dashboards/uid/${encodeURIComponent(requestedUid)}`
+        );
+        if (dashResp?.dashboard) {
+            return { dashResp, resolvedUid: requestedUid };
+        }
+    } catch (err) {
+        // Fall through to prefix search — operators often paste a truncated UID.
+        const prefixErr = extractErrorMessage(err);
+        if (requestedUid.length < MIN_UID_PREFIX_LEN) {
+            return { error: `Could not load dashboard \`${requestedUid}\`: ${prefixErr}` };
+        }
+        try {
+            const hits = await grafanaGet<SearchHit[]>('/api/search?type=dash-db&limit=5000');
+            const matches = (Array.isArray(hits) ? hits : []).filter((h) => {
+                const uid = (h.uid ?? '').trim();
+                return uid === requestedUid || uid.startsWith(requestedUid);
+            });
+            if (matches.length === 1 && matches[0].uid) {
+                const resolvedUid = matches[0].uid;
+                const dashResp = await grafanaGet<DashboardApiResponse>(
+                    `/api/dashboards/uid/${encodeURIComponent(resolvedUid)}`
+                );
+                if (!dashResp?.dashboard) {
+                    return {
+                        error: `Dashboard \`${resolvedUid}\` (matched from \`${requestedUid}\`) returned no dashboard JSON.`,
+                    };
+                }
+                return { dashResp, resolvedUid };
+            }
+            if (matches.length > 1) {
+                const listed = matches
+                    .slice(0, 8)
+                    .map((h) => `\`${h.uid}\` (${h.title ?? 'untitled'})`)
+                    .join(', ');
+                return {
+                    error:
+                        `Dashboard UID \`${requestedUid}\` is incomplete and matches ${matches.length} dashboards: ${listed}. ` +
+                        `Use the full UID from the Grafana URL (the part after \`/d/\`).`,
+                };
+            }
+            return {
+                error:
+                    `Could not load dashboard \`${requestedUid}\`: ${prefixErr}. ` +
+                    `If this UID was copied short, paste the full UID from the dashboard URL.`,
+            };
+        } catch (searchErr) {
+            return {
+                error: `Could not load dashboard \`${requestedUid}\`: ${prefixErr} (search: ${extractErrorMessage(searchErr)})`,
+            };
+        }
+    }
+    return { error: `Dashboard \`${requestedUid}\` returned no dashboard JSON.` };
+}
+
+function similarPanelHint(entries: ReturnType<typeof listDashboardPanels>, want: string): string {
+    const needle = want.toLowerCase();
+    const similar = entries
+        .filter((e) => {
+            const t = e.title.toLowerCase();
+            return (
+                t.includes('randomforest') ||
+                t.includes('random forest') ||
+                t.includes('peer rf') ||
+                (needle.length >= 12 && t.includes(needle.slice(0, 24)))
+            );
+        })
+        .slice(0, 8)
+        .map((e) => `“${e.title}”`);
+    if (similar.length === 0) {
+        return '';
+    }
+    return ` Nearby titles: ${similar.join('; ')}.`;
 }
 
 interface ContactPointRow {
@@ -259,20 +341,20 @@ export async function runProgrammaticGrafanaAlertCreate(
         guidance: formatGrafanaAlertGuidanceReply(request, buildNumber, error),
     });
 
-    const dashboardUid = request.dashboardUid?.trim();
-    if (!dashboardUid) {
+    const dashboardUidRequested = request.dashboardUid?.trim();
+    if (!dashboardUidRequested) {
         return guidanceBase('Missing dashboard UID. Include `dashboard with UID = …` in the prompt.');
     }
     if (!request.panelTitle?.trim()) {
         return guidanceBase('Missing panel title. Include `panel titled "…"` in the prompt.');
     }
 
-    let dashResp: DashboardApiResponse;
-    try {
-        dashResp = await grafanaGet<DashboardApiResponse>(`/api/dashboards/uid/${dashboardUid}`);
-    } catch (err) {
-        return guidanceBase(`Could not load dashboard \`${dashboardUid}\`: ${extractErrorMessage(err)}`);
+    const loaded = await loadDashboardByUidOrPrefix(dashboardUidRequested);
+    if ('error' in loaded) {
+        return guidanceBase(loaded.error);
     }
+    const dashResp = loaded.dashResp;
+    const dashboardUid = loaded.resolvedUid;
 
     const dashboard = dashResp.dashboard;
     if (!dashboard) {
@@ -314,10 +396,15 @@ export async function runProgrammaticGrafanaAlertCreate(
     }
 
     const entries = listDashboardPanels(dashboard.panels);
-    const hit = findPanelByStrictTitle(entries, request.panelTitle);
+    const hit = findPanelByTitleRelaxed(entries, request.panelTitle);
     if (!hit) {
+        const uidNote =
+            dashboardUid !== dashboardUidRequested
+                ? ` (resolved \`${dashboardUidRequested}\` → \`${dashboardUid}\`)`
+                : '';
         return guidanceBase(
-            `Panel titled **${request.panelTitle}** was not found on dashboard \`${dashboardUid}\`.`
+            `Panel titled **${request.panelTitle}** was not found on dashboard \`${dashboardUid}\`${uidNote}.` +
+                similarPanelHint(entries, request.panelTitle)
         );
     }
     if (hit.panelId == null) {

@@ -35,10 +35,20 @@ export interface GrafanaAlertCreateRequest {
     buildFromPanel?: boolean;
     /** Human description of the breach condition. */
     conditionSummary: string;
+    /** True when the operator asked to alert from RandomForest vs Peers model output. */
+    peerRfAlert?: boolean;
 }
 
 function normalizeMessageQuotes(text: string): string {
     return text.replace(/[\u201C\u201D]/g, '"').replace(/[\u2018\u2019]/g, "'");
+}
+
+export function messageLooksLikePeerRfAlert(text: string): boolean {
+    const blob = text.toLowerCase();
+    return (
+        /\brandom\s*forest\b/.test(blob) &&
+        (/\bvs\s+peers?\b/.test(blob) || /\bpeer\s+modules?\b/.test(blob) || /\bpeer[- ]?rf\b/.test(blob))
+    );
 }
 
 /** True when the user is asking to create/configure a Grafana alert or alert rule. */
@@ -756,7 +766,16 @@ export function parseGrafanaAlertCreateRequest(message: string): GrafanaAlertCre
     const restrictMetadata = messageRestrictsExtraMetadata(text);
 
     let conditionSummary = 'Actual value breaches its Upper or Lower Bound (±2σ)';
-    if (/\bactual\b/i.test(text) && /\bupper\b/i.test(text) && /\blower\b/i.test(text)) {
+    const peerRfAlert = messageLooksLikePeerRfAlert(text);
+    if (peerRfAlert) {
+        conditionSummary =
+            'Module 2 Current is outside the RandomForest vs Peers upper/lower bands already defined by the model (no invented threshold)';
+        const mod = text.match(/\bmodule\s*(\d+)\b/i)?.[1];
+        if (mod) {
+            conditionSummary =
+                `Module ${mod} Current is outside the RandomForest vs Peers upper/lower bands already defined by the model (no invented threshold)`;
+        }
+    } else if (/\bactual\b/i.test(text) && /\bupper\b/i.test(text) && /\blower\b/i.test(text)) {
         conditionSummary =
             'Actual > Upper Bound (±2σ) **OR** Actual < Lower Bound (±2σ) (Last reducer on each series)';
     }
@@ -779,6 +798,7 @@ export function parseGrafanaAlertCreateRequest(message: string): GrafanaAlertCre
         customAnnotations,
         buildFromPanel,
         conditionSummary,
+        peerRfAlert,
     };
 }
 
@@ -799,12 +819,31 @@ export function formatGrafanaAlertGuidanceReply(
     const every = request.every ?? '1m';
     const pendingFor = request.pendingFor ?? '1m';
     const errorBlock = apiError
-        ? `**Automatic create failed:** ${apiError}\n\nUse the steps below in the Grafana UI.\n\n`
-        : `Graft tried the provisioning API and could not finish automatically. Use the steps below.\n\n`;
+        ? `**Automatic create failed:** ${apiError}\n\n`
+        : `Graft tried the provisioning API and could not finish automatically.\n\n`;
+
+    if (request.peerRfAlert) {
+        return (
+            `### RandomForest vs Peers alert (Graft build ${buildNumber})\n\n` +
+            errorBlock +
+            `Graft will **not** invent a RandomForest threshold or fake model output. ` +
+            `The alert must use the **existing** RandomForest vs Peers upper/lower bands on the panel ` +
+            `(Actual outside those bands = the model already classified Module Current as anomalous vs peers).\n\n` +
+            `**What to do next:**\n` +
+            `1. Open ${dash} and confirm the panel **${panel}** is there ` +
+            `(the saved title often ends with **(Influx)**).\n` +
+            `2. If the UID was shortened, use the full dashboard UID from the URL (after \`/d/\`).\n` +
+            `3. If the panel has Actual + Expected but **no Upper/Lower Bound (Peer RF)** series, ` +
+            `the model output is incomplete — recreate the RandomForest vs Peers panel first, then ask again.\n` +
+            `4. Peer Band (±2σ) and Own History alerts do **not** use this RandomForest model and can be created separately.\n\n` +
+            `**Notify:** ${contact}. Pending period: **${pendingFor}**. Evaluate every **${every}**.`
+        );
+    }
 
     return (
         `### Grafana alerts — how to create this (build ${buildNumber})\n\n` +
         errorBlock +
+        `Use the steps below in the Grafana UI.\n\n` +
         `**Goal:** Alert when **${request.conditionSummary}** on panel **${panel}** (${dash}), ` +
         `notify **${contact}**.\n\n` +
         `#### 1. Open a new Grafana-managed alert rule\n` +
