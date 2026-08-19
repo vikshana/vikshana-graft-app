@@ -170,20 +170,31 @@ async function searchDashboardsByUidPrefix(requestedUid: string): Promise<Search
     return [...seen.values()];
 }
 
+type LoadedDashboard = { dashResp: DashboardApiResponse; resolvedUid: string };
+
 /**
- * Load by exact UID, then by unique longer prefix. Operators often paste a truncated
- * Grafana URL uid (`idHkqdqnk` vs `idHkqdqnkmfv`). Prefer the unique longer match even
- * when the short UID also 200s with a stub/empty dashboard.
+ * Exact UID first, then prefix clones. A real dashboard (`idHkqdqnk`) must not lose
+ * to a longer clone (`idHkqdqnkeres`). Truncated UIDs still fall through when exact
+ * GET 404s or the exact dashboard has no matching panel.
  */
-async function loadDashboardByUidOrPrefix(
+async function loadDashboardCandidates(
     requestedUid: string
-): Promise<{ dashResp: DashboardApiResponse; resolvedUid: string } | { error: string }> {
-    let exact: { dashResp: DashboardApiResponse; resolvedUid: string } | undefined;
+): Promise<{ candidates: LoadedDashboard[] } | { error: string }> {
+    const candidates: LoadedDashboard[] = [];
+    const seen = new Set<string>();
+    const push = (item: LoadedDashboard) => {
+        if (!item.resolvedUid || seen.has(item.resolvedUid)) {
+            return;
+        }
+        seen.add(item.resolvedUid);
+        candidates.push(item);
+    };
+
     let prefixErr: string | undefined;
     try {
         const dashResp = await fetchDashboardByUid(requestedUid);
         if (dashResp) {
-            exact = { dashResp, resolvedUid: resolvedUidFromDashboard(requestedUid, dashResp) };
+            push({ dashResp, resolvedUid: resolvedUidFromDashboard(requestedUid, dashResp) });
         }
     } catch (err) {
         prefixErr = extractErrorMessage(err);
@@ -194,33 +205,21 @@ async function loadDashboardByUidOrPrefix(
 
     if (requestedUid.length >= MIN_UID_PREFIX_LEN) {
         const matches = await searchDashboardsByUidPrefix(requestedUid);
-        const longer = matches.filter((h) => (h.uid ?? '').trim().length > requestedUid.length);
-        if (longer.length === 1 && longer[0].uid) {
-            const resolvedUid = longer[0].uid.trim();
+        for (const hit of matches) {
+            const uid = (hit.uid ?? '').trim();
+            if (!uid || seen.has(uid)) {
+                continue;
+            }
             try {
-                const dashResp = await fetchDashboardByUid(resolvedUid);
+                const dashResp = await fetchDashboardByUid(uid);
                 if (dashResp) {
-                    return { dashResp, resolvedUid: resolvedUidFromDashboard(resolvedUid, dashResp) };
+                    push({ dashResp, resolvedUid: resolvedUidFromDashboard(uid, dashResp) });
                 }
             } catch (err) {
                 prefixErr = prefixErr ?? extractErrorMessage(err);
             }
         }
-        if (!exact && matches.length === 1 && matches[0].uid) {
-            const resolvedUid = matches[0].uid.trim();
-            try {
-                const dashResp = await fetchDashboardByUid(resolvedUid);
-                if (dashResp) {
-                    return { dashResp, resolvedUid: resolvedUidFromDashboard(resolvedUid, dashResp) };
-                }
-                return {
-                    error: `Dashboard \`${resolvedUid}\` (matched from \`${requestedUid}\`) returned no dashboard JSON.`,
-                };
-            } catch (err) {
-                prefixErr = prefixErr ?? extractErrorMessage(err);
-            }
-        }
-        if (!exact && matches.length > 1) {
+        if (candidates.length === 0 && matches.length > 1) {
             const listed = matches
                 .slice(0, 8)
                 .map((h) => `\`${h.uid}\` (${h.title ?? 'untitled'})`)
@@ -233,8 +232,8 @@ async function loadDashboardByUidOrPrefix(
         }
     }
 
-    if (exact) {
-        return exact;
+    if (candidates.length > 0) {
+        return { candidates };
     }
     if (prefixErr) {
         return {
@@ -424,16 +423,41 @@ export async function runProgrammaticGrafanaAlertCreate(
         return guidanceBase('Missing panel title. Include `panel titled "…"` in the prompt.');
     }
 
-    const loaded = await loadDashboardByUidOrPrefix(dashboardUidRequested);
+    const loaded = await loadDashboardCandidates(dashboardUidRequested);
     if ('error' in loaded) {
         return guidanceBase(loaded.error);
     }
-    const dashResp = loaded.dashResp;
-    const dashboardUid = loaded.resolvedUid;
 
-    const dashboard = dashResp.dashboard;
-    if (!dashboard) {
-        return guidanceBase(`Dashboard \`${dashboardUid}\` returned no dashboard JSON.`);
+    let dashResp: DashboardApiResponse | undefined;
+    let dashboardUid = dashboardUidRequested;
+    let dashboard: Record<string, unknown> | undefined;
+    let hit: ReturnType<typeof findPanelForGrafanaAlert> | undefined;
+    const hintEntries: DashboardPanelEntry[] = [];
+    for (const cand of loaded.candidates) {
+        const candDash = cand.dashResp.dashboard;
+        if (!candDash) {
+            continue;
+        }
+        const entries = listDashboardPanelsFromDashboard(candDash);
+        hintEntries.push(...entries);
+        const found = findPanelForGrafanaAlert(entries, request.panelTitle);
+        if (found) {
+            dashResp = cand.dashResp;
+            dashboardUid = cand.resolvedUid;
+            dashboard = candDash;
+            hit = found;
+            break;
+        }
+    }
+    if (!dashResp || !dashboard || !hit) {
+        const uidNote =
+            loaded.candidates[0] && loaded.candidates[0].resolvedUid !== dashboardUidRequested
+                ? ` (tried \`${loaded.candidates.map((c) => c.resolvedUid).join('`, `')}\`)`
+                : '';
+        return guidanceBase(
+            `Panel titled **${request.panelTitle}** was not found on dashboard \`${dashboardUidRequested}\`${uidNote}.` +
+                similarPanelHint(hintEntries, request.panelTitle)
+        );
     }
 
     const dashboardTitle =
@@ -470,18 +494,6 @@ export async function runProgrammaticGrafanaAlertCreate(
         );
     }
 
-    const entries = listDashboardPanelsFromDashboard(dashboard);
-    const hit = findPanelForGrafanaAlert(entries, request.panelTitle);
-    if (!hit) {
-        const uidNote =
-            dashboardUid !== dashboardUidRequested
-                ? ` (resolved \`${dashboardUidRequested}\` → \`${dashboardUid}\`)`
-                : '';
-        return guidanceBase(
-            `Panel titled **${request.panelTitle}** was not found on dashboard \`${dashboardUid}\`${uidNote}.` +
-                similarPanelHint(entries, request.panelTitle)
-        );
-    }
     if (hit.panelId == null) {
         return guidanceBase(`Panel **${hit.title}** has no panel id (cannot link annotations).`);
     }

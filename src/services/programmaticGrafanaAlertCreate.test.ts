@@ -916,6 +916,115 @@ describe('runProgrammaticGrafanaAlertCreate', () => {
         expect(result.guidance).toBeUndefined();
     });
 
+    it('keeps exact Skywater UID when a longer Test clone shares the same prefix', async () => {
+        const prompt =
+            'Create a Grafana-managed alert for the panel titled "Module 2 Current — RandomForest vs Peers" on the dashboard with UID idHkqdqnk. Configure the alert to trigger when the RandomForest model identifies Module 2 Current as anomalous compared with its peer modules. Do not invent an arbitrary RandomForest threshold. Configure the alert to notify the Alex Test Email contact point.';
+
+        mockFetch.mockImplementation((req: { url: string; method?: string; data?: unknown }) => {
+            if (req.url.includes('/api/dashboards/uid/idHkqdqnkeres')) {
+                return of({
+                    data: {
+                        meta: { folderUid: 'folder-test' },
+                        dashboard: {
+                            uid: 'idHkqdqnkeres',
+                            title: '2103-176030 / Skywater-MN Test',
+                            panels: [
+                                { id: 1, type: 'timeseries', title: 'Overview' },
+                                { id: 2, type: 'timeseries', title: 'Current' },
+                            ],
+                        },
+                    },
+                });
+            }
+            if (req.url.includes('/api/dashboards/uid/idHkqdqnk')) {
+                return of({
+                    data: {
+                        meta: { folderUid: 'folder-skywater' },
+                        dashboard: {
+                            uid: 'idHkqdqnk',
+                            title: '2103-176030 / Skywater-MN',
+                            panels: [
+                                {
+                                    id: 44,
+                                    type: 'timeseries',
+                                    title: 'Module 2 Current — RandomForest vs Peers (Influx)',
+                                    datasource: { uid: 'inf1', type: 'influxdb' },
+                                    targets: [
+                                        {
+                                            refId: 'A',
+                                            datasource: { uid: 'inf1', type: 'influxdb' },
+                                            legendFormat: 'Module 2 (Actual)',
+                                            query:
+                                                'from(bucket: v.bucket)\n' +
+                                                '  |> filter(fn: (r) => r._field == "Module2_Current_A")',
+                                            rawQuery: true,
+                                        },
+                                        {
+                                            refId: 'B',
+                                            datasource: { uid: 'inf1', type: 'influxdb' },
+                                            legendFormat: 'Upper Bound (Peer RF)',
+                                            query: 'from(bucket: v.bucket) |> filter(fn: (r) => r._field == "upper")',
+                                            rawQuery: true,
+                                        },
+                                        {
+                                            refId: 'C',
+                                            datasource: { uid: 'inf1', type: 'influxdb' },
+                                            legendFormat: 'Lower Bound (Peer RF)',
+                                            query: 'from(bucket: v.bucket) |> filter(fn: (r) => r._field == "lower")',
+                                            rawQuery: true,
+                                        },
+                                    ],
+                                },
+                            ],
+                        },
+                    },
+                });
+            }
+            if (req.url.includes('/api/search')) {
+                return of({
+                    data: [
+                        { uid: 'idHkqdqnk', title: '2103-176030 / Skywater-MN', type: 'dash-db' },
+                        { uid: 'idHkqdqnkeres', title: '2103-176030 / Skywater-MN Test', type: 'dash-db' },
+                    ],
+                });
+            }
+            if (req.url.includes('/contact-points')) {
+                return of({ data: [{ name: 'Alex Test Email', type: 'email', uid: 'cp1' }] });
+            }
+            if (/\/alert-rules\/[\w-]+$/.test(req.url) && (req.method ?? 'GET') === 'GET') {
+                const uid = req.url.split('/alert-rules/')[1];
+                return of({ data: { uid, title: 'created', folderUID: 'folder-skywater' } });
+            }
+            if (req.url.includes('/alert-rules') && (req.method ?? 'GET') === 'GET') {
+                return of({ data: [] });
+            }
+            if (req.url.includes('/alert-rules') && req.method === 'POST') {
+                const body = req.data as { annotations?: Record<string, string> };
+                expect(body.annotations?.__dashboardUid__).toBe('idHkqdqnk');
+                expect(body.annotations?.__panelId__).toBe('44');
+                return of({ data: { uid: 'rule-rf-exact', title: 'created' } });
+            }
+            if (req.url.includes('/rule-groups/')) {
+                return of({
+                    data: {
+                        title: 'graft-idHkqdqnk-44',
+                        folderUid: 'folder-skywater',
+                        interval: 60,
+                        rules: [],
+                    },
+                });
+            }
+            return throwError(() => new Error(`unexpected url ${req.url}`));
+        });
+
+        const req = parseGrafanaAlertCreateRequest(prompt)!;
+        const result = await runProgrammaticGrafanaAlertCreate(req, 214);
+        expect(result.ok).toBe(true);
+        expect(result.dashboardUid).toBe('idHkqdqnk');
+        expect(result.panelId).toBe(44);
+        expect(result.ruleUid).toBe('rule-rf-exact');
+    });
+
     it('explains missing peer-RF bands instead of creating an invalid alert', async () => {
         const prompt =
             'Create a Grafana-managed alert for the panel titled "Module 2 Current — RandomForest vs Peers" on the dashboard with UID idHkqdqnkmfv. Do not invent an arbitrary RandomForest threshold. Configure the alert to notify the Alex Test Email contact point.';
