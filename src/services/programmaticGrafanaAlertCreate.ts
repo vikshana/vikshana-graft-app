@@ -11,7 +11,8 @@ import {
     parseEvalIntervalSeconds,
     reconcilePendingWithEvalInterval,
 } from './grafanaAlertBuild';
-import { findPanelByTitleRelaxed, listDashboardPanels } from './panelDiscovery';
+import { findPanelForGrafanaAlert, listDashboardPanelsFromDashboard } from './panelDiscovery';
+import type { DashboardPanelEntry } from './panelDiscovery';
 
 const PROVISION_HEADERS = {
     'X-Disable-Provenance': 'true',
@@ -123,85 +124,159 @@ interface SearchHit {
     type?: string;
 }
 
+interface DashboardApiResponse {
+    meta?: { folderUid?: string; folderTitle?: string };
+    dashboard?: Record<string, unknown> & { uid?: string; title?: string; panels?: unknown; rows?: unknown };
+}
+
 const MIN_UID_PREFIX_LEN = 8;
 
+function resolvedUidFromDashboard(
+    requestedUid: string,
+    dashResp: DashboardApiResponse
+): string {
+    const fromJson = typeof dashResp.dashboard?.uid === 'string' ? dashResp.dashboard.uid.trim() : '';
+    return fromJson || requestedUid;
+}
+
+async function fetchDashboardByUid(
+    uid: string
+): Promise<DashboardApiResponse | undefined> {
+    const dashResp = await grafanaGet<DashboardApiResponse>(
+        `/api/dashboards/uid/${encodeURIComponent(uid)}`
+    );
+    return dashResp?.dashboard ? dashResp : undefined;
+}
+
+async function searchDashboardsByUidPrefix(requestedUid: string): Promise<SearchHit[]> {
+    const urls = [
+        `/api/search?type=dash-db&limit=5000&query=${encodeURIComponent(requestedUid)}`,
+        '/api/search?type=dash-db&limit=5000',
+    ];
+    const seen = new Map<string, SearchHit>();
+    for (const url of urls) {
+        try {
+            const hits = await grafanaGet<SearchHit[]>(url);
+            for (const hit of Array.isArray(hits) ? hits : []) {
+                const uid = (hit.uid ?? '').trim();
+                if (uid === requestedUid || uid.startsWith(requestedUid)) {
+                    seen.set(uid, hit);
+                }
+            }
+        } catch {
+            // Try the next search URL.
+        }
+    }
+    return [...seen.values()];
+}
+
+/**
+ * Load by exact UID, then by unique longer prefix. Operators often paste a truncated
+ * Grafana URL uid (`idHkqdqnk` vs `idHkqdqnkmfv`). Prefer the unique longer match even
+ * when the short UID also 200s with a stub/empty dashboard.
+ */
 async function loadDashboardByUidOrPrefix(
     requestedUid: string
 ): Promise<{ dashResp: DashboardApiResponse; resolvedUid: string } | { error: string }> {
+    let exact: { dashResp: DashboardApiResponse; resolvedUid: string } | undefined;
+    let prefixErr: string | undefined;
     try {
-        const dashResp = await grafanaGet<DashboardApiResponse>(
-            `/api/dashboards/uid/${encodeURIComponent(requestedUid)}`
-        );
-        if (dashResp?.dashboard) {
-            return { dashResp, resolvedUid: requestedUid };
+        const dashResp = await fetchDashboardByUid(requestedUid);
+        if (dashResp) {
+            exact = { dashResp, resolvedUid: resolvedUidFromDashboard(requestedUid, dashResp) };
         }
     } catch (err) {
-        // Fall through to prefix search — operators often paste a truncated UID.
-        const prefixErr = extractErrorMessage(err);
+        prefixErr = extractErrorMessage(err);
         if (requestedUid.length < MIN_UID_PREFIX_LEN) {
             return { error: `Could not load dashboard \`${requestedUid}\`: ${prefixErr}` };
         }
-        try {
-            const hits = await grafanaGet<SearchHit[]>('/api/search?type=dash-db&limit=5000');
-            const matches = (Array.isArray(hits) ? hits : []).filter((h) => {
-                const uid = (h.uid ?? '').trim();
-                return uid === requestedUid || uid.startsWith(requestedUid);
-            });
-            if (matches.length === 1 && matches[0].uid) {
-                const resolvedUid = matches[0].uid;
-                const dashResp = await grafanaGet<DashboardApiResponse>(
-                    `/api/dashboards/uid/${encodeURIComponent(resolvedUid)}`
-                );
-                if (!dashResp?.dashboard) {
-                    return {
-                        error: `Dashboard \`${resolvedUid}\` (matched from \`${requestedUid}\`) returned no dashboard JSON.`,
-                    };
+    }
+
+    if (requestedUid.length >= MIN_UID_PREFIX_LEN) {
+        const matches = await searchDashboardsByUidPrefix(requestedUid);
+        const longer = matches.filter((h) => (h.uid ?? '').trim().length > requestedUid.length);
+        if (longer.length === 1 && longer[0].uid) {
+            const resolvedUid = longer[0].uid.trim();
+            try {
+                const dashResp = await fetchDashboardByUid(resolvedUid);
+                if (dashResp) {
+                    return { dashResp, resolvedUid: resolvedUidFromDashboard(resolvedUid, dashResp) };
                 }
-                return { dashResp, resolvedUid };
+            } catch (err) {
+                prefixErr = prefixErr ?? extractErrorMessage(err);
             }
-            if (matches.length > 1) {
-                const listed = matches
-                    .slice(0, 8)
-                    .map((h) => `\`${h.uid}\` (${h.title ?? 'untitled'})`)
-                    .join(', ');
+        }
+        if (!exact && matches.length === 1 && matches[0].uid) {
+            const resolvedUid = matches[0].uid.trim();
+            try {
+                const dashResp = await fetchDashboardByUid(resolvedUid);
+                if (dashResp) {
+                    return { dashResp, resolvedUid: resolvedUidFromDashboard(resolvedUid, dashResp) };
+                }
                 return {
-                    error:
-                        `Dashboard UID \`${requestedUid}\` is incomplete and matches ${matches.length} dashboards: ${listed}. ` +
-                        `Use the full UID from the Grafana URL (the part after \`/d/\`).`,
+                    error: `Dashboard \`${resolvedUid}\` (matched from \`${requestedUid}\`) returned no dashboard JSON.`,
                 };
+            } catch (err) {
+                prefixErr = prefixErr ?? extractErrorMessage(err);
             }
+        }
+        if (!exact && matches.length > 1) {
+            const listed = matches
+                .slice(0, 8)
+                .map((h) => `\`${h.uid}\` (${h.title ?? 'untitled'})`)
+                .join(', ');
             return {
                 error:
-                    `Could not load dashboard \`${requestedUid}\`: ${prefixErr}. ` +
-                    `If this UID was copied short, paste the full UID from the dashboard URL.`,
-            };
-        } catch (searchErr) {
-            return {
-                error: `Could not load dashboard \`${requestedUid}\`: ${prefixErr} (search: ${extractErrorMessage(searchErr)})`,
+                    `Dashboard UID \`${requestedUid}\` is incomplete and matches ${matches.length} dashboards: ${listed}. ` +
+                    `Use the full UID from the Grafana URL (the part after \`/d/\`).`,
             };
         }
+    }
+
+    if (exact) {
+        return exact;
+    }
+    if (prefixErr) {
+        return {
+            error:
+                `Could not load dashboard \`${requestedUid}\`: ${prefixErr}. ` +
+                `If this UID was copied short, paste the full UID from the dashboard URL.`,
+        };
     }
     return { error: `Dashboard \`${requestedUid}\` returned no dashboard JSON.` };
 }
 
-function similarPanelHint(entries: ReturnType<typeof listDashboardPanels>, want: string): string {
-    const needle = want.toLowerCase();
-    const similar = entries
-        .filter((e) => {
-            const t = e.title.toLowerCase();
-            return (
-                t.includes('randomforest') ||
-                t.includes('random forest') ||
-                t.includes('peer rf') ||
-                (needle.length >= 12 && t.includes(needle.slice(0, 24)))
-            );
-        })
-        .slice(0, 8)
-        .map((e) => `“${e.title}”`);
-    if (similar.length === 0) {
-        return '';
+function similarPanelHint(entries: DashboardPanelEntry[], want: string): string {
+    if (entries.length === 0) {
+        return ' That dashboard JSON has no panels — the UID may be truncated or a stub. Paste the full UID from the URL after `/d/`.';
     }
-    return ` Nearby titles: ${similar.join('; ')}.`;
+    const needle = want.toLowerCase();
+    const mod = want.match(/\bmodule\s*(\d+)\b/i)?.[1];
+    const scored = entries
+        .filter((e) => e.title)
+        .map((e) => {
+            const t = e.title.toLowerCase();
+            let score = 0;
+            if (t.includes('randomforest') || t.includes('random forest') || t.includes('peer rf')) {
+                score += 3;
+            }
+            if (t.includes('peer band') || t.includes('own history')) {
+                score += 1;
+            }
+            if (mod && t.includes(`module ${mod}`)) {
+                score += 2;
+            }
+            if (needle.length >= 12 && t.includes(needle.slice(0, 24))) {
+                score += 4;
+            }
+            return { title: e.title, score };
+        })
+        .filter((x) => x.score > 0)
+        .sort((a, b) => b.score - a.score);
+    const titles = (scored.length > 0 ? scored : entries.map((e) => ({ title: e.title, score: 0 })))
+        .slice(0, 8)
+        .map((x) => `“${x.title}”`);
+    return ` Nearby titles (reply with the exact one): ${titles.join('; ')}.`;
 }
 
 interface ContactPointRow {
@@ -395,8 +470,8 @@ export async function runProgrammaticGrafanaAlertCreate(
         );
     }
 
-    const entries = listDashboardPanels(dashboard.panels);
-    const hit = findPanelByTitleRelaxed(entries, request.panelTitle);
+    const entries = listDashboardPanelsFromDashboard(dashboard);
+    const hit = findPanelForGrafanaAlert(entries, request.panelTitle);
     if (!hit) {
         const uidNote =
             dashboardUid !== dashboardUidRequested

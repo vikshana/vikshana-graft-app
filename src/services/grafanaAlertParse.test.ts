@@ -53,9 +53,16 @@ describe('grafanaAlertParse', () => {
         expect(req?.conditionSummary).toMatch(/RandomForest vs Peers/i);
         expect(messageHasProgrammaticHandler(prompt)).toBe(true);
         const guidance = formatGrafanaAlertGuidanceReply(req!, 213, 'Panel titled **Module 2 Current — RandomForest vs Peers** was not found');
-        expect(guidance).toContain('RandomForest vs Peers alert');
+        expect(guidance).toContain('Need clarification');
+        expect(guidance).toContain('RandomForest vs Peers');
         expect(guidance).not.toContain('typical Own History layout');
+        expect(guidance).not.toContain('how to create this');
         expect(guidance).toMatch(/will \*\*not\*\* invent/i);
+        expect(
+            parseGrafanaAlertCreateRequest('Create a Grafana-managed alert for the panel titled "Module 2 Current — RandomForest vs Peers". Notify Alex Test Email.', {
+                contextDashboardUid: 'idHkqdqnkmfv',
+            })?.dashboardUid
+        ).toBe('idHkqdqnkmfv');
     });
 
     // Production: alert-for-existing Peer Band panel was mis-routed as panel create → "already exists".
@@ -260,20 +267,21 @@ describe('grafanaAlertParse', () => {
         expect(parseGrafanaAlertCreateRequest(FULL_CUSTOM_METADATA_PROMPT)?.panelTitle).toBeTruthy();
     });
 
-    it('formats guidance that names the contact point and Reduce/Math steps', () => {
+    it('formats clarification instead of a Grafana UI cookbook', () => {
         const reply = formatGrafanaAlertGuidanceReply(
             parseGrafanaAlertCreateRequest(MANAGED_RULE_PROMPT)!,
             186,
             'contact point missing'
         );
-        expect(reply).toContain('Grafana alerts — how to create this (build 186)');
+        expect(reply).toContain('Need clarification — Grafana alert (Graft build 186)');
         expect(reply).toContain('Automatic create failed');
         expect(reply).toContain('Alex Test Email');
         expect(reply).toContain('Module 2 Current — Alert Test Own History ±2σ');
         expect(reply).toContain('afq7tc6hl1m9sb');
         expect(reply).toContain('Reduce');
-        expect(reply).toContain('$E > $F || $E < $G');
         expect(reply).toContain('1m');
+        expect(reply).not.toContain('typical Own History layout');
+        expect(reply).not.toContain('$E > $F || $E < $G');
     });
 
     const EVAL_GROUP_INTERVAL_PROMPT =

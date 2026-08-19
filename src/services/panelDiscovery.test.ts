@@ -1,8 +1,10 @@
 import {
     findFluxBrokenPanels,
     findPanelByStrictTitle,
+    findPanelForGrafanaAlert,
     findPanelForRemoval,
     listDashboardPanels,
+    listDashboardPanelsFromDashboard,
     normalizePanelTitleForMatch,
     panelHasBrokenFluxSyntax,
     removePanelAtPath,
@@ -53,6 +55,33 @@ describe('findPanelForRemoval', () => {
             { id: 9, title: 'Module 2 Current — RandomForest vs Peers (Influx)', type: 'timeseries' },
         ]);
         expect(findPanelForRemoval(entries, 'Module 2 Current — RandomForest vs Peers')?.panelId).toBe(9);
+        expect(findPanelForGrafanaAlert(entries, 'Module 2 Current — RandomForest vs Peers')?.panelId).toBe(9);
+    });
+
+    it('resolves library-panel name when title is empty', () => {
+        const entries = listDashboardPanelsFromDashboard({
+            panels: [
+                {
+                    id: 12,
+                    type: 'timeseries',
+                    title: '',
+                    libraryPanel: { name: 'Module 2 Current — RandomForest vs Peers (Influx)', uid: 'lib1' },
+                },
+            ],
+        });
+        expect(findPanelForGrafanaAlert(entries, 'Module 2 Current — RandomForest vs Peers')?.panelId).toBe(12);
+    });
+
+    it('does not bind a RandomForest vs Peers alert to Own History via word overlap', () => {
+        const entries = listDashboardPanels([
+            { id: 1, title: 'Module 2 Current — Alert Test Own History ±2σ', type: 'timeseries' },
+            { id: 9, title: 'Module 2 Current — RandomForest vs Peers (Influx)', type: 'timeseries' },
+        ]);
+        expect(findPanelForGrafanaAlert(entries, 'Module 2 Current — RandomForest vs Peers')?.panelId).toBe(9);
+        const onlyHistory = listDashboardPanels([
+            { id: 1, title: 'Module 2 Current — Alert Test Own History ±2σ', type: 'timeseries' },
+        ]);
+        expect(findPanelForGrafanaAlert(onlyHistory, 'Module 2 Current — RandomForest vs Peers')).toBeUndefined();
     });
 });
 

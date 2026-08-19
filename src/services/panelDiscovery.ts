@@ -40,6 +40,21 @@ export function listDashboardPanels(panels: unknown): DashboardPanelEntry[] {
     return out;
 }
 
+function panelDisplayTitle(panel: PanelRecord): string {
+    const title = typeof panel.title === 'string' ? panel.title.trim() : '';
+    if (title) {
+        return title;
+    }
+    const lib = panel.libraryPanel;
+    if (lib && typeof lib === 'object') {
+        const name = (lib as { name?: unknown }).name;
+        if (typeof name === 'string' && name.trim()) {
+            return name.trim();
+        }
+    }
+    return '';
+}
+
 function collectPanels(
     item: unknown,
     path: number[],
@@ -50,7 +65,7 @@ function collectPanels(
         return;
     }
     const panel = item as PanelRecord;
-    const title = typeof panel.title === 'string' ? panel.title.trim() : '';
+    const title = panelDisplayTitle(panel);
     const panelId = typeof panel.id === 'number' ? panel.id : undefined;
     if (panelId != null || title) {
         out.push({ panel, arrayIndex, panelId, title, path });
@@ -160,6 +175,85 @@ export function findPanelByTitleRelaxed(
         )[0];
     }
     return undefined;
+}
+
+/** Flatten Grafana dashboard JSON (`panels` or legacy `rows`). */
+export function listDashboardPanelsFromDashboard(
+    dashboard: Record<string, unknown> | undefined
+): DashboardPanelEntry[] {
+    if (!dashboard) {
+        return [];
+    }
+    const fromPanels = listDashboardPanels(dashboard.panels);
+    if (fromPanels.length > 0) {
+        return fromPanels;
+    }
+    const rows = dashboard.rows;
+    if (!Array.isArray(rows)) {
+        return fromPanels;
+    }
+    return listDashboardPanels(
+        rows.map((row) => {
+            if (!row || typeof row !== 'object') {
+                return row;
+            }
+            const r = row as PanelRecord;
+            return { ...r, type: typeof r.type === 'string' ? r.type : 'row' };
+        })
+    );
+}
+
+function titleLooksLikePeerRf(title: string): boolean {
+    const t = title.toLowerCase();
+    const isRf = t.includes('randomforest') || t.includes('random forest');
+    const isPeers = t.includes('vs peers') || t.includes('peer rf') || t.includes('vs. peers');
+    return isRf && isPeers;
+}
+
+function titleLooksLikeOwnHistory(title: string): boolean {
+    return /own\s+history/i.test(title);
+}
+
+/**
+ * Alert-from-panel lookup: relaxed title, then unique Module N RandomForest vs Peers
+ * match. Never bind an RF prompt to Own History / Peer Band via generic word overlap.
+ */
+export function findPanelForGrafanaAlert(
+    entries: DashboardPanelEntry[],
+    title: string
+): DashboardPanelEntry | undefined {
+    const wantRf = titleLooksLikePeerRf(title) || /random\s*forest|randomforest/i.test(title);
+    const relaxed = findPanelByTitleRelaxed(entries, title);
+    if (relaxed) {
+        if (wantRf && !titleLooksLikePeerRf(relaxed.title)) {
+            // Prefix match hit the wrong family (e.g. Own History sharing "Module 2 Current").
+        } else {
+            return relaxed;
+        }
+    }
+
+    const mod = title.match(/\bmodule\s*(\d+)\b/i)?.[1];
+    const rfHits = entries.filter((e) => {
+        if (!titleLooksLikePeerRf(e.title)) {
+            return false;
+        }
+        if (!mod) {
+            return true;
+        }
+        return new RegExp(`module\\s*${mod}\\b`, 'i').test(e.title);
+    });
+    if (rfHits.length === 1) {
+        return rfHits[0];
+    }
+    if (wantRf) {
+        return undefined;
+    }
+
+    const fuzzy = findPanelByTitle(entries, title);
+    if (fuzzy && titleLooksLikeOwnHistory(fuzzy.title) && /peer\s+band|randomforest|random forest/i.test(title)) {
+        return undefined;
+    }
+    return fuzzy;
 }
 
 /**

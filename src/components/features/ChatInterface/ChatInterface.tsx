@@ -1396,7 +1396,9 @@ export const ChatInterface = () => {
         return;
       }
 
-      const grafanaAlertCreateRequest = parseGrafanaAlertCreateRequest(content);
+      const grafanaAlertCreateRequest = parseGrafanaAlertCreateRequest(content, {
+        contextDashboardUid: contextService.getDashboardUid() ?? undefined,
+      });
       if (grafanaAlertCreateRequest) {
         errorPathTag = 'grafana-alert-create';
         const alertResult = await runProgrammaticGrafanaAlertCreate(

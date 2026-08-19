@@ -45,10 +45,13 @@ function normalizeMessageQuotes(text: string): string {
 
 export function messageLooksLikePeerRfAlert(text: string): boolean {
     const blob = text.toLowerCase();
-    return (
-        /\brandom\s*forest\b/.test(blob) &&
-        (/\bvs\s+peers?\b/.test(blob) || /\bpeer\s+modules?\b/.test(blob) || /\bpeer[- ]?rf\b/.test(blob))
-    );
+    const mentionsRf =
+        /\brandom\s*forest\b/.test(blob) || /\brandomforest\b/.test(blob) || /\bpeer[- ]?rf\b/.test(blob);
+    const mentionsPeers =
+        /\bvs\s*\.?\s*peers?\b/.test(blob) ||
+        /\bpeer\s+modules?\b/.test(blob) ||
+        /\bpeer[- ]?rf\b/.test(blob);
+    return mentionsRf && mentionsPeers;
 }
 
 /** True when the user is asking to create/configure a Grafana alert or alert rule. */
@@ -730,7 +733,10 @@ export function parseGrafanaEvalGroupIntervalRequest(
     return { ruleGroup, every };
 }
 
-export function parseGrafanaAlertCreateRequest(message: string): GrafanaAlertCreateRequest | null {
+export function parseGrafanaAlertCreateRequest(
+    message: string,
+    opts?: { contextDashboardUid?: string }
+): GrafanaAlertCreateRequest | null {
     const text = normalizeMessageQuotes(message.trim());
     // Group-level interval changes are not alert-rule creates.
     if (messageMentionsGrafanaEvalGroupIntervalChange(text) && parseGrafanaEvalGroupIntervalRequest(text)) {
@@ -749,7 +755,10 @@ export function parseGrafanaAlertCreateRequest(message: string): GrafanaAlertCre
     if (!messageMentionsGrafanaAlertCreate(text)) {
         return null;
     }
-    const dashboardUid = extractAllDashboardUids(text)[0] ?? extractDashboardUidFromMessage(text);
+    const dashboardUid =
+        extractAllDashboardUids(text)[0] ??
+        extractDashboardUidFromMessage(text) ??
+        (opts?.contextDashboardUid?.trim() || undefined);
     const panelTitle = extractQuotedPanelTitle(text);
     const contactPoint = extractContactPoint(text);
     const contactPointEmail = extractContactPointEmail(text);
@@ -765,17 +774,19 @@ export function parseGrafanaAlertCreateRequest(message: string): GrafanaAlertCre
     const customAnnotations = extractCustomAnnotation(text);
     const restrictMetadata = messageRestrictsExtraMetadata(text);
 
-    let conditionSummary = 'Actual value breaches its Upper or Lower Bound (±2σ)';
+    // Do not assume Own History ±2σ when the prompt did not say so.
+    let conditionSummary =
+        'the panel Actual series is outside its existing Upper and Lower bound series (Last reducer; no invented threshold)';
     const peerRfAlert = messageLooksLikePeerRfAlert(text);
     if (peerRfAlert) {
         conditionSummary =
-            'Module 2 Current is outside the RandomForest vs Peers upper/lower bands already defined by the model (no invented threshold)';
+            'Module Current is outside the RandomForest vs Peers upper/lower bands already defined by the model (no invented threshold)';
         const mod = text.match(/\bmodule\s*(\d+)\b/i)?.[1];
         if (mod) {
             conditionSummary =
                 `Module ${mod} Current is outside the RandomForest vs Peers upper/lower bands already defined by the model (no invented threshold)`;
         }
-    } else if (/\bactual\b/i.test(text) && /\bupper\b/i.test(text) && /\blower\b/i.test(text)) {
+    } else if (/\bown\s+history\b/i.test(text) || (/\bactual\b/i.test(text) && /\bupper\b/i.test(text) && /\blower\b/i.test(text))) {
         conditionSummary =
             'Actual > Upper Bound (±2σ) **OR** Actual < Lower Bound (±2σ) (Last reducer on each series)';
     }
@@ -803,8 +814,9 @@ export function parseGrafanaAlertCreateRequest(message: string): GrafanaAlertCre
 }
 
 /**
- * Manual UI fallback when provisioning API create fails (permissions, missing
- * contact point, General folder, etc.).
+ * When automatic create cannot finish, ask for the missing piece.
+ * Do not dump a competing Grafana UI cookbook (that made operators think
+ * Graft only writes instructions, and it guessed Own History steps for RF alerts).
  */
 export function formatGrafanaAlertGuidanceReply(
     request: GrafanaAlertCreateRequest,
@@ -814,7 +826,7 @@ export function formatGrafanaAlertGuidanceReply(
     const panel = request.panelTitle ?? 'your panel';
     const dash = request.dashboardUid
         ? `dashboard uid \`${request.dashboardUid}\``
-        : 'the Keysight dashboard';
+        : 'the dashboard open in Grafana (or paste UID from the URL after `/d/`)';
     const contact = request.contactPoint ?? 'your contact point (e.g. Alex Test Email)';
     const every = request.every ?? '1m';
     const pendingFor = request.pendingFor ?? '1m';
@@ -822,63 +834,24 @@ export function formatGrafanaAlertGuidanceReply(
         ? `**Automatic create failed:** ${apiError}\n\n`
         : `Graft tried the provisioning API and could not finish automatically.\n\n`;
 
-    if (request.peerRfAlert) {
-        return (
-            `### RandomForest vs Peers alert (Graft build ${buildNumber})\n\n` +
-            errorBlock +
-            `Graft will **not** invent a RandomForest threshold or fake model output. ` +
-            `The alert must use the **existing** RandomForest vs Peers upper/lower bands on the panel ` +
-            `(Actual outside those bands = the model already classified Module Current as anomalous vs peers).\n\n` +
-            `**What to do next:**\n` +
-            `1. Open ${dash} and confirm the panel **${panel}** is there ` +
-            `(the saved title often ends with **(Influx)**).\n` +
-            `2. If the UID was shortened, use the full dashboard UID from the URL (after \`/d/\`).\n` +
-            `3. If the panel has Actual + Expected but **no Upper/Lower Bound (Peer RF)** series, ` +
-            `the model output is incomplete — recreate the RandomForest vs Peers panel first, then ask again.\n` +
-            `4. Peer Band (±2σ) and Own History alerts do **not** use this RandomForest model and can be created separately.\n\n` +
-            `**Notify:** ${contact}. Pending period: **${pendingFor}**. Evaluate every **${every}**.`
-        );
-    }
+    const kindLine = request.peerRfAlert
+        ? `This request is a **RandomForest vs Peers** alert. Graft will **not** invent a RandomForest threshold, fake model output, or switch to Own History / Peer Band ±2σ.\n\n`
+        : `Graft will use the **existing** Actual / Upper / Lower series on the named panel (Reduce **Last**). It will **not** invent a threshold or switch panel types.\n\n`;
+
+    const rfExtra = request.peerRfAlert
+        ? `If the panel has Actual + Expected but **no Upper/Lower Bound (Peer RF)** series, the model output is incomplete — recreate that RandomForest vs Peers panel first, then ask again.\n\n`
+        : '';
 
     return (
-        `### Grafana alerts — how to create this (build ${buildNumber})\n\n` +
+        `### Need clarification — Grafana alert (Graft build ${buildNumber})\n\n` +
         errorBlock +
-        `Use the steps below in the Grafana UI.\n\n` +
-        `**Goal:** Alert when **${request.conditionSummary}** on panel **${panel}** (${dash}), ` +
-        `notify **${contact}**.\n\n` +
-        `#### 1. Open a new Grafana-managed alert rule\n` +
-        `1. Left menu → **Alerts & IRM** → **Alert rules** → **+ New alert rule**\n` +
-        `2. Name: e.g. \`Module 2 Current outside Own History ±2σ\`\n\n` +
-        `#### 2. Prefer starting from the panel\n` +
-        `1. Open ${dash}\n` +
-        `2. Find **${panel}** → panel menu (▼) → **More…** → **New alert rule** (Grafana copies the Flux queries)\n` +
-        `   If that menu item is missing, create the rule from **Alert rules** and use **Link dashboard and panel** in annotations.\n\n` +
-        `#### 3. Define queries + condition (Advanced)\n` +
-        `Switch to **Advanced** so you can Reduce multiple series:\n\n` +
-        `1. Keep the panel queries (typical Own History layout):\n` +
-        `   - **A** — Module Actual\n` +
-        `   - **C** — Upper Bound (±2σ)\n` +
-        `   - **D** — Lower Bound (±2σ)\n` +
-        `   (Match by legend if refIds differ; you need Actual, Upper, and Lower.)\n` +
-        `2. **Add expression → Reduce** three times — Function **Last** — one for Actual, one for Upper, one for Lower\n` +
-        `3. **Add expression → Math** (use the Reduce refIds Grafana shows, example names \`E\`, \`F\`, \`G\`):\n` +
-        '   ```\n' +
-        '   $E > $F || $E < $G\n' +
-        '   ```\n' +
-        `   Meaning: last(Actual) > last(Upper) **OR** last(Actual) < last(Lower).\n` +
-        `4. Click **Set as alert condition** on that Math expression.\n` +
-        `5. **Preview** — you want \`1\` when Actual is outside the band, \`0\` when inside.\n\n` +
-        `#### 4. Evaluation\n` +
-        `1. Evaluation group interval: **${every}**\n` +
-        `2. Pending period (**for**): **${pendingFor}** (must stay true before the alert fires)\n\n` +
-        `#### 5. Notifications\n` +
-        `1. **Configure notifications** → **Select contact point**\n` +
-        `2. Choose **${contact}**\n` +
-        `3. If it is missing: **Alerts & IRM → Contact points → + Add contact point** → type **Email** → ` +
-        `name it exactly **${contact}** → add address → **Save contact point**\n\n` +
-        `#### 6. Save\n` +
-        `1. Pick a folder (Keysight’s folder is fine)\n` +
-        `2. **Save rule** → hard-refresh the dashboard and confirm the panel shows a linked alert\n\n` +
+        kindLine +
+        `**Intended rule:** ${request.conditionSummary} on **${panel}** (${dash}), notify **${contact}**, evaluate **${every}**, pending **${pendingFor}**.\n\n` +
+        `**Reply with the missing piece, then send the same create request.** Do not build the rule in the Grafana UI unless you want to — Graft should create it once lookup succeeds.\n` +
+        `1. Full dashboard UID from the URL (the part after \`/d/\` — short prefixes like \`idHkqdqnk\` are often incomplete).\n` +
+        `2. Exact panel title as shown on the dashboard (titles often end with **(Influx)**).\n` +
+        `3. Contact point name, or \`notify … using you@email\` so Graft can create it.\n\n` +
+        rfExtra +
         `**Permissions:** Editor (or Admin) on the alert folder. Viewers cannot create rules.`
     );
 }
