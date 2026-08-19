@@ -17,18 +17,22 @@
  */
 import {
     E2E_GRAFANA_ALERT_CREATE_EXPECT_NOT_CONTAINS,
+    E2E_GRAFANA_ALERT_CREATE_RULE_TITLE,
+    E2E_PEER_RF_CREATE_EXPECT_NOT_CONTAINS,
     E2E_REGRESSION_CASES,
     E2E_MULTI_PANEL_DEFAULT_TITLES,
     e2eDashboardRowWithPanelsExpectContains,
     e2eDashboardRowWithPanelsPrompt,
     e2eGrafanaAlertCreateExpectContains,
     e2eGrafanaAlertCreatePrompt,
-    E2E_GRAFANA_ALERT_CREATE_RULE_TITLE,
+    e2eGrafanaAlertUpdateExpectContains,
+    e2eGrafanaAlertUpdatePrompt,
     e2ePanelCreateExpectContains,
     e2ePanelCreatePrompt,
     e2ePanelRemovePrompt,
     e2ePanelRenameExpectContains,
     e2ePanelRenamePrompt,
+    e2ePeerRfPanelCreatePrompt,
 } from '../src/services/regression/graftRegressionE2eFixtures';
 import { test, expect } from './fixtures';
 import {
@@ -246,5 +250,49 @@ test.describe('Graft regression E2E (mutating)', () => {
             [...E2E_GRAFANA_ALERT_CREATE_EXPECT_NOT_CONTAINS]
         );
         await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
+    });
+
+    test('alert-update-description-by-panel', async ({ page }) => {
+        test.setTimeout(210_000);
+
+        const description = 'Graft E2E sandbox description';
+        const prompt = e2eGrafanaAlertUpdatePrompt(E2E_GRAFANA_ALERT_CREATE_RULE_TITLE, description);
+
+        await openFreshGraftChat(page);
+        const startCopyCount = await sendGraftPrompt(page, prompt);
+        const reply = await waitForAssistantReply(page, {
+            timeoutMs: 180_000,
+            startCopyCount,
+        });
+
+        assertReplyExpectations(reply, e2eGrafanaAlertUpdateExpectContains(description), [
+            'Need clarification',
+        ]);
+        await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
+    });
+
+    test('peer-rf-module2-operator-wording', async ({ page }) => {
+        test.setTimeout(210_000);
+
+        const panelTitle = `Module 2 Current — RandomForest vs Peers E2E ${Date.now()}`;
+        const prompt = e2ePeerRfPanelCreatePrompt(panelTitle);
+        const removeTimeoutMs = removeCase?.replyTimeoutMs ?? 180_000;
+
+        await openFreshGraftChat(page);
+        const startCopyCount = await sendGraftPrompt(page, prompt);
+        const reply = await waitForAssistantReply(page, {
+            timeoutMs: 180_000,
+            startCopyCount,
+        });
+
+        expect(reply, reply.slice(0, 400)).toMatch(/randomforest vs peers/i);
+        assertReplyExpectations(reply, undefined, [...E2E_PEER_RF_CREATE_EXPECT_NOT_CONTAINS]);
+        await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
+
+        if (/panel added/i.test(reply)) {
+            await removeE2ePanelsIfPresent(page, [panelTitle], e2ePanelRemovePrompt, {
+                timeoutMs: removeTimeoutMs,
+            });
+        }
     });
 });

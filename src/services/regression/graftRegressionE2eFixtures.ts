@@ -11,7 +11,8 @@ export function e2eDashboardUid(): string {
 }
 
 function withE2eDashboardUid(prompt: string): string {
-    return prompt.split(KEYSIGHT_DASHBOARD_UID).join(e2eDashboardUid());
+    const uid = e2eDashboardUid();
+    return prompt.split(KEYSIGHT_DASHBOARD_UID).join(uid).split('afq7tc6hl1m9sb').join(uid);
 }
 
 export type E2eRegressionMode = 'read-only' | 'mutating';
@@ -98,6 +99,9 @@ export const E2E_REGRESSION_CASES: E2eRegressionCase[] = [
         replyTimeoutMs: SLOW_REPLY_TIMEOUT_MS,
     }),
     toE2eCase('review-no-auto-continue', { e2eEnabled: false, e2eMode: 'read-only' }),
+    toE2eCase('create-organization-admin', { e2eEnabled: true, e2eMode: 'read-only' }),
+    toE2eCase('add-user-admin', { e2eEnabled: true, e2eMode: 'read-only' }),
+    toE2eCase('rf-bare-pressure-clarify', { e2eEnabled: true, e2eMode: 'read-only' }),
 ];
 
 export function e2ePanelCreatePrompt(panelName: string): string {
@@ -150,9 +154,30 @@ export function e2eGrafanaAlertCreateExpectContains(ruleTitle: string): string[]
 
 export const E2E_GRAFANA_ALERT_CREATE_EXPECT_NOT_CONTAINS = [
     'Need clarification',
-    'Own History',
     'typical Own History layout',
 ] as const;
+
+export function e2eGrafanaAlertUpdatePrompt(ruleTitle: string, description: string): string {
+    return (
+        `Change the alert rule named "${ruleTitle}" on the dashboard with UID = ${SANDBOX_SKYWATER_DASHBOARD_UID} ` +
+        `to have the description of "${description}"`
+    );
+}
+
+export function e2eGrafanaAlertUpdateExpectContains(description: string): string[] {
+    return ['Grafana alert updated', description];
+}
+
+export function e2ePeerRfPanelCreatePrompt(panelTitle: string): string {
+    return (
+        `Create a machine learning panel titled "${panelTitle}" on the dashboard with UID ${e2eDashboardUid()}. ` +
+        `Compare Module 2 Current against the peer modules using a RandomForest anomaly detection model. ` +
+        `Plot the Module 2 Actual values and the RandomForest anomaly score or prediction. ` +
+        `If a RandomForest model is not available, explain what additional configuration or data is required instead of creating placeholder queries`
+    );
+}
+
+export const E2E_PEER_RF_CREATE_EXPECT_NOT_CONTAINS = ['History Comparison'] as const;
 
 export function extractAlertRuleUidFromReply(reply: string, ruleTitle: string): string | undefined {
     const escaped = ruleTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

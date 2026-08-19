@@ -1,9 +1,12 @@
-import { parseGrafanaAlertCreateRequest } from '../grafanaAlertParse';
+import { parseGrafanaAlertCreateRequest, parseGrafanaAlertUpdateRequest } from '../grafanaAlertParse';
+import { parseAddPeerRfPanelRequest } from '../peerRfPanelAddParse';
 import { KEYSIGHT_DASHBOARD_UID } from './graftRegressionFixtures';
 import {
     e2eDashboardUid,
     e2eGrafanaAlertCreatePrompt,
+    e2eGrafanaAlertUpdatePrompt,
     e2ePanelCreatePrompt,
+    e2ePeerRfPanelCreatePrompt,
     extractAlertRuleUidFromReply,
     SANDBOX_E2E_DASHBOARD_UID,
     SANDBOX_SKYWATER_DASHBOARD_UID,
@@ -47,6 +50,22 @@ describe('e2eGrafanaAlertCreatePrompt', () => {
         });
         expect(req?.dashboardUid).not.toBe(KEYSIGHT_DASHBOARD_UID);
         expect(req?.dashboardUid).not.toBe(SANDBOX_E2E_DASHBOARD_UID);
+    });
+
+    it('parses a Skywater alert-update prompt by panel title', () => {
+        const req = parseGrafanaAlertUpdateRequest(
+            e2eGrafanaAlertUpdatePrompt('Graft E2E RF vs Peers', 'Graft E2E sandbox description')
+        );
+        expect(req?.ruleTitle).toBe('Graft E2E RF vs Peers');
+        expect(req?.dashboardUid).toBe(SANDBOX_SKYWATER_DASHBOARD_UID);
+        expect(req?.description).toBe('Graft E2E sandbox description');
+    });
+
+    it('parses peer-RF create onto the sandbox E2E Keysight clone', () => {
+        const title = 'Module 2 Current — RandomForest vs Peers E2E 1';
+        const req = parseAddPeerRfPanelRequest(e2ePeerRfPanelCreatePrompt(title));
+        expect(req?.dashboardUid).toBe(SANDBOX_E2E_DASHBOARD_UID);
+        expect(req?.moduleNumber).toBe(2);
     });
 
     it('extracts the provisioned rule uid from a Graft create reply', () => {
