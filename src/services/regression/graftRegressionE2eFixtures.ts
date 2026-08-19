@@ -1,8 +1,13 @@
 import { KEYSIGHT_DASHBOARD_UID, REGRESSION_CASES, type RegressionCase } from './graftRegressionFixtures';
 
-/** Live sandbox Keysight UID (Jest fixtures still use historical `cfo0wckufbdhce`). */
+/**
+ * Sandbox Playwright target: cloned Keysight (`2505-200033 / Keysight — Graft E2E`).
+ * Jest operator fixtures still use historical `cfo0wckufbdhce`.
+ */
+export const SANDBOX_E2E_DASHBOARD_UID = 'grafte2ekeysht';
+
 export function e2eDashboardUid(): string {
-    return process.env.GRAFANA_E2E_DASHBOARD_UID?.trim() || KEYSIGHT_DASHBOARD_UID;
+    return process.env.GRAFANA_E2E_DASHBOARD_UID?.trim() || SANDBOX_E2E_DASHBOARD_UID;
 }
 
 function withE2eDashboardUid(prompt: string): string {

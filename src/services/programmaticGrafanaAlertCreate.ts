@@ -173,6 +173,23 @@ async function searchDashboardsByUidPrefix(requestedUid: string): Promise<Search
 type LoadedDashboard = { dashResp: DashboardApiResponse; resolvedUid: string };
 
 /**
+ * Lower is better. Exact UID wins; then the shortest prefix match.
+ * Titles with a standalone "Test" (Skywater-MN Test) lose to the production clone.
+ */
+export function rankGrafanaAlertDashboardCandidate(
+    requestedUid: string,
+    resolvedUid: string,
+    title: string
+): number {
+    if (resolvedUid === requestedUid) {
+        return 0;
+    }
+    const extra = Math.max(0, resolvedUid.length - requestedUid.length);
+    const testPenalty = /\btest\b/i.test(title) ? 1000 : 0;
+    return 1 + extra + testPenalty;
+}
+
+/**
  * Exact UID first, then prefix clones. A real dashboard (`idHkqdqnk`) must not lose
  * to a longer clone (`idHkqdqnkeres`). Truncated UIDs still fall through when exact
  * GET 404s or the exact dashboard has no matching panel.
@@ -433,6 +450,11 @@ export async function runProgrammaticGrafanaAlertCreate(
     let dashboard: Record<string, unknown> | undefined;
     let hit: ReturnType<typeof findPanelForGrafanaAlert> | undefined;
     const hintEntries: DashboardPanelEntry[] = [];
+    const withPanel: Array<{
+        cand: LoadedDashboard;
+        found: NonNullable<ReturnType<typeof findPanelForGrafanaAlert>>;
+        rank: number;
+    }> = [];
     for (const cand of loaded.candidates) {
         const candDash = cand.dashResp.dashboard;
         if (!candDash) {
@@ -442,12 +464,23 @@ export async function runProgrammaticGrafanaAlertCreate(
         hintEntries.push(...entries);
         const found = findPanelForGrafanaAlert(entries, request.panelTitle);
         if (found) {
-            dashResp = cand.dashResp;
-            dashboardUid = cand.resolvedUid;
-            dashboard = candDash;
-            hit = found;
-            break;
+            const title = typeof candDash.title === 'string' ? candDash.title : '';
+            withPanel.push({
+                cand,
+                found,
+                rank: rankGrafanaAlertDashboardCandidate(dashboardUidRequested, cand.resolvedUid, title),
+            });
         }
+    }
+    withPanel.sort(
+        (a, b) => a.rank - b.rank || a.cand.resolvedUid.localeCompare(b.cand.resolvedUid)
+    );
+    const chosen = withPanel[0];
+    if (chosen) {
+        dashResp = chosen.cand.dashResp;
+        dashboardUid = chosen.cand.resolvedUid;
+        dashboard = chosen.cand.dashResp.dashboard;
+        hit = chosen.found;
     }
     if (!dashResp || !dashboard || !hit) {
         const uidNote =
