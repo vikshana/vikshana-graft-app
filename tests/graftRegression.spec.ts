@@ -33,10 +33,17 @@ import {
     e2ePanelRenameExpectContains,
     e2ePanelRenamePrompt,
     e2ePeerRfPanelCreatePrompt,
+    e2eDashboardClonePrompt,
+    e2ePeerBandPressureCreatePrompt,
+    e2eSensingVoltageHistoryComparisonPrompt,
+    extractClonedDashboardUidFromReply,
+    E2E_CLONE_TARGET_MACHINE,
 } from '../src/services/regression/graftRegressionE2eFixtures';
 import { test, expect } from './fixtures';
 import {
     assertReplyExpectations,
+    deleteGrafanaDashboardIfPresent,
+    upsertTinyCloneSourceDashboard,
     isGraftE2eMutatingEnabled,
     isGraftE2eTarget,
     openFreshGraftChat,
@@ -294,5 +301,88 @@ test.describe('Graft regression E2E (mutating)', () => {
                 timeoutMs: removeTimeoutMs,
             });
         }
+    });
+
+    test('dashboard-clone-visual-copy', async ({ page }) => {
+        test.setTimeout(210_000);
+
+        await upsertTinyCloneSourceDashboard(page);
+
+        const dashboardTitle = `${E2E_CLONE_TARGET_MACHINE} / Graft E2E Clone ${Date.now()}`;
+        const prompt = e2eDashboardClonePrompt(dashboardTitle);
+        let reply = '';
+        let clonedUid: string | undefined;
+
+        try {
+            await openFreshGraftChat(page);
+            const startCopyCount = await sendGraftPrompt(page, prompt);
+            reply = await waitForAssistantReply(page, {
+                timeoutMs: 180_000,
+                startCopyCount,
+            });
+            clonedUid = extractClonedDashboardUidFromReply(reply);
+
+            expect(reply, reply.slice(0, 500)).toMatch(/dashboard cloned/i);
+            assertReplyExpectations(reply, [dashboardTitle, E2E_CLONE_TARGET_MACHINE, 'Panels copied'], [
+                'Need clarification',
+                'Reply Continue',
+            ]);
+            await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
+            expect(clonedUid, `Could not parse cloned dashboard uid from reply: ${reply.slice(0, 400)}`).toBeTruthy();
+        } finally {
+            const uid = clonedUid ?? extractClonedDashboardUidFromReply(reply);
+            if (uid) {
+                await deleteGrafanaDashboardIfPresent(page, uid);
+            }
+        }
+    });
+
+    test('peer-band-pressure-create', async ({ page }) => {
+        test.setTimeout(210_000);
+
+        const panelTitle = `Module 2 Pressure — Alert Test Peer Band ±2σ E2E ${Date.now()}`;
+        const prompt = e2ePeerBandPressureCreatePrompt(panelTitle);
+        const removeTimeoutMs = removeCase?.replyTimeoutMs ?? 180_000;
+
+        await openFreshGraftChat(page);
+        const startCopyCount = await sendGraftPrompt(page, prompt);
+        const reply = await waitForAssistantReply(page, {
+            timeoutMs: 180_000,
+            startCopyCount,
+        });
+
+        assertReplyExpectations(
+            reply,
+            ['Peer Band panel', panelTitle],
+            ['History Comparison', 'Need a clearer Random Forest signal']
+        );
+        await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
+
+        if (/saved/i.test(reply)) {
+            await removeE2ePanelsIfPresent(page, [panelTitle], e2ePanelRemovePrompt, {
+                timeoutMs: removeTimeoutMs,
+            });
+        }
+    });
+
+    test('rf-sensing-voltage-not-module5', async ({ page }) => {
+        test.setTimeout(210_000);
+
+        await upsertTinyCloneSourceDashboard(page);
+        const prompt = e2eSensingVoltageHistoryComparisonPrompt();
+
+        await openFreshGraftChat(page);
+        const startCopyCount = await sendGraftPrompt(page, prompt);
+        const reply = await waitForAssistantReply(page, {
+            timeoutMs: 180_000,
+            startCopyCount,
+        });
+
+        assertReplyExpectations(
+            reply,
+            ['Predictive analytics panel', 'Sensing Voltage'],
+            ['Module 5 Current']
+        );
+        await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
     });
 });

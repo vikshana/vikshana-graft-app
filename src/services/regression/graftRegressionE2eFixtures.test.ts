@@ -1,13 +1,23 @@
 import { parseGrafanaAlertCreateRequest, parseGrafanaAlertUpdateRequest } from '../grafanaAlertParse';
 import { parseAddPeerRfPanelRequest } from '../peerRfPanelAddParse';
+import { parseCloneIntentMessage } from '../dashboardCloneParse';
+import { parseAddPeerBandPanelRequest } from '../peerBandPanelAddParse';
+import { parseAddHistoryComparisonPanelRequest } from '../historyComparisonPanelAddParse';
 import { KEYSIGHT_DASHBOARD_UID } from './graftRegressionFixtures';
 import {
+    e2eDashboardClonePrompt,
     e2eDashboardUid,
     e2eGrafanaAlertCreatePrompt,
     e2eGrafanaAlertUpdatePrompt,
     e2ePanelCreatePrompt,
+    e2ePeerBandPressureCreatePrompt,
     e2ePeerRfPanelCreatePrompt,
+    e2eSensingVoltageHistoryComparisonPrompt,
     extractAlertRuleUidFromReply,
+    extractClonedDashboardUidFromReply,
+    E2E_CLONE_SOURCE_MACHINE,
+    E2E_CLONE_TARGET_MACHINE,
+    E2E_CLONE_SOURCE_DASHBOARD_UID,
     SANDBOX_E2E_DASHBOARD_UID,
     SANDBOX_SKYWATER_DASHBOARD_UID,
 } from './graftRegressionE2eFixtures';
@@ -77,5 +87,33 @@ describe('e2eGrafanaAlertCreatePrompt', () => {
         expect(extractAlertRuleUidFromReply(reply, title)).toBe('cfvoxf1zoqr5sa');
         const rendered = `Saved from panel — rule ${title} (cfvoxf1zoqr5sa).\nDashboard: Skywater-MN (idHkqdqnk)`;
         expect(extractAlertRuleUidFromReply(rendered, title)).toBe('cfvoxf1zoqr5sa');
+    });
+
+    it('parses a one-dashboard clone between unused sandbox machine ids', () => {
+        const title = `${E2E_CLONE_TARGET_MACHINE} / Graft E2E Clone 1`;
+        const parsed = parseCloneIntentMessage(e2eDashboardClonePrompt(title));
+        expect(parsed.valid).toBe(true);
+        expect(parsed.sourceMachineId).toBe(E2E_CLONE_SOURCE_MACHINE);
+        expect(parsed.targetMachineId).toBe(E2E_CLONE_TARGET_MACHINE);
+        expect(parsed.requestedTitle).toBe(title);
+        expect(extractClonedDashboardUidFromReply(
+            '**New dashboard:** 2599-000001 / Graft E2E Clone (`abcdef12`).\n- **Panels copied:** 1'
+        )).toBe('abcdef12');
+    });
+
+    it('parses peer-band pressure create onto the sandbox E2E Keysight clone', () => {
+        const title = 'Module 2 Pressure — Alert Test Peer Band ±2σ E2E 1';
+        const req = parseAddPeerBandPanelRequest(e2ePeerBandPressureCreatePrompt(title));
+        expect(req?.dashboardUid).toBe(SANDBOX_E2E_DASHBOARD_UID);
+        expect(req?.metricKind).toBe('pressure');
+        expect(req?.moduleNumber).toBe(2);
+        expect(req?.panelTitle).toBe(title);
+    });
+
+    it('parses sensing-voltage History Comparison onto the tiny clone source (Prometheus-stamped)', () => {
+        const req = parseAddHistoryComparisonPanelRequest(e2eSensingVoltageHistoryComparisonPrompt());
+        expect(req?.dashboardUid).toBe(E2E_CLONE_SOURCE_DASHBOARD_UID);
+        expect(req?.signal?.field).toBe('Cartridge_Sensing_Voltage');
+        expect(req?.signal?.panelTitle).toMatch(/Sensing Voltage/i);
     });
 });

@@ -179,6 +179,40 @@ export function e2ePeerRfPanelCreatePrompt(panelTitle: string): string {
 
 export const E2E_PEER_RF_CREATE_EXPECT_NOT_CONTAINS = ['History Comparison'] as const;
 
+/** Tiny unused machines so clone does not overwrite Keysight or Skywater. */
+export const E2E_CLONE_SOURCE_MACHINE = '2598-000001';
+export const E2E_CLONE_SOURCE_DASHBOARD_UID = 'grafte2eclsrc';
+export const E2E_CLONE_TARGET_MACHINE = '2599-000001';
+
+export function e2eDashboardClonePrompt(dashboardTitle: string): string {
+    return (
+        `Create a new dashboard named "${dashboardTitle}" that is a visual copy of ${E2E_CLONE_SOURCE_MACHINE}, ` +
+        `with data for ${E2E_CLONE_TARGET_MACHINE}.`
+    );
+}
+
+export function extractClonedDashboardUidFromReply(reply: string): string | undefined {
+    const match = reply.match(/New dashboard:[^\n]*?\(\`?([A-Za-z0-9_-]{8,})\`?\)/i);
+    return match?.[1];
+}
+
+export function e2ePeerBandPressureCreatePrompt(panelTitle: string): string {
+    return (
+        `Create a new machine learning time series panel titled "${panelTitle}" ` +
+        `on the dashboard with UID ${e2eDashboardUid()}. ` +
+        `Compare Module 2 Pressure against the average of Modules 1 and 3 through 8. ` +
+        `Create four visible lines: Module 2 Actual Peer Mean Upper Peer Bound (Peer Mean + 2 × Standard Deviation) ` +
+        `Lower Peer Bound (Peer Mean - 2 × Standard Deviation) Calculate the Upper and Lower Peer Bounds in the Flux query itself.`
+    );
+}
+
+export function e2eSensingVoltageHistoryComparisonPrompt(): string {
+    return (
+        `Create a Random Forest machine learning panel for sensing voltage ` +
+        `on the dashboard with UID = ${E2E_CLONE_SOURCE_DASHBOARD_UID}.`
+    );
+}
+
 export function extractAlertRuleUidFromReply(reply: string, ruleTitle: string): string | undefined {
     const escaped = ruleTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const match = reply.match(new RegExp(`${escaped}[^\\n]*?\\(\`?([A-Za-z0-9_-]{8,})\`?\\)`));

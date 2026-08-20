@@ -1,11 +1,9 @@
 import type { PluginOptions } from '@grafana/plugin-e2e';
 import { defineConfig, devices } from '@playwright/test';
-import fs from 'node:fs';
 import { dirname } from 'node:path';
 
 const pluginE2eAuth = `${dirname(require.resolve('@grafana/plugin-e2e'))}/auth`;
 const graftAuthFile = process.env.GRAFANA_STORAGE_STATE || 'playwright/.auth/admin.json';
-const reuseGraftAuth = process.env.GRAFANA_REUSE_AUTH === '1' && fs.existsSync(graftAuthFile);
 
 /**
  * Read environment variables from file.
@@ -67,7 +65,7 @@ export default defineConfig<PluginOptions>({
         ...devices['Desktop Chrome'],
         storageState: graftAuthFile,
       },
-      dependencies: reuseGraftAuth ? [] : ['graft-regression-auth'],
+      dependencies: ['graft-regression-auth'],
     },
   ],
 });

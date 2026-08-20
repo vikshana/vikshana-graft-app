@@ -17,6 +17,52 @@ function isRemoteGrafana(): boolean {
     }
 }
 
+interface GrafanaSessionUser {
+    login?: string;
+    orgId?: number;
+}
+
+interface GrafanaUserOrg {
+    orgId?: number;
+    name?: string;
+    role?: string;
+}
+
+function orgAdminHelpMessage(login: string, orgName: string | undefined, role: string | undefined): string {
+    return [
+        `Graft E2E user "${login}" is org ${role ?? 'unknown'}` +
+            `${orgName ? ` in "${orgName}"` : ''}.`,
+        'Need Grafana org Admin so Playwright can save dashboards and provision alerts.',
+        'Fix: Server Admin → Users → that login → org role Admin (not Viewer).',
+    ].join('\n');
+}
+
+function requireOrgAdmin(user: GrafanaSessionUser, orgs: GrafanaUserOrg[]): void {
+    const org = orgs.find((o) => o.orgId === user.orgId) ?? orgs[0];
+    if (org?.role === 'Admin') {
+        return;
+    }
+    throw new Error(orgAdminHelpMessage(user.login ?? GRAFANA_USER, org?.name, org?.role));
+}
+
+async function readJsonIfOk<T>(response: import('@playwright/test').APIResponse | null): Promise<T | undefined> {
+    if (!response?.ok()) {
+        return undefined;
+    }
+    return (await response.json()) as T;
+}
+
+async function loadSessionIdentity(
+    get: (path: string) => Promise<import('@playwright/test').APIResponse>
+): Promise<{ user: GrafanaSessionUser; orgs: GrafanaUserOrg[] } | undefined> {
+    const user = await readJsonIfOk<GrafanaSessionUser>(await get('/api/user'));
+    const orgs = await readJsonIfOk<GrafanaUserOrg[]>(await get('/api/user/orgs'));
+    if (!user?.login || !Array.isArray(orgs)) {
+        return undefined;
+    }
+    return { user, orgs };
+}
+
 function authHelpMessage(apiError: string): string {
     return [
         `Could not authenticate to Grafana at ${BASE_URL} as user "${GRAFANA_USER}".`,
@@ -41,9 +87,11 @@ function authHelpMessage(apiError: string): string {
         .join('\n');
 }
 
-async function storageStateIsValid(browser: import('@playwright/test').Browser): Promise<boolean> {
+async function loadStorageStateIdentity(
+    browser: import('@playwright/test').Browser
+): Promise<{ user: GrafanaSessionUser; orgs: GrafanaUserOrg[] } | undefined> {
     if (!fs.existsSync(AUTH_FILE)) {
-        return false;
+        return undefined;
     }
 
     const context = await browser.newContext({
@@ -54,10 +102,9 @@ async function storageStateIsValid(browser: import('@playwright/test').Browser):
     const page = await context.newPage();
 
     try {
-        const response = await page.goto('/api/user', { waitUntil: 'domcontentloaded' });
-        return response?.ok() === true;
+        return await loadSessionIdentity((path) => page.request.get(path));
     } catch {
-        return false;
+        return undefined;
     } finally {
         await context.close();
     }
@@ -66,8 +113,12 @@ async function storageStateIsValid(browser: import('@playwright/test').Browser):
 setup('authenticate Graft regression E2E', async ({ browser, request, page }) => {
     fs.mkdirSync(path.dirname(AUTH_FILE), { recursive: true });
 
-    if (process.env.GRAFANA_REUSE_AUTH === '1' && (await storageStateIsValid(browser))) {
-        return;
+    if (process.env.GRAFANA_REUSE_AUTH === '1') {
+        const reused = await loadStorageStateIdentity(browser);
+        if (reused) {
+            requireOrgAdmin(reused.user, reused.orgs);
+            return;
+        }
     }
 
     if (isRemoteGrafana() && GRAFANA_USER === 'admin' && GRAFANA_PASSWORD === 'admin') {
@@ -80,6 +131,8 @@ setup('authenticate Graft regression E2E', async ({ browser, request, page }) =>
 
     if (loginRes.ok()) {
         await request.storageState({ path: AUTH_FILE });
+        const identity = await loadSessionIdentity((path) => request.get(path));
+        requireOrgAdmin(identity?.user ?? {}, identity?.orgs ?? []);
         return;
     }
 
@@ -101,4 +154,6 @@ setup('authenticate Graft regression E2E', async ({ browser, request, page }) =>
     }
 
     await page.context().storageState({ path: AUTH_FILE });
+    const identity = await loadSessionIdentity((path) => page.request.get(path));
+    requireOrgAdmin(identity?.user ?? {}, identity?.orgs ?? []);
 });

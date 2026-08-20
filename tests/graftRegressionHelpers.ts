@@ -1,4 +1,8 @@
 import { expect, type Page } from '@playwright/test';
+import {
+    E2E_CLONE_SOURCE_DASHBOARD_UID,
+    E2E_CLONE_SOURCE_MACHINE,
+} from '../src/services/regression/graftRegressionE2eFixtures';
 
 export function isGraftE2eTarget(): boolean {
     if (process.env.GRAFANA_E2E === '1') {
@@ -168,5 +172,60 @@ export async function deleteGrafanaAlertRuleIfPresent(page: Page, ruleUid: strin
     expect(
         [204, 404].includes(response.status()),
         `Could not delete alert rule ${ruleUid}: HTTP ${response.status()}`
+    ).toBe(true);
+}
+
+export async function firstPrometheusDatasourceUid(page: Page): Promise<string> {
+    const response = await page.request.get('/api/datasources');
+    expect(response.ok(), `Could not list datasources: HTTP ${response.status()}`).toBe(true);
+    const body = await response.json();
+    const list = Array.isArray(body) ? body : [];
+    const prom = list.find((ds: { type?: string; uid?: string }) => ds.type === 'prometheus' && ds.uid);
+    expect(prom?.uid, 'Sandbox org has no Prometheus datasource').toBeTruthy();
+    return String(prom.uid);
+}
+
+export async function upsertTinyCloneSourceDashboard(page: Page): Promise<string> {
+    const promUid = await firstPrometheusDatasourceUid(page);
+    const datasource = { type: 'prometheus', uid: promUid };
+    const response = await page.request.post('/api/dashboards/db', {
+        data: {
+            dashboard: {
+                uid: E2E_CLONE_SOURCE_DASHBOARD_UID,
+                title: `${E2E_CLONE_SOURCE_MACHINE} / Graft E2E Source`,
+                panels: [
+                    {
+                        id: 1,
+                        type: 'timeseries',
+                        title: 'Module 1 Current',
+                        datasource,
+                        gridPos: { x: 0, y: 0, w: 12, h: 8 },
+                        targets: [
+                            {
+                                refId: 'A',
+                                datasource,
+                                expr: `up{machine="${E2E_CLONE_SOURCE_MACHINE}"}`,
+                            },
+                        ],
+                    },
+                ],
+                schemaVersion: 39,
+                version: 0,
+            },
+            overwrite: true,
+            message: 'Playwright tiny clone source',
+        },
+    });
+    expect(response.ok(), `Could not upsert clone source dashboard: HTTP ${response.status()}`).toBe(true);
+    return E2E_CLONE_SOURCE_DASHBOARD_UID;
+}
+
+export async function deleteGrafanaDashboardIfPresent(page: Page, dashboardUid: string): Promise<void> {
+    const response = await page.request.delete(
+        `/api/dashboards/uid/${encodeURIComponent(dashboardUid)}`
+    );
+    expect(
+        [200, 404].includes(response.status()),
+        `Could not delete dashboard ${dashboardUid}: HTTP ${response.status()}`
     ).toBe(true);
 }
