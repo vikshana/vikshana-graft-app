@@ -155,7 +155,8 @@ describe('e2eGrafanaAlertCreatePrompt', () => {
         expect(reply).toMatch(/Did you mean/i);
         expect(reply).toMatch(/Peer Band/i);
         expect(reply).toMatch(/History Comparison/i);
-        expect(parseAddPeerBandPanelRequest(prompt)).toBeNull();
+        // Peer Band parser still matches — ChatInterface must run resolveIntentRouteAmbiguity first.
+        expect(parseAddPeerBandPanelRequest(prompt)).not.toBeNull();
         expect(parseAddHistoryComparisonPanelRequest(prompt)).toBeNull();
     });
 });
