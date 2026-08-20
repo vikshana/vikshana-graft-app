@@ -11,7 +11,8 @@ Graft uses **Conventional Commits** and **release-please** to automate the relea
 1. Developers merge feature/fix PRs to `main` using Conventional Commit messages.
 2. After each merge, release-please opens (or updates) a **Release PR** automatically. This PR contains the version bump to `package.json` and the auto-generated `CHANGELOG.md` entries.
 3. When the team is ready to cut a release, they **merge the Release PR**.
-4. Merging the Release PR causes release-please to push a `vX.Y.Z` tag, which triggers the `release.yml` workflow to build and publish the GitHub Release.
+4. Merging the Release PR causes release-please to create/update the GitHub Release and push a `graft-vX.Y.Z` tag.
+5. In the same `release-please.yml` run, a `package` job (gated on `release_created == 'true'`) checks out that tag, builds the plugin, and uploads the artifact to the existing release.
 
 No manual version editing, no manual tagging, no manual changelog writing.
 
@@ -63,15 +64,28 @@ If a commit message was wrong and the version bump is incorrect, you can overrid
 ### 4. Merge the Release PR
 
 When ready to release, simply **merge the Release PR**. release-please will:
-- Push a `vX.Y.Z` tag to `main`
+- Push a `graft-vX.Y.Z` tag to `main`
+- Create/update the GitHub Release notes for that tag
 
-### 5. Automated build and publish
+### 5. Automated build and publish (same workflow)
 
-The `vX.Y.Z` tag push triggers `.github/workflows/release.yml`, which:
+The same `.github/workflows/release-please.yml` run then executes a `package` job (only when `release_created == 'true'`) that:
 1. Builds the frontend (`npm run build`)
 2. Builds the Go backend for all platforms (`mage -v`)
-3. Packages `dist/` as `vikshana-graft-app-vX.Y.Z.zip`
-4. Creates a GitHub Release and attaches the zip as a downloadable artifact
+3. Packages `dist/` as `vikshana-graft-app-graft-vX.Y.Z.zip`
+4. Uploads the zip artifact to the existing `graft-vX.Y.Z` GitHub Release
+
+### 6. Manual recovery (artifact upload only)
+
+If the automated packaging/upload job fails or needs to be re-run, use **Actions → Release** (`.github/workflows/release.yml`) and dispatch it manually with an existing tag, for example:
+
+```
+graft-v0.6.2
+```
+
+This workflow checks out the provided tag, rebuilds the plugin, and uploads `vikshana-graft-app-graft-vX.Y.Z.zip` to that existing release.
+
+It is a recovery path only — it does **not** create a new release or regenerate release notes.
 
 The release is then available at:
 ```
@@ -84,10 +98,10 @@ https://github.com/vikshana/vikshana-graft-app/releases
 
 | File | Purpose |
 |---|---|
-| `.github/workflows/release-please.yml` | Runs release-please on every push to `main` |
+| `.github/workflows/release-please.yml` | Runs release-please on every push to `main`, then packages/uploads artifacts when a release is created |
 | `release-please-config.json` | Configures release type, changelog sections, and version bump behaviour |
 | `.release-please-manifest.json` | Tracks the last released version; updated automatically by release-please — do not edit manually |
-| `.github/workflows/release.yml` | Builds and publishes the plugin artifact when a `v*` tag is pushed |
+| `.github/workflows/release.yml` | Manual recovery workflow: rebuilds/uploads artifacts for an existing `graft-v*` release tag |
 
 ---
 
@@ -97,7 +111,7 @@ https://github.com/vikshana/vikshana-graft-app/releases
 
 | Placeholder | Replaced with |
 |---|---|
-| `%VERSION%` | The version from the git tag (e.g. `v0.3.0` → `0.3.0`) |
+| `%VERSION%` | The version from the git tag (e.g. `graft-v0.3.0` → `0.3.0`) |
 | `%TODAY%` | The current date in `YYYY-MM-DD` format |
 
 The source file always keeps the placeholders — substitution only happens in the built artifact inside `dist/`.
@@ -108,7 +122,7 @@ The source file always keeps the placeholders — substitution only happens in t
 
 For urgent fixes that can't wait for the next scheduled release:
 
-1. Create a branch from the release tag: `git checkout -b hotfix/0.2.1 v0.2.0`
+1. Create a branch from the release tag: `git checkout -b hotfix/0.2.1 graft-v0.2.0`
 2. Apply the fix with a `fix:` commit
 3. Open a PR against `main` (and backport to the release branch if needed)
 4. Once merged, the Release PR on `main` will propose the patch bump — merge it immediately
