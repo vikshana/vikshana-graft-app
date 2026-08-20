@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.3](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.6.2...graft-v0.6.3) (2026-08-20)
+
+
+### Bug fixes
+
+* **release:** package artifacts in release workflow ([#38](https://github.com/vikshana/vikshana-graft-app/issues/38)) ([97c6c82](https://github.com/vikshana/vikshana-graft-app/commit/97c6c8233ff7d5d7f228619b8a60c8589b516f5a))
+
 ## [0.6.2](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.6.1...graft-v0.6.2) (2026-08-20)
 
 
