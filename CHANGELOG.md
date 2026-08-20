@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.6.1...graft-v0.6.2) (2026-08-20)
+
+
+### Bug fixes
+
+* **release:** trigger artifact builds for graft tags ([#36](https://github.com/vikshana/vikshana-graft-app/issues/36)) ([e8b4aeb](https://github.com/vikshana/vikshana-graft-app/commit/e8b4aebc861a8f8783ceb86b6d47c9ac75fe36f6))
+
 ## [0.6.1](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.6.0...graft-v0.6.1) (2026-06-26)
 
 
