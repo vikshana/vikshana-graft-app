@@ -50,6 +50,28 @@ describe('applyLlmVerifiedSaveReply', () => {
         expect(out).not.toContain('8 panels added');
     });
 
+    it('returns routing mismatch reply when LLM saved wrong history comparison panel', () => {
+        const prompt =
+            'Create a Random Forest machine learning panel for sensing voltage on the dashboard with UID = afq7tc6hl1m9sb.';
+        const mismatch =
+            '### Routing mismatch — did you mean Sensing Voltage? (Graft build 216)\n\nYou asked for **sensing voltage**, but the saved panel is **Module 5 Current — History Comparison**.';
+        const out = applyLlmVerifiedSaveReply(
+            '### Done\n\nPanel saved.',
+            {
+                verified: false,
+                skipped: false,
+                routingMismatchReply: mismatch,
+                detail: 'Expected panel **Sensing Voltage — History Comparison** but observed **Module 5 Current — History Comparison**.',
+            },
+            tools,
+            [prompt],
+            prompt,
+            216
+        );
+        expect(out).toBe(mismatch);
+        expect(out).not.toContain('Save not verified');
+    });
+
     it('skips rename prompts', () => {
         const msg = 'Rename the "A" panel to "B" on dashboard uid abc';
         const out = applyLlmVerifiedSaveReply(

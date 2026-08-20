@@ -18,6 +18,7 @@ import {
     e2ePeerRfPanelCreatePrompt,
     e2ePeerRfVsPeersPrompt,
     e2eSensingVoltageHistoryComparisonPrompt,
+    e2eAmbiguousPeerBandVsHistoryComparisonPrompt,
     extractAlertRuleUidFromReply,
     extractClonedDashboardUidFromReply,
     E2E_CLONE_SOURCE_MACHINE,
@@ -26,6 +27,7 @@ import {
     SANDBOX_E2E_DASHBOARD_UID,
     SANDBOX_SKYWATER_DASHBOARD_UID,
 } from './graftRegressionE2eFixtures';
+import { resolveIntentRouteAmbiguity } from '../programmaticIntentRouter';
 
 describe('e2eDashboardUid', () => {
     const previous = process.env.GRAFANA_E2E_DASHBOARD_UID;
@@ -144,5 +146,16 @@ describe('e2eGrafanaAlertCreatePrompt', () => {
         expect(req?.dashboardUid).not.toBe(E2E_CLONE_SOURCE_DASHBOARD_UID);
         expect(req?.signal?.field).toBe('Cartridge_Sensing_Voltage');
         expect(req?.signal?.panelTitle).toMatch(/Sensing Voltage/i);
+    });
+
+    it('routes ambiguous peer-mean + RF predictive wording to did-you-mean clarification', () => {
+        const prompt = e2eAmbiguousPeerBandVsHistoryComparisonPrompt();
+        const reply = resolveIntentRouteAmbiguity(prompt, 216);
+        expect(reply).toMatch(/Need clarification/i);
+        expect(reply).toMatch(/Did you mean/i);
+        expect(reply).toMatch(/Peer Band/i);
+        expect(reply).toMatch(/History Comparison/i);
+        expect(parseAddPeerBandPanelRequest(prompt)).toBeNull();
+        expect(parseAddHistoryComparisonPanelRequest(prompt)).toBeNull();
     });
 });

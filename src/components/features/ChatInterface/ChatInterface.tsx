@@ -251,6 +251,7 @@ import {
 import { formatChatErrorForUser, extractErrorMessage } from '../../../services/chatError';
 import { contentHasLeakedToolCalls } from '../../../services/leakedToolCallRecovery';
 import { tryProgrammaticFallbackAfterLlm } from '../../../services/programmaticLlmFallback';
+import { resolveIntentRouteAmbiguity, intentRouteWinnerScore } from '../../../services/programmaticIntentRouter';
 import {
   parseBulkModulePanelMatchRequest,
   userWantsBulkModulePanelMatch,
@@ -1323,6 +1324,49 @@ export const ChatInterface = () => {
       // "Create a Grafana-managed alert for the panel titled … Peer Band …" is not
       // mis-routed as "panel already exists".
       const grafanaEvalGroupIntervalRequest = parseGrafanaEvalGroupIntervalRequest(content);
+      const intentRouteClarification = resolveIntentRouteAmbiguity(
+        content,
+        GRAFT_BUILD_NUMBER,
+        contextService.getDashboardUid() ?? undefined
+      );
+      if (intentRouteClarification) {
+        errorPathTag = 'intent-route-disambiguation';
+        recordClarificationShown(
+          'generic-clarification',
+          content,
+          contextService.getDashboardUid() ?? undefined
+        );
+        finalContent = intentRouteClarification;
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const clarifyMessage: Message = { role: 'assistant', content: finalContent };
+        const clarifySession = chatHistoryService.saveSession(
+          [...newMessages, clarifyMessage],
+          currentSessionId
+        );
+        if (clarifySession) {
+          setCurrentSessionId(clarifySession.id);
+          currentSessionIdRef.current = clarifySession.id;
+          replaceChatSessionInUrl(clarifySession.id);
+        }
+        return;
+      }
+      const softWinner = intentRouteWinnerScore(
+        content,
+        contextService.getDashboardUid() ?? undefined
+      );
+      if (softWinner != null && softWinner < 60) {
+        console.info(
+          `[graft] soft intent-route confidence score=${softWinner} (proceeding without disambiguation)`
+        );
+      }
+
       if (grafanaEvalGroupIntervalRequest) {
         errorPathTag = 'grafana-eval-group-interval';
         const evalGroupResult = await runProgrammaticGrafanaEvalGroupInterval(

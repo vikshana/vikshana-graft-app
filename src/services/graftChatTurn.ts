@@ -149,7 +149,8 @@ export async function runGraftChatTurn(params: GraftChatTurnParams): Promise<Gra
                 mcpClient as Parameters<typeof verifyLlmDashboardSave>[0],
                 fallbackUserMessage,
                 finalToolExecutions,
-                contextDashboardUid ?? uidForDiscovery
+                contextDashboardUid ?? uidForDiscovery,
+                buildNumber
             );
             if (!verification.verified && !verification.skipped) {
                 const removeReq = parsePanelRemoveRequest(fallbackUserMessage, {

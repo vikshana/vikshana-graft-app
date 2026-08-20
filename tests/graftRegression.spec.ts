@@ -12,6 +12,7 @@
  *   GRAFANA_ADMIN_USER=... GRAFANA_ADMIN_PASSWORD=... GRAFANA_MIN_BUILD=216 npm run test:regression:sandbox-gate
  *
  * Sandbox-ready, not bulletproof: LLM wording and Grafana restarts can still flake.
+ * Intent disambiguation (peer-band vs HC) is covered by a dedicated read-only E2E case.
  * Clone/History Comparison use a tiny Prometheus-stamped board, not live Keysight.
  * Auth — pick one:
  *   A) One-time manual login, then reuse saved session:
@@ -44,6 +45,9 @@ import {
     e2ePeerBandAlertUpdateByRulePrompt,
     E2E_PEER_BAND_ALERT_PANEL_TITLE,
     e2eSensingVoltageHistoryComparisonPrompt,
+    e2eAmbiguousPeerBandVsHistoryComparisonPrompt,
+    E2E_AMBIGUOUS_INTENT_EXPECT_CONTAINS,
+    E2E_AMBIGUOUS_INTENT_EXPECT_NOT_CONTAINS,
     E2E_CLONE_TARGET_MACHINE,
 } from '../src/services/regression/graftRegressionE2eFixtures';
 import { test, expect } from './fixtures';
@@ -93,6 +97,32 @@ test.describe('Graft regression E2E (read-only)', () => {
             await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
         });
     }
+});
+
+test.describe('Graft regression E2E (intent disambiguation)', () => {
+    test.describe.configure({ mode: 'serial' });
+    test.skip(!isGraftE2eTarget(), 'Set GRAFANA_E2E=1 and GRAFANA_URL to a non-localhost instance');
+
+    test('intent-ambiguous-peer-band-vs-history-comparison', async ({ page }) => {
+        test.setTimeout(90_000);
+
+        await openFreshGraftChat(page);
+        const startCopyCount = await sendGraftPrompt(
+            page,
+            e2eAmbiguousPeerBandVsHistoryComparisonPrompt()
+        );
+        const reply = await waitForAssistantReply(page, {
+            timeoutMs: 60_000,
+            startCopyCount,
+        });
+
+        assertReplyExpectations(
+            reply,
+            [...E2E_AMBIGUOUS_INTENT_EXPECT_CONTAINS],
+            [...E2E_AMBIGUOUS_INTENT_EXPECT_NOT_CONTAINS]
+        );
+        await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
+    });
 });
 
 test.describe('Graft regression E2E (mutating)', () => {

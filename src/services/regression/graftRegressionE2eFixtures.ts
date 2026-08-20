@@ -240,6 +240,30 @@ export function e2eSensingVoltageHistoryComparisonPrompt(dashboardUid: string): 
     );
 }
 
+/**
+ * Intentionally ambiguous: peer mean (Peer Band) + Random Forest predictive analytics (HC).
+ * Must trigger intent-router clarification, not save either panel.
+ */
+export function e2eAmbiguousPeerBandVsHistoryComparisonPrompt(): string {
+    return (
+        `Create a machine learning panel for Module 2 Pressure on the dashboard with UID = ${e2eDashboardUid()}. ` +
+        `Compare Module 2 Pressure against peer mean and Random Forest predictive analytics bands.`
+    );
+}
+
+export const E2E_AMBIGUOUS_INTENT_EXPECT_CONTAINS = [
+    'Need clarification',
+    'Did you mean',
+    'Peer Band',
+    'History Comparison',
+] as const;
+
+export const E2E_AMBIGUOUS_INTENT_EXPECT_NOT_CONTAINS = [
+    'Predictive analytics panel — saved',
+    'Peer Band panel — saved',
+    '### Done',
+] as const;
+
 export function extractAlertRuleUidFromReply(reply: string, ruleTitle: string): string | undefined {
     const escaped = ruleTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const match = reply.match(new RegExp(`${escaped}[^\\n]*?\\(\`?([A-Za-z0-9_-]{8,})\`?\\)`));

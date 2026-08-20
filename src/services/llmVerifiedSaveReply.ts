@@ -46,6 +46,14 @@ export function applyLlmVerifiedSaveReply(
     const versionBit = version ? ` (version **${version}**)` : '';
 
     if (!verification.verified && !verification.skipped) {
+        if (verification.routingMismatchReply) {
+            recordClarificationShown(
+                'generic-clarification',
+                latestUser,
+                extractDashboardUidFromMessage(latestUser)
+            );
+            return verification.routingMismatchReply;
+        }
         if (messageDescribesAmbiguousGraphCreate(latestUser)) {
             recordClarificationShown(
                 'ambiguous-graph-create',

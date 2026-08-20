@@ -13,7 +13,10 @@ import { findPanelByStrictTitle } from './panelDiscovery';
 import { savedUidFromTools, savedVersionFromTools } from './dashboardSaveReplyUtils';
 import { hasSuccessfulDashboardSave } from './continueAction';
 import { userWantsPanelCreate } from './dashboardPanelCreateReply';
-import { messageMentionsPredictiveAnalyticsPanel } from './historyComparisonPanelAddParse';
+import { messageMentionsPredictiveAnalyticsPanel, parseAddHistoryComparisonPanelRequest } from './historyComparisonPanelAddParse';
+import { parseAddPeerBandPanelRequest } from './peerBandPanelAddParse';
+import { formatHistoryComparisonOutcomeMismatch } from './programmaticIntentRouter';
+import { isLiveHistoryComparisonPanel } from './modulePanelTitles';
 
 export interface LlmSaveVerification {
     verified: boolean;
@@ -21,6 +24,8 @@ export interface LlmSaveVerification {
     uid?: string;
     version?: number;
     detail?: string;
+    /** Full assistant reply when save succeeded but the wrong panel type/title was observed. */
+    routingMismatchReply?: string;
     baselinePanelCount?: number;
     currentPanelCount?: number;
 }
@@ -31,11 +36,30 @@ function panelTitlesFromDashboard(panels: unknown): string[] {
         .filter(Boolean);
 }
 
+function newHistoryComparisonPanels(baselineTitles: string[] | undefined, currentTitles: string[]): string[] {
+    const baselineSet = new Set((baselineTitles ?? []).map((t) => t.toLowerCase()));
+    return currentTitles.filter(
+        (t) => !baselineSet.has(t.toLowerCase()) && isLiveHistoryComparisonPanel(t)
+    );
+}
+
+function routingMismatchFromObservedPanel(
+    userMessage: string,
+    observedPanelTitle: string | undefined,
+    buildNumber: string | number
+): string | undefined {
+    if (!observedPanelTitle) {
+        return undefined;
+    }
+    return formatHistoryComparisonOutcomeMismatch(userMessage, observedPanelTitle, Number(buildNumber)) ?? undefined;
+}
+
 export async function verifyLlmDashboardSave(
     mcpClient: McpClient | null | undefined,
     userMessage: string,
     toolExecutions: ToolExecution[],
-    contextDashboardUid?: string
+    contextDashboardUid?: string,
+    buildNumber: string | number = 0
 ): Promise<LlmSaveVerification> {
     if (!mcpClient || !hasSuccessfulDashboardSave(toolExecutions)) {
         return { verified: false, skipped: true };
@@ -82,6 +106,57 @@ export async function verifyLlmDashboardSave(
             ? extracted.dashboard.version
             : parseInt(savedVersionFromTools(toolExecutions) ?? '', 10) || undefined;
     const baseline = getTurnDashboardBaseline();
+    const baselineTitles = baseline?.panelTitles;
+
+    const hcReq = parseAddHistoryComparisonPanelRequest(userMessage);
+    if (hcReq?.signal?.panelTitle) {
+        const expected = hcReq.signal.panelTitle;
+        const hasExpected = currentTitles.some((t) => t.toLowerCase() === expected.toLowerCase());
+        if (!hasExpected) {
+            const observed = newHistoryComparisonPanels(baselineTitles, currentTitles)[0];
+            if (observed) {
+                const routingMismatchReply = routingMismatchFromObservedPanel(
+                    userMessage,
+                    observed,
+                    buildNumber
+                );
+                if (routingMismatchReply) {
+                    return {
+                        verified: false,
+                        skipped: false,
+                        uid,
+                        version,
+                        routingMismatchReply,
+                        baselinePanelCount: baseline?.panelCount,
+                        currentPanelCount: currentCount,
+                        detail: `Expected panel **${expected}** but observed **${observed}**.`,
+                    };
+                }
+            }
+        }
+    }
+
+    const peerReq = parseAddPeerBandPanelRequest(userMessage);
+    if (peerReq) {
+        const observed = newHistoryComparisonPanels(baselineTitles, currentTitles)[0];
+        const routingMismatchReply = routingMismatchFromObservedPanel(
+            userMessage,
+            observed,
+            buildNumber
+        );
+        if (routingMismatchReply) {
+            return {
+                verified: false,
+                skipped: false,
+                uid,
+                version,
+                routingMismatchReply,
+                baselinePanelCount: baseline?.panelCount,
+                currentPanelCount: currentCount,
+                detail: `Peer Band create observed History Comparison panel **${observed}**.`,
+            };
+        }
+    }
 
     const createReq = parsePanelCreateRequest(userMessage, { contextDashboardUid: contextDashboardUid ?? uid });
     if (createReq) {
