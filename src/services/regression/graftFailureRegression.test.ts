@@ -29,6 +29,11 @@ import {
     llmIntentAllowsUpdateDashboard,
 } from '../llmIntentRouter';
 import {
+    messageNeedsIntentRouteClarification,
+    preferredIntentHandler,
+    resolveIntentRouteAmbiguity,
+} from '../programmaticIntentRouter';
+import {
     messageDescribesBulkGaugePanelRename,
     parseBulkGaugePanelRenameRequest,
     userWantsBulkGaugePanelRenameProgrammatic,
@@ -243,6 +248,20 @@ function assertHandlerRouting(c: RegressionCase): void {
             }
             break;
         }
+        case 'intent-route-clarify': {
+            expect(messageNeedsIntentRouteClarification(prompt)).toBe(true);
+            expect(preferredIntentHandler(prompt)).toBeNull();
+            expect(llmIntentAllowsUpdateDashboard(classifyLlmIntent(prompt))).toBe(false);
+            const reply = resolveIntentRouteAmbiguity(prompt, BUILD);
+            expect(reply).toBeTruthy();
+            for (const needle of c.expectReplyContains ?? []) {
+                expect(reply!).toContain(needle);
+            }
+            for (const needle of c.expectReplyNotContains ?? []) {
+                expect(reply!).not.toContain(needle);
+            }
+            break;
+        }
         default:
             throw new Error(`Unhandled handler ${c.expectHandler as string}`);
     }
@@ -251,7 +270,7 @@ function assertHandlerRouting(c: RegressionCase): void {
 describe('graft historical failure regression', () => {
     describe('fixture catalog', () => {
         it('documents known failure patterns', () => {
-            expect(REGRESSION_CASES).toHaveLength(22);
+            expect(REGRESSION_CASES).toHaveLength(23);
             const ids = REGRESSION_CASES.map((c) => c.id);
             expect(new Set(ids).size).toBe(ids.length);
         });
@@ -534,6 +553,7 @@ describe('graft historical failure regression', () => {
             'history-comparison',
             'peer-rf-create',
             'history-comparison-clarify',
+            'intent-route-clarify',
         ];
 
         it.each(handlers)('%s prompt does not collide with unrelated handlers', (handlerId) => {
@@ -577,17 +597,25 @@ describe('graft historical failure regression', () => {
             if (handlerId !== 'grafana-alert-update') {
                 expect(messageMentionsGrafanaAlertUpdate(c.prompt)).toBe(false);
             }
-            if (handlerId !== 'peer-band-create') {
+            // Intent-route clarify intentionally overlaps peer-band / HC wording — ambiguity gate wins.
+            if (handlerId !== 'peer-band-create' && handlerId !== 'intent-route-clarify') {
                 expect(messageMentionsPeerBandPanelCreate(c.prompt)).toBe(false);
             }
             if (
                 handlerId !== 'history-comparison' &&
-                handlerId !== 'history-comparison-clarify'
+                handlerId !== 'history-comparison-clarify' &&
+                handlerId !== 'intent-route-clarify'
             ) {
                 expect(messageMentionsPredictiveAnalyticsPanel(c.prompt)).toBe(false);
             }
             if (handlerId !== 'peer-rf-create') {
                 expect(messageMentionsAddPeerRfPanel(c.prompt)).toBe(false);
+            }
+            if (handlerId === 'intent-route-clarify') {
+                expect(messageNeedsIntentRouteClarification(c.prompt)).toBe(true);
+                expect(preferredIntentHandler(c.prompt)).toBeNull();
+            } else {
+                expect(messageNeedsIntentRouteClarification(c.prompt)).toBe(false);
             }
         });
     });

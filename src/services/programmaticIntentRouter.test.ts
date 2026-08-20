@@ -2,10 +2,14 @@ import { REGRESSION_CASES } from './regression/graftRegressionFixtures';
 import {
     detectIntentAmbiguity,
     formatHistoryComparisonOutcomeMismatch,
+    formatSoftIntentConfidenceNote,
+    messageNeedsIntentRouteClarification,
     preferredIntentHandler,
     resolveIntentRouteAmbiguity,
     scoreIntentCandidates,
 } from './programmaticIntentRouter';
+import { classifyLlmIntent, llmIntentAllowsUpdateDashboard } from './llmIntentRouter';
+import { messageHasProgrammaticHandler } from './programmaticChatIntents';
 
 function casePrompt(id: string): string {
     const found = REGRESSION_CASES.find((c) => c.id === id);
@@ -55,12 +59,20 @@ describe('programmaticIntentRouter', () => {
         expect(reply).toMatch(/Did you mean/i);
         expect(reply).toMatch(/Peer Band/i);
         expect(reply).toMatch(/History Comparison/i);
+        expect(messageNeedsIntentRouteClarification(ambiguous)).toBe(true);
+        expect(messageHasProgrammaticHandler(ambiguous)).toBe(true);
+        expect(classifyLlmIntent(ambiguous)).toBe('read_only');
+        expect(llmIntentAllowsUpdateDashboard(classifyLlmIntent(ambiguous))).toBe(false);
     });
 
     it('does not clarify clear peer-band or alert creates after soft-confidence tighten', () => {
         expect(resolveIntentRouteAmbiguity(casePrompt('peer-band-pressure-create'), 216)).toBeNull();
         expect(resolveIntentRouteAmbiguity(casePrompt('alert-create-not-panel-create'), 216)).toBeNull();
         expect(resolveIntentRouteAmbiguity(casePrompt('rf-sensing-voltage-not-module5'), 216)).toBeNull();
+    });
+
+    it('formats soft confidence footer for operator-visible soft wins', () => {
+        expect(formatSoftIntentConfidenceNote(58)).toMatch(/Routing confidence: \*\*58\*\*/);
     });
 
     it('flags history comparison outcome mismatch for sensing voltage vs module panel', () => {

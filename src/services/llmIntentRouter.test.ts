@@ -31,4 +31,11 @@ describe('classifyLlmIntent', () => {
     it('classifies casual chat as conversational', () => {
         expect(classifyLlmIntent('hello')).toBe('conversational');
     });
+
+    it('classifies ambiguous peer-band vs HC wording as read_only (no LLM mutate)', () => {
+        const ambiguous =
+            'Create a machine learning panel for Module 2 Pressure on the dashboard with UID = grafte2ekeysht. ' +
+            'Compare Module 2 Pressure against peer mean and Random Forest predictive analytics bands.';
+        expect(classifyLlmIntent(ambiguous)).toBe('read_only');
+    });
 });

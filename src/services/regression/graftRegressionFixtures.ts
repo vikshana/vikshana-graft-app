@@ -18,7 +18,8 @@ export type RegressionHandlerId =
     | 'peer-band-create'
     | 'history-comparison'
     | 'peer-rf-create'
-    | 'history-comparison-clarify';
+    | 'history-comparison-clarify'
+    | 'intent-route-clarify';
 
 export interface RegressionCase {
     id: string;
@@ -274,5 +275,23 @@ export const REGRESSION_CASES: RegressionCase[] = [
         expectLlmIntent: 'programmatic',
         expectReplyContains: ['Need a clearer Random Forest signal', 'pressure'],
         expectReplyNotContains: ['Module 5 Current — History Comparison'],
+    },
+    {
+        id: 'intent-ambiguous-peer-band-vs-hc',
+        failure:
+            'Peer mean + Random Forest predictive analytics wording silently picked Peer Band or History Comparison',
+        prompt:
+            'Create a machine learning panel for Module 2 Pressure on the dashboard with UID = afq7tc6hl1m9sb. ' +
+            'Compare Module 2 Pressure against peer mean and Random Forest predictive analytics bands.',
+        expectHandler: 'intent-route-clarify',
+        expectProgrammatic: true,
+        /** LLM tools must stay read-only if the clarify gate is skipped. */
+        expectLlmIntent: 'read_only',
+        expectReplyContains: ['Need clarification', 'Did you mean', 'Peer Band', 'History Comparison'],
+        expectReplyNotContains: [
+            'Predictive analytics panel — saved',
+            'Peer Band panel — saved',
+            '### Done',
+        ],
     },
 ];

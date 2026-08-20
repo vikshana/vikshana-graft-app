@@ -80,12 +80,18 @@ import {
     userWantsMultiPanelCreateProgrammatic,
     userWantsPanelCreateProgrammatic,
 } from './panelCreateParse';
+import { messageNeedsIntentRouteClarification } from './programmaticIntentRouter';
 
 /** True when Graft can handle the message via MCP without calling the LLM. */
 export function messageHasProgrammaticHandler(message: string, contextDashboardUid?: string): boolean {
     const text = message.trim();
     if (!text) {
         return false;
+    }
+
+    // Ambiguous colliding intents still take the programmatic path (clarify reply), not the LLM.
+    if (messageNeedsIntentRouteClarification(text, contextDashboardUid)) {
+        return true;
     }
 
     return (

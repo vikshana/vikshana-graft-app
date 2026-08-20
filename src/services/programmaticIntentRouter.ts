@@ -445,6 +445,14 @@ export function formatHistoryComparisonOutcomeMismatch(
     return null;
 }
 
+/** True when colliding intents are too close to pick safely (clarify instead of mutate). */
+export function messageNeedsIntentRouteClarification(
+    message: string,
+    contextDashboardUid?: string
+): boolean {
+    return detectIntentAmbiguity(scoreIntentCandidates(message, contextDashboardUid)) != null;
+}
+
 /** Returns a disambiguation reply when top intent scores are tied; otherwise null (proceed). */
 export function resolveIntentRouteAmbiguity(
     message: string,
@@ -469,4 +477,12 @@ export function preferredIntentHandler(
         return null;
     }
     return candidates[0].id;
+}
+
+/** One-line footer when a colliding-intent winner is soft but still unambiguous enough to proceed. */
+export function formatSoftIntentConfidenceNote(score: number): string {
+    return (
+        `\n\n_Routing confidence: **${score}** — reply if this looks wrong ` +
+        '(Graft picked the clearer of two close programmatic paths)._'
+    );
 }

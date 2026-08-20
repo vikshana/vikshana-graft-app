@@ -251,7 +251,11 @@ import {
 import { formatChatErrorForUser, extractErrorMessage } from '../../../services/chatError';
 import { contentHasLeakedToolCalls } from '../../../services/leakedToolCallRecovery';
 import { tryProgrammaticFallbackAfterLlm } from '../../../services/programmaticLlmFallback';
-import { resolveIntentRouteAmbiguity, intentRouteWinnerScore } from '../../../services/programmaticIntentRouter';
+import {
+    formatSoftIntentConfidenceNote,
+    intentRouteWinnerScore,
+    resolveIntentRouteAmbiguity,
+} from '../../../services/programmaticIntentRouter';
 import {
   parseBulkModulePanelMatchRequest,
   userWantsBulkModulePanelMatch,
@@ -1361,11 +1365,19 @@ export const ChatInterface = () => {
         content,
         contextService.getDashboardUid() ?? undefined
       );
-      if (softWinner != null && softWinner < 60) {
+      const softConfidenceSuffix =
+        softWinner != null && softWinner < 60
+          ? formatSoftIntentConfidenceNote(softWinner)
+          : '';
+      if (softConfidenceSuffix) {
         console.info(
           `[graft] soft intent-route confidence score=${softWinner} (proceeding without disambiguation)`
         );
       }
+      const withSoftConfidence = (body: string): string =>
+        softConfidenceSuffix && !/Routing confidence/i.test(body)
+          ? `${body}${softConfidenceSuffix}`
+          : body;
 
       if (grafanaEvalGroupIntervalRequest) {
         errorPathTag = 'grafana-eval-group-interval';
@@ -1449,7 +1461,7 @@ export const ChatInterface = () => {
           grafanaAlertCreateRequest,
           GRAFT_BUILD_NUMBER
         );
-        finalContent = formatGrafanaAlertCreateReply(alertResult, GRAFT_BUILD_NUMBER);
+        finalContent = withSoftConfidence(formatGrafanaAlertCreateReply(alertResult, GRAFT_BUILD_NUMBER));
         if (!alertResult.ok) {
           recordGraftFailure({
             buildNumber: GRAFT_BUILD_NUMBER,
@@ -1518,7 +1530,7 @@ export const ChatInterface = () => {
             '### Could not add Peer Band panel\n\nGrafana MCP tools are not connected. Open **Grafana LLM / MCP settings**, enable MCP for Graft, hard-refresh, then try again.';
         } else {
           const addResult = await runProgrammaticAddPeerBandPanel(mcpClient, addPeerBandRequest);
-          finalContent = formatAddPeerBandPanelReply(addResult, GRAFT_BUILD_NUMBER);
+          finalContent = withSoftConfidence(formatAddPeerBandPanelReply(addResult, GRAFT_BUILD_NUMBER));
           finalToolExecutions = addResult.toolExecutions;
           clearPendingOnProgrammaticSuccess(addResult.ok);
           if (!addResult.ok) {
@@ -1574,7 +1586,7 @@ export const ChatInterface = () => {
           const panelCreateResult = await runProgrammaticPanelCreate(mcpClient, panelCreateRequest, {
             contextDashboardUid: contextService.getDashboardUid() ?? undefined,
           });
-          finalContent = formatPanelCreateReply(panelCreateResult, GRAFT_BUILD_NUMBER);
+          finalContent = withSoftConfidence(formatPanelCreateReply(panelCreateResult, GRAFT_BUILD_NUMBER));
           finalToolExecutions = panelCreateResult.toolExecutions;
           clearPendingOnProgrammaticSuccess(panelCreateResult.ok);
           if (!panelCreateResult.ok) {
@@ -2233,7 +2245,9 @@ export const ChatInterface = () => {
             '### Could not add predictive analytics panel\n\nGrafana MCP tools are not connected.';
         } else {
           const addResult = await runProgrammaticAddHistoryComparisonPanel(mcpClient, addHistoryComparisonRequest);
-          finalContent = formatAddHistoryComparisonPanelReply(addResult, GRAFT_BUILD_NUMBER);
+          finalContent = withSoftConfidence(
+            formatAddHistoryComparisonPanelReply(addResult, GRAFT_BUILD_NUMBER)
+          );
           finalToolExecutions = addResult.toolExecutions;
           clearPendingOnProgrammaticSuccess(addResult.ok);
         }

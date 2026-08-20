@@ -1,6 +1,7 @@
 import { isDashboardDataInvestigationQuestion } from './dashboardInvestigation';
 import { userWantsDashboardReviewOnly } from './dashboardReviewParse';
 import { isSimpleConversationalMessage, messageHasProgrammaticHandler } from './programmaticChatIntents';
+import { messageNeedsIntentRouteClarification } from './programmaticIntentRouter';
 import { messageDescribesMultiPanelCreate, messageDescribesPanelCreate } from './panelCreateParse';
 import { messageDescribesPanelRemove, userWantsPanelRemove } from './panelRemoveParse';
 import { messageDescribesPanelRename, userWantsPanelRename } from './panelRenameParse';
@@ -17,6 +18,10 @@ export function classifyLlmIntent(userMessage: string, contextDashboardUid?: str
     const text = userMessage.trim();
     if (!text || isSimpleConversationalMessage(text)) {
         return 'conversational';
+    }
+    // Ambiguous colliding intents must not get mutating LLM tools if the clarify gate is skipped.
+    if (messageNeedsIntentRouteClarification(text, contextDashboardUid)) {
+        return 'read_only';
     }
     if (messageHasProgrammaticHandler(text, contextDashboardUid)) {
         return 'programmatic';
