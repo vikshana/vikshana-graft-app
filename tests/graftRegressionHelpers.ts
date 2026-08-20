@@ -4,6 +4,8 @@ import {
     E2E_CLONE_SOURCE_MACHINE,
     E2E_CLONE_TARGET_MACHINE,
     e2eDashboardClonePrompt,
+    e2eDashboardUid,
+    e2ePeerBandPressureCreatePrompt,
     extractClonedDashboardUidFromReply,
 } from '../src/services/regression/graftRegressionE2eFixtures';
 
@@ -251,4 +253,57 @@ export async function runTinyDashboardClone(
     expect(uid, `Could not parse cloned dashboard uid from reply: ${reply.slice(0, 400)}`).toBeTruthy();
 
     return { uid: uid!, reply, title };
+}
+
+function collectPanelTitles(panels: unknown): string[] {
+    if (!Array.isArray(panels)) {
+        return [];
+    }
+    const titles: string[] = [];
+    for (const entry of panels) {
+        const panel = entry as { title?: string; panels?: unknown };
+        if (typeof panel.title === 'string' && panel.title.trim()) {
+            titles.push(panel.title.trim());
+        }
+        if (panel.panels) {
+            titles.push(...collectPanelTitles(panel.panels));
+        }
+    }
+    return titles;
+}
+
+export async function dashboardHasPanelTitle(
+    page: Page,
+    dashboardUid: string,
+    panelTitle: string
+): Promise<boolean> {
+    const response = await page.request.get(`/api/dashboards/uid/${encodeURIComponent(dashboardUid)}`);
+    if (!response.ok()) {
+        return false;
+    }
+    const body = (await response.json()) as { dashboard?: { panels?: unknown } };
+    const titles = collectPanelTitles(body.dashboard?.panels);
+    const wanted = panelTitle.trim().toLowerCase();
+    return titles.some((title) => title.toLowerCase() === wanted);
+}
+
+/** Idempotent fixture: fixed-title peer-band panel for alert routing E2E on grafte2ekeysht. */
+export async function ensurePeerBandPanelForAlertE2e(
+    page: Page,
+    panelTitle: string,
+    { timeoutMs = 180_000 }: { timeoutMs?: number } = {}
+): Promise<void> {
+    const dashboardUid = e2eDashboardUid();
+    if (await dashboardHasPanelTitle(page, dashboardUid, panelTitle)) {
+        return;
+    }
+
+    await openFreshGraftChat(page);
+    const startCopyCount = await sendGraftPrompt(page, e2ePeerBandPressureCreatePrompt(panelTitle));
+    const reply = await waitForAssistantReply(page, { timeoutMs, startCopyCount });
+    const lower = reply.toLowerCase();
+    expect(
+        lower.includes('peer band panel') || lower.includes('saved'),
+        `Could not seed peer-band panel "${panelTitle}": ${reply.slice(0, 400)}`
+    ).toBe(true);
 }

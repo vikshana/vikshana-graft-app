@@ -213,6 +213,26 @@ export function e2ePeerBandPressureCreatePrompt(panelTitle: string): string {
     );
 }
 
+/** Fixed operator titles for peer-band alert E2E (must match Jest regression fixtures). */
+export const E2E_PEER_BAND_ALERT_PANEL_TITLE = 'Module 2 Pressure — Alert Test Peer Band ±2σ';
+export const E2E_PEER_BAND_ALERT_RULE_TITLE = `${E2E_PEER_BAND_ALERT_PANEL_TITLE} — outside ±2σ`;
+
+export function e2ePeerBandAlertCreatePrompt(): string {
+    return (
+        `Create a Grafana-managed alert for the panel titled "${E2E_PEER_BAND_ALERT_PANEL_TITLE}" ` +
+        `on the dashboard with UID = ${e2eDashboardUid()}. ` +
+        `Configure the alert to trigger when the Module 1 Actual value is greater than the Upper Bound (±2σ) or less than the Lower Bound (±2σ). ` +
+        `Use Reduce expressions with the Last function. Configure the alert to notify the Alex Test Email contact point.`
+    );
+}
+
+export function e2ePeerBandAlertUpdateByRulePrompt(description: string): string {
+    return (
+        `Add a description to the alarm titled "${E2E_PEER_BAND_ALERT_RULE_TITLE}" ` +
+        `on the dashboard with UID = ${e2eDashboardUid()} that says "${description}"`
+    );
+}
+
 export function e2eSensingVoltageHistoryComparisonPrompt(dashboardUid: string): string {
     return (
         `Create a Random Forest machine learning panel for sensing voltage ` +

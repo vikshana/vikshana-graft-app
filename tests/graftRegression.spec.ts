@@ -40,6 +40,9 @@ import {
     e2ePeerRfPanelCreatePrompt,
     e2ePeerRfVsPeersPrompt,
     e2ePeerBandPressureCreatePrompt,
+    e2ePeerBandAlertCreatePrompt,
+    e2ePeerBandAlertUpdateByRulePrompt,
+    E2E_PEER_BAND_ALERT_PANEL_TITLE,
     e2eSensingVoltageHistoryComparisonPrompt,
     E2E_CLONE_TARGET_MACHINE,
 } from '../src/services/regression/graftRegressionE2eFixtures';
@@ -48,6 +51,7 @@ import {
     assertReplyExpectations,
     deleteGrafanaDashboardIfPresent,
     runTinyDashboardClone,
+    ensurePeerBandPanelForAlertE2e,
     isGraftE2eMutatingEnabled,
     isGraftE2eTarget,
     openFreshGraftChat,
@@ -382,6 +386,48 @@ test.describe('Graft regression E2E (mutating)', () => {
                 timeoutMs: removeTimeoutMs,
             });
         }
+    });
+
+    test('alert-create-not-panel-create', async ({ page }) => {
+        test.setTimeout(300_000);
+
+        const removeTimeoutMs = removeCase?.replyTimeoutMs ?? 180_000;
+        await ensurePeerBandPanelForAlertE2e(page, E2E_PEER_BAND_ALERT_PANEL_TITLE, {
+            timeoutMs: removeTimeoutMs,
+        });
+
+        const prompt = e2ePeerBandAlertCreatePrompt();
+        await openFreshGraftChat(page);
+        const startCopyCount = await sendGraftPrompt(page, prompt);
+        const reply = await waitForAssistantReply(page, {
+            timeoutMs: 180_000,
+            startCopyCount,
+        });
+
+        expect(reply, reply.slice(0, 400)).toMatch(/grafana alert (created|updated)/i);
+        assertReplyExpectations(reply, ['Alex Test Email'], [
+            'Peer Band panel',
+            'Panel created',
+            'already exists',
+        ]);
+        await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
+    });
+
+    test('alert-update-alarm-titled-that-says', async ({ page }) => {
+        test.setTimeout(210_000);
+
+        const description = '. Description for Pressure Panel';
+        const prompt = e2ePeerBandAlertUpdateByRulePrompt(description);
+
+        await openFreshGraftChat(page);
+        const startCopyCount = await sendGraftPrompt(page, prompt);
+        const reply = await waitForAssistantReply(page, {
+            timeoutMs: 180_000,
+            startCopyCount,
+        });
+
+        assertReplyExpectations(reply, ['Grafana alert updated', description], ['Peer Band panel']);
+        await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
     });
 
     test('rf-sensing-voltage-not-module5', async ({ page }) => {

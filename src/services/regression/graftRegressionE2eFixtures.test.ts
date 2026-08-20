@@ -11,6 +11,10 @@ import {
     e2eGrafanaAlertUpdatePrompt,
     e2ePanelCreatePrompt,
     e2ePeerBandPressureCreatePrompt,
+    e2ePeerBandAlertCreatePrompt,
+    e2ePeerBandAlertUpdateByRulePrompt,
+    E2E_PEER_BAND_ALERT_PANEL_TITLE,
+    E2E_PEER_BAND_ALERT_RULE_TITLE,
     e2ePeerRfPanelCreatePrompt,
     e2ePeerRfVsPeersPrompt,
     e2eSensingVoltageHistoryComparisonPrompt,
@@ -109,6 +113,21 @@ describe('e2eGrafanaAlertCreatePrompt', () => {
         expect(req?.metricKind).toBe('pressure');
         expect(req?.moduleNumber).toBe(2);
         expect(req?.panelTitle).toBe(title);
+    });
+
+    it('parses peer-band alert create on the sandbox E2E Keysight clone', () => {
+        const req = parseGrafanaAlertCreateRequest(e2ePeerBandAlertCreatePrompt());
+        expect(req?.dashboardUid).toBe(SANDBOX_E2E_DASHBOARD_UID);
+        expect(req?.panelTitle).toBe(E2E_PEER_BAND_ALERT_PANEL_TITLE);
+        expect(req?.contactPoint).toBe('Alex Test Email');
+    });
+
+    it('parses peer-band alert update by rule title on the sandbox E2E Keysight clone', () => {
+        const req = parseGrafanaAlertUpdateRequest(
+            e2ePeerBandAlertUpdateByRulePrompt('. Description for Pressure Panel')
+        );
+        expect(req?.dashboardUid).toBe(SANDBOX_E2E_DASHBOARD_UID);
+        expect(req?.ruleTitle).toBe(E2E_PEER_BAND_ALERT_RULE_TITLE);
     });
 
     it('parses peer-RF vs Peers create onto the sandbox E2E Keysight clone', () => {
