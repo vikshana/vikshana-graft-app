@@ -2,6 +2,9 @@ import { expect, type Page } from '@playwright/test';
 import {
     E2E_CLONE_SOURCE_DASHBOARD_UID,
     E2E_CLONE_SOURCE_MACHINE,
+    E2E_CLONE_TARGET_MACHINE,
+    e2eDashboardClonePrompt,
+    extractClonedDashboardUidFromReply,
 } from '../src/services/regression/graftRegressionE2eFixtures';
 
 export function isGraftE2eTarget(): boolean {
@@ -228,4 +231,24 @@ export async function deleteGrafanaDashboardIfPresent(page: Page, dashboardUid: 
         [200, 404].includes(response.status()),
         `Could not delete dashboard ${dashboardUid}: HTTP ${response.status()}`
     ).toBe(true);
+}
+
+/** Clone the tiny Prometheus-stamped source; caller must delete `uid` in a finally block. */
+export async function runTinyDashboardClone(
+    page: Page,
+    titleSuffix: string,
+    { timeoutMs = 180_000 }: { timeoutMs?: number } = {}
+): Promise<{ uid: string; reply: string; title: string }> {
+    await upsertTinyCloneSourceDashboard(page);
+
+    const title = `${E2E_CLONE_TARGET_MACHINE} / ${titleSuffix} ${Date.now()}`;
+    const prompt = e2eDashboardClonePrompt(title);
+
+    await openFreshGraftChat(page);
+    const startCopyCount = await sendGraftPrompt(page, prompt);
+    const reply = await waitForAssistantReply(page, { timeoutMs, startCopyCount });
+    const uid = extractClonedDashboardUidFromReply(reply);
+    expect(uid, `Could not parse cloned dashboard uid from reply: ${reply.slice(0, 400)}`).toBeTruthy();
+
+    return { uid: uid!, reply, title };
 }

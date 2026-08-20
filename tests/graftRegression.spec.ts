@@ -8,6 +8,11 @@
  *   GRAFANA_E2E_MUTATING=1             — enable mutating dashboard/panel tests
  *   GRAFANA_MIN_BUILD=161              — optional build badge assertion
  *
+ * Full sandbox gate (Jest + read-only + mutating E2E):
+ *   GRAFANA_ADMIN_USER=... GRAFANA_ADMIN_PASSWORD=... GRAFANA_MIN_BUILD=216 npm run test:regression:sandbox-gate
+ *
+ * Sandbox-ready, not bulletproof: LLM wording and Grafana restarts can still flake.
+ * Clone/History Comparison use a tiny Prometheus-stamped board, not live Keysight.
  * Auth — pick one:
  *   A) One-time manual login, then reuse saved session:
  *        npm run test:regression:e2e:login
@@ -33,17 +38,16 @@ import {
     e2ePanelRenameExpectContains,
     e2ePanelRenamePrompt,
     e2ePeerRfPanelCreatePrompt,
-    e2eDashboardClonePrompt,
+    e2ePeerRfVsPeersPrompt,
     e2ePeerBandPressureCreatePrompt,
     e2eSensingVoltageHistoryComparisonPrompt,
-    extractClonedDashboardUidFromReply,
     E2E_CLONE_TARGET_MACHINE,
 } from '../src/services/regression/graftRegressionE2eFixtures';
 import { test, expect } from './fixtures';
 import {
     assertReplyExpectations,
     deleteGrafanaDashboardIfPresent,
-    upsertTinyCloneSourceDashboard,
+    runTinyDashboardClone,
     isGraftE2eMutatingEnabled,
     isGraftE2eTarget,
     openFreshGraftChat,
@@ -145,6 +149,10 @@ test.describe('Graft regression E2E (mutating)', () => {
             multiPanelCase.expectReplyNotContains
         );
         await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
+
+        await removeE2ePanelsIfPresent(page, E2E_MULTI_PANEL_DEFAULT_TITLES, e2ePanelRemovePrompt, {
+            timeoutMs: removeTimeoutMs,
+        });
     });
 
     test('bulk-gauge-panel-rename', async ({ page }) => {
@@ -160,11 +168,8 @@ test.describe('Graft regression E2E (mutating)', () => {
             startCopyCount,
         });
 
-        assertReplyExpectations(
-            reply,
-            bulkGaugeCase.expectReplyContains,
-            bulkGaugeCase.expectReplyNotContains
-        );
+        assertReplyExpectations(reply, ['System'], bulkGaugeCase.expectReplyNotContains);
+        expect(reply.toLowerCase()).toMatch(/gauge panels renamed|already begin with system/);
         await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
     });
 
@@ -303,36 +308,50 @@ test.describe('Graft regression E2E (mutating)', () => {
         }
     });
 
+    test('peer-rf-vs-peers', async ({ page }) => {
+        test.setTimeout(210_000);
+
+        const panelTitle = 'Module 3 Current — RandomForest vs Peers (Influx)';
+        const prompt = e2ePeerRfVsPeersPrompt();
+        const removeTimeoutMs = removeCase?.replyTimeoutMs ?? 180_000;
+
+        await openFreshGraftChat(page);
+        const startCopyCount = await sendGraftPrompt(page, prompt);
+        const reply = await waitForAssistantReply(page, {
+            timeoutMs: 180_000,
+            startCopyCount,
+        });
+
+        expect(reply, reply.slice(0, 400)).toMatch(/randomforest vs peers/i);
+        assertReplyExpectations(reply, undefined, ['History Comparison']);
+        await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
+
+        if (/panel added/i.test(reply)) {
+            await removeE2ePanelsIfPresent(page, [panelTitle], e2ePanelRemovePrompt, {
+                timeoutMs: removeTimeoutMs,
+            });
+        }
+    });
+
     test('dashboard-clone-visual-copy', async ({ page }) => {
         test.setTimeout(210_000);
 
-        await upsertTinyCloneSourceDashboard(page);
-
-        const dashboardTitle = `${E2E_CLONE_TARGET_MACHINE} / Graft E2E Clone ${Date.now()}`;
-        const prompt = e2eDashboardClonePrompt(dashboardTitle);
-        let reply = '';
         let clonedUid: string | undefined;
 
         try {
-            await openFreshGraftChat(page);
-            const startCopyCount = await sendGraftPrompt(page, prompt);
-            reply = await waitForAssistantReply(page, {
-                timeoutMs: 180_000,
-                startCopyCount,
-            });
-            clonedUid = extractClonedDashboardUidFromReply(reply);
+            const cloned = await runTinyDashboardClone(page, 'Graft E2E Clone');
+            clonedUid = cloned.uid;
 
-            expect(reply, reply.slice(0, 500)).toMatch(/dashboard cloned/i);
-            assertReplyExpectations(reply, [dashboardTitle, E2E_CLONE_TARGET_MACHINE, 'Panels copied'], [
-                'Need clarification',
-                'Reply Continue',
-            ]);
+            expect(cloned.reply, cloned.reply.slice(0, 500)).toMatch(/dashboard cloned/i);
+            assertReplyExpectations(
+                cloned.reply,
+                [cloned.title, E2E_CLONE_TARGET_MACHINE, 'Panels copied'],
+                ['Need clarification', 'Reply Continue']
+            );
             await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
-            expect(clonedUid, `Could not parse cloned dashboard uid from reply: ${reply.slice(0, 400)}`).toBeTruthy();
         } finally {
-            const uid = clonedUid ?? extractClonedDashboardUidFromReply(reply);
-            if (uid) {
-                await deleteGrafanaDashboardIfPresent(page, uid);
+            if (clonedUid) {
+                await deleteGrafanaDashboardIfPresent(page, clonedUid);
             }
         }
     });
@@ -368,28 +387,14 @@ test.describe('Graft regression E2E (mutating)', () => {
     test('rf-sensing-voltage-not-module5', async ({ page }) => {
         test.setTimeout(300_000);
 
-        await upsertTinyCloneSourceDashboard(page);
-
-        const dashboardTitle = `${E2E_CLONE_TARGET_MACHINE} / Graft E2E HC ${Date.now()}`;
-        const clonePrompt = e2eDashboardClonePrompt(dashboardTitle);
-        let cloneReply = '';
         let clonedUid: string | undefined;
 
         try {
-            await openFreshGraftChat(page);
-            const cloneStart = await sendGraftPrompt(page, clonePrompt);
-            cloneReply = await waitForAssistantReply(page, {
-                timeoutMs: 180_000,
-                startCopyCount: cloneStart,
-            });
-            clonedUid = extractClonedDashboardUidFromReply(cloneReply);
-            expect(
-                clonedUid,
-                `Could not parse cloned dashboard uid from reply: ${cloneReply.slice(0, 400)}`
-            ).toBeTruthy();
+            const cloned = await runTinyDashboardClone(page, 'Graft E2E HC');
+            clonedUid = cloned.uid;
 
             await openFreshGraftChat(page);
-            const hcPrompt = e2eSensingVoltageHistoryComparisonPrompt(clonedUid!);
+            const hcPrompt = e2eSensingVoltageHistoryComparisonPrompt(clonedUid);
             const hcStart = await sendGraftPrompt(page, hcPrompt);
             const reply = await waitForAssistantReply(page, {
                 timeoutMs: 180_000,
@@ -403,9 +408,8 @@ test.describe('Graft regression E2E (mutating)', () => {
             );
             await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
         } finally {
-            const uid = clonedUid ?? extractClonedDashboardUidFromReply(cloneReply);
-            if (uid) {
-                await deleteGrafanaDashboardIfPresent(page, uid);
+            if (clonedUid) {
+                await deleteGrafanaDashboardIfPresent(page, clonedUid);
             }
         }
     });

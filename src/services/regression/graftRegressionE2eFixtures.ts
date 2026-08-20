@@ -177,6 +177,13 @@ export function e2ePeerRfPanelCreatePrompt(panelTitle: string): string {
     );
 }
 
+export function e2ePeerRfVsPeersPrompt(): string {
+    return (
+        `Create a RandomForest vs Peers (Influx) machine learning panel for Module 3 Current ` +
+        `for the dashboard with UID = ${e2eDashboardUid()}.`
+    );
+}
+
 export const E2E_PEER_RF_CREATE_EXPECT_NOT_CONTAINS = ['History Comparison'] as const;
 
 /** Tiny unused machines so clone does not overwrite Keysight or Skywater. */

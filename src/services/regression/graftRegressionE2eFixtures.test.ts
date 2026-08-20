@@ -12,6 +12,7 @@ import {
     e2ePanelCreatePrompt,
     e2ePeerBandPressureCreatePrompt,
     e2ePeerRfPanelCreatePrompt,
+    e2ePeerRfVsPeersPrompt,
     e2eSensingVoltageHistoryComparisonPrompt,
     extractAlertRuleUidFromReply,
     extractClonedDashboardUidFromReply,
@@ -108,6 +109,12 @@ describe('e2eGrafanaAlertCreatePrompt', () => {
         expect(req?.metricKind).toBe('pressure');
         expect(req?.moduleNumber).toBe(2);
         expect(req?.panelTitle).toBe(title);
+    });
+
+    it('parses peer-RF vs Peers create onto the sandbox E2E Keysight clone', () => {
+        const req = parseAddPeerRfPanelRequest(e2ePeerRfVsPeersPrompt());
+        expect(req?.dashboardUid).toBe(SANDBOX_E2E_DASHBOARD_UID);
+        expect(req?.moduleNumber).toBe(3);
     });
 
     it('parses sensing-voltage History Comparison onto a cloned dashboard uid', () => {
