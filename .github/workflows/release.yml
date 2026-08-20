@@ -1,12 +1,14 @@
-# Build and publish a GitHub Release for every graft-vX.Y.Z tag.
-# Tags are created automatically by the release-please workflow when its
-# Release PR is merged. See docs/release_workflow.md for the full process.
+# Manual recovery workflow: rebuild and upload artifacts for an existing
+# graft-vX.Y.Z release tag when automation needs a rerun.
 name: Release
 
 on:
-  push:
-    tags:
-      - 'graft-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to rebuild (e.g., graft-v0.6.2)'
+        required: true
+        type: string
 
 permissions: read-all
 
@@ -17,6 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -51,15 +55,15 @@ jobs:
         id: metadata
         run: |
           echo "plugin-id=$(cat dist/plugin.json | jq -r '.id')" >> $GITHUB_OUTPUT
-          echo "archive=$(cat dist/plugin.json | jq -r '.id')-${{ github.ref_name }}.zip" >> $GITHUB_OUTPUT
+          echo "archive=$(cat dist/plugin.json | jq -r '.id')-${{ inputs.tag }}.zip" >> $GITHUB_OUTPUT
 
       - name: Package plugin
         run: |
           mv dist ${{ steps.metadata.outputs.plugin-id }}
           zip -r ${{ steps.metadata.outputs.archive }} ${{ steps.metadata.outputs.plugin-id }}
 
-      - name: Create release
+      - name: Upload release artifact
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag }}
           files: ${{ steps.metadata.outputs.archive }}
-          generate_release_notes: true
