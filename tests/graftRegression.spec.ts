@@ -366,23 +366,47 @@ test.describe('Graft regression E2E (mutating)', () => {
     });
 
     test('rf-sensing-voltage-not-module5', async ({ page }) => {
-        test.setTimeout(210_000);
+        test.setTimeout(300_000);
 
         await upsertTinyCloneSourceDashboard(page);
-        const prompt = e2eSensingVoltageHistoryComparisonPrompt();
 
-        await openFreshGraftChat(page);
-        const startCopyCount = await sendGraftPrompt(page, prompt);
-        const reply = await waitForAssistantReply(page, {
-            timeoutMs: 180_000,
-            startCopyCount,
-        });
+        const dashboardTitle = `${E2E_CLONE_TARGET_MACHINE} / Graft E2E HC ${Date.now()}`;
+        const clonePrompt = e2eDashboardClonePrompt(dashboardTitle);
+        let cloneReply = '';
+        let clonedUid: string | undefined;
 
-        assertReplyExpectations(
-            reply,
-            ['Predictive analytics panel', 'Sensing Voltage'],
-            ['Module 5 Current']
-        );
-        await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
+        try {
+            await openFreshGraftChat(page);
+            const cloneStart = await sendGraftPrompt(page, clonePrompt);
+            cloneReply = await waitForAssistantReply(page, {
+                timeoutMs: 180_000,
+                startCopyCount: cloneStart,
+            });
+            clonedUid = extractClonedDashboardUidFromReply(cloneReply);
+            expect(
+                clonedUid,
+                `Could not parse cloned dashboard uid from reply: ${cloneReply.slice(0, 400)}`
+            ).toBeTruthy();
+
+            await openFreshGraftChat(page);
+            const hcPrompt = e2eSensingVoltageHistoryComparisonPrompt(clonedUid!);
+            const hcStart = await sendGraftPrompt(page, hcPrompt);
+            const reply = await waitForAssistantReply(page, {
+                timeoutMs: 180_000,
+                startCopyCount: hcStart,
+            });
+
+            assertReplyExpectations(
+                reply,
+                ['Predictive analytics panel', 'Sensing Voltage'],
+                ['Module 5 Current']
+            );
+            await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
+        } finally {
+            const uid = clonedUid ?? extractClonedDashboardUidFromReply(cloneReply);
+            if (uid) {
+                await deleteGrafanaDashboardIfPresent(page, uid);
+            }
+        }
     });
 });

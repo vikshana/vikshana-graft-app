@@ -110,9 +110,12 @@ describe('e2eGrafanaAlertCreatePrompt', () => {
         expect(req?.panelTitle).toBe(title);
     });
 
-    it('parses sensing-voltage History Comparison onto the tiny clone source (Prometheus-stamped)', () => {
-        const req = parseAddHistoryComparisonPanelRequest(e2eSensingVoltageHistoryComparisonPrompt());
-        expect(req?.dashboardUid).toBe(E2E_CLONE_SOURCE_DASHBOARD_UID);
+    it('parses sensing-voltage History Comparison onto a cloned dashboard uid', () => {
+        const req = parseAddHistoryComparisonPanelRequest(
+            e2eSensingVoltageHistoryComparisonPrompt('grafte2eclone')
+        );
+        expect(req?.dashboardUid).toBe('grafte2eclone');
+        expect(req?.dashboardUid).not.toBe(E2E_CLONE_SOURCE_DASHBOARD_UID);
         expect(req?.signal?.field).toBe('Cartridge_Sensing_Voltage');
         expect(req?.signal?.panelTitle).toMatch(/Sensing Voltage/i);
     });

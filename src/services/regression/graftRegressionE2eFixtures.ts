@@ -206,10 +206,10 @@ export function e2ePeerBandPressureCreatePrompt(panelTitle: string): string {
     );
 }
 
-export function e2eSensingVoltageHistoryComparisonPrompt(): string {
+export function e2eSensingVoltageHistoryComparisonPrompt(dashboardUid: string): string {
     return (
         `Create a Random Forest machine learning panel for sensing voltage ` +
-        `on the dashboard with UID = ${E2E_CLONE_SOURCE_DASHBOARD_UID}.`
+        `on the dashboard with UID = ${dashboardUid}.`
     );
 }
 
