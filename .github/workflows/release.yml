@@ -32,11 +32,13 @@ jobs:
       - name: Verify tag exists on remote
         env:
           REPO_REMOTE_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
-          git ls-remote --tags "$REPO_REMOTE_URL" "refs/tags/$INPUT_TAG" | grep -Eq "refs/tags/${INPUT_TAG}$"
-
+          AUTH_HEADER=$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')
+          git -c "http.extraheader=AUTHORIZATION: basic $AUTH_HEADER" \
+            ls-remote --tags "$REPO_REMOTE_URL" "refs/tags/$INPUT_TAG" | grep -Eq "refs/tags/${INPUT_TAG}$"
       - uses: actions/checkout@v5
         with:
           ref: ${{ env.INPUT_TAG }}
