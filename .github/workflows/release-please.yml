@@ -32,12 +32,27 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false
+
+      - name: Checkout workflow tools
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          path: .workflow-tools
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/normalize-lockfile-cache-key.mjs
+          sparse-checkout-cone-mode: false
+
+      - name: Prepare normalized npm cache key
+        run: node .workflow-tools/scripts/normalize-lockfile-cache-key.mjs --input package-lock.json --output .ci-cache/package-lock.normalized.json
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: 'npm'
+          cache-dependency-path: .ci-cache/package-lock.normalized.json
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -45,7 +60,7 @@ jobs:
           go-version-file: 'go.mod'
 
       - name: Install Mage
-        run: go install github.com/magefile/mage@latest
+        run: go install github.com/magefile/mage@v1.17.2
 
       - name: Install frontend dependencies
         run: npm ci
@@ -56,19 +71,57 @@ jobs:
       - name: Build backend
         run: mage -v
 
+      - name: Validate release versions
+        env:
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+
+          TAG_VERSION="${TAG_NAME#graft-v}"
+          PACKAGE_VERSION=$(node -e "process.stdout.write(require('./package.json').version)")
+          PLUGIN_VERSION=$(node -e "process.stdout.write(require('./dist/plugin.json').info.version)")
+
+          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
+            echo "package.json version ($PACKAGE_VERSION) does not match tag version ($TAG_VERSION)"
+            exit 1
+          fi
+
+          if [ "$PLUGIN_VERSION" != "$TAG_VERSION" ]; then
+            echo "dist/plugin.json version ($PLUGIN_VERSION) does not match tag version ($TAG_VERSION)"
+            exit 1
+          fi
+
       - name: Get plugin metadata
         id: metadata
+        env:
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
         run: |
-          echo "plugin-id=$(cat dist/plugin.json | jq -r '.id')" >> $GITHUB_OUTPUT
-          echo "archive=$(cat dist/plugin.json | jq -r '.id')-${{ needs.release-please.outputs.tag_name }}.zip" >> $GITHUB_OUTPUT
+          PLUGIN_ID=$(node -e "process.stdout.write(require('./dist/plugin.json').id)")
+          ARCHIVE="${PLUGIN_ID}-${TAG_NAME}.zip"
+
+          echo "plugin-id=${PLUGIN_ID}" >> "$GITHUB_OUTPUT"
+          echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
 
       - name: Package plugin
+        env:
+          PLUGIN_ID: ${{ steps.metadata.outputs.plugin-id }}
+          ARCHIVE: ${{ steps.metadata.outputs.archive }}
         run: |
-          mv dist ${{ steps.metadata.outputs.plugin-id }}
-          zip -r ${{ steps.metadata.outputs.archive }} ${{ steps.metadata.outputs.plugin-id }}
+          mv dist "$PLUGIN_ID"
+          zip -r "$ARCHIVE" "$PLUGIN_ID"
+
+      - name: Validate package
+        env:
+          ARCHIVE: ${{ steps.metadata.outputs.archive }}
+        run: |
+          docker run --pull=always \
+            -v "$PWD/$ARCHIVE:/archive.zip" \
+            grafana/plugin-validator-cli -analyzer=metadatavalid /archive.zip
 
       - name: Upload release artifact
         uses: softprops/action-gh-release@v2
+        env:
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
         with:
-          tag_name: ${{ needs.release-please.outputs.tag_name }}
+          tag_name: ${{ env.TAG_NAME }}
           files: ${{ steps.metadata.outputs.archive }}

@@ -18,43 +18,180 @@ on:
       - 'jest*.js'
       - 'jest*.ts'
       - 'eslint.config.mjs'
-      - '.github/workflows/ci.yml'
+      - 'docker-compose.yaml'
+      - 'provisioning/**'
+      - '.release-please-manifest.json'
+      - 'CHANGELOG.md'
+      - 'scripts/classify-release-pr.mjs'
+      - 'scripts/normalize-lockfile-cache-key.mjs'
+      - '.github/workflows/**'
+  workflow_dispatch:
   pull_request:
     branches:
       - main
-    paths:
-      - 'src/**'
-      - 'pkg/**'
-      - 'tests/**'
-      - 'package*.json'
-      - 'tsconfig*.json'
-      - 'go.mod'
-      - 'go.sum'
-      - 'Magefile.go'
-      - '.config/**'
-      - 'playwright.config.ts'
-      - 'jest*.js'
-      - 'jest*.ts'
-      - 'eslint.config.mjs'
-      - '.github/workflows/ci.yml'
+  merge_group:
+    types:
+      - checks_requested
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || format('ref-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
-  build:
-    name: Build, lint and unit tests
+  classify:
+    name: Classify change set
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      mode: ${{ steps.classify.outputs.mode }}
+      reason: ${{ steps.classify.outputs.reason }}
+      ci-scope: ${{ steps.classify.outputs.ci-scope }}
+      base-sha: ${{ steps.resolve-shas.outputs.base-sha }}
+      head-sha: ${{ steps.resolve-shas.outputs.head-sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve diff SHAs
+        id: resolve-shas
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
+          MG_BASE_SHA: ${{ github.event.merge_group.base_sha || '' }}
+          MG_HEAD_SHA: ${{ github.event.merge_group.head_sha || '' }}
+          PUSH_BASE_SHA: ${{ github.event.before || '' }}
+          FALLBACK_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          BASE_SHA=""
+          HEAD_SHA=""
+
+          case "$EVENT_NAME" in
+            pull_request)
+              BASE_SHA="$PR_BASE_SHA"
+              if [ -n "$FALLBACK_HEAD_SHA" ]; then
+                HEAD_SHA="$FALLBACK_HEAD_SHA"
+              else
+                HEAD_SHA="$PR_HEAD_SHA"
+              fi
+              ;;
+            merge_group)
+              BASE_SHA="$MG_BASE_SHA"
+              if [ -n "$MG_HEAD_SHA" ]; then
+                HEAD_SHA="$MG_HEAD_SHA"
+              else
+                HEAD_SHA="$FALLBACK_HEAD_SHA"
+              fi
+              ;;
+            push)
+              BASE_SHA="$PUSH_BASE_SHA"
+              HEAD_SHA="$FALLBACK_HEAD_SHA"
+              ;;
+            workflow_dispatch)
+              BASE_SHA=""
+              HEAD_SHA="$FALLBACK_HEAD_SHA"
+              ;;
+            *)
+              BASE_SHA=""
+              HEAD_SHA="$FALLBACK_HEAD_SHA"
+              ;;
+          esac
+
+          if [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            BASE_SHA=""
+          fi
+
+          if [ -z "$HEAD_SHA" ]; then
+            HEAD_SHA="$FALLBACK_HEAD_SHA"
+          fi
+
+          echo "base-sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "head-sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Run trusted classifier
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ steps.resolve-shas.outputs.base-sha }}
+          HEAD_SHA: ${{ steps.resolve-shas.outputs.head-sha }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$BASE_SHA" ] || [ -z "$HEAD_SHA" ]; then
+            echo "mode=full" >> "$GITHUB_OUTPUT"
+            echo "reason=non-diffable-event" >> "$GITHUB_OUTPUT"
+            echo "release-version-only=false" >> "$GITHUB_OUTPUT"
+            echo "release-version=" >> "$GITHUB_OUTPUT"
+            echo "changed-files-json=[]" >> "$GITHUB_OUTPUT"
+            echo "ci-scope=full" >> "$GITHUB_OUTPUT"
+            echo "compat-scope=full" >> "$GITHUB_OUTPUT"
+            echo "bundle-scope=full" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CLASSIFIER_PATH="$RUNNER_TEMP/classify-release-pr.mjs"
+          if git cat-file -e "$BASE_SHA:scripts/classify-release-pr.mjs" 2>/dev/null; then
+            git show "$BASE_SHA:scripts/classify-release-pr.mjs" > "$CLASSIFIER_PATH"
+            node "$CLASSIFIER_PATH" \
+              --event-name "$EVENT_NAME" \
+              --base-sha "$BASE_SHA" \
+              --head-sha "$HEAD_SHA"
+          else
+            case "$EVENT_NAME" in
+              pull_request|merge_group)
+                echo "mode=full" >> "$GITHUB_OUTPUT"
+                echo "reason=classifier-not-in-base" >> "$GITHUB_OUTPUT"
+                echo "release-version-only=false" >> "$GITHUB_OUTPUT"
+                echo "release-version=" >> "$GITHUB_OUTPUT"
+                echo "changed-files-json=[]" >> "$GITHUB_OUTPUT"
+                echo "ci-scope=full" >> "$GITHUB_OUTPUT"
+                echo "compat-scope=full" >> "$GITHUB_OUTPUT"
+                echo "bundle-scope=full" >> "$GITHUB_OUTPUT"
+                ;;
+              push|workflow_dispatch)
+                node scripts/classify-release-pr.mjs \
+                  --event-name "$EVENT_NAME" \
+                  --base-sha "$BASE_SHA" \
+                  --head-sha "$HEAD_SHA"
+                ;;
+              *)
+                echo "mode=full" >> "$GITHUB_OUTPUT"
+                echo "reason=classifier-missing-default-full" >> "$GITHUB_OUTPUT"
+                echo "release-version-only=false" >> "$GITHUB_OUTPUT"
+                echo "release-version=" >> "$GITHUB_OUTPUT"
+                echo "changed-files-json=[]" >> "$GITHUB_OUTPUT"
+                echo "ci-scope=full" >> "$GITHUB_OUTPUT"
+                echo "compat-scope=full" >> "$GITHUB_OUTPUT"
+                echo "bundle-scope=full" >> "$GITHUB_OUTPUT"
+                ;;
+            esac
+          fi
+
+  full-build:
+    name: Full source validation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    needs: classify
+    if: ${{ needs.classify.outputs.ci-scope == 'full' && needs.classify.outputs.mode == 'full' }}
     outputs:
       plugin-id: ${{ steps.metadata.outputs.plugin-id }}
       plugin-version: ${{ steps.metadata.outputs.plugin-version }}
       has-e2e: ${{ steps.check-for-e2e.outputs.has-e2e }}
       has-backend: ${{ steps.check-for-backend.outputs.has-backend }}
-    env:
-      GRAFANA_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+
       - name: Setup Node.js environment
         uses: actions/setup-node@v6
         with:
@@ -66,19 +203,23 @@ jobs:
 
       - name: Check types
         run: npm run typecheck
+
       - name: Lint
         run: npm run lint
+
       - name: Unit tests
         run: npm run test:ci
+
       - name: Build frontend
         run: npm run build
 
       - name: Check for backend
         id: check-for-backend
         run: |
-          if [ -f "Magefile.go" ]
-          then
-            echo "has-backend=true" >> $GITHUB_OUTPUT
+          if [ -f "Magefile.go" ]; then
+            echo "has-backend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-backend=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Setup Go environment
@@ -91,58 +232,52 @@ jobs:
         if: steps.check-for-backend.outputs.has-backend == 'true'
         uses: magefile/mage-action@6f50bbb8ea47d56e62dee92392788acbc8192d0b # v3.1.0
         with:
-          version: latest
+          version: v1.17.2
           args: coverage
 
       - name: Build backend
         if: steps.check-for-backend.outputs.has-backend == 'true'
         uses: magefile/mage-action@6f50bbb8ea47d56e62dee92392788acbc8192d0b # v3.1.0
         with:
-          version: latest
+          version: v1.17.2
           args: buildAll
 
       - name: Check for E2E
         id: check-for-e2e
         run: |
-          if [ -f "playwright.config.ts" ]
-          then
-            echo "has-e2e=true" >> $GITHUB_OUTPUT
+          if [ -f "playwright.config.ts" ]; then
+            echo "has-e2e=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-e2e=false" >> "$GITHUB_OUTPUT"
           fi
-
-      # Uncomment after Grafana approval for plugin signing
-      # - name: Sign plugin
-      #   run: npm run sign
-      #   if: ${{ env.GRAFANA_ACCESS_POLICY_TOKEN != '' }}
 
       - name: Get plugin metadata
         id: metadata
         run: |
-          sudo apt-get install jq
+          GRAFANA_PLUGIN_ID=$(node -e "const p=require('./dist/plugin.json'); process.stdout.write(p.id)")
+          GRAFANA_PLUGIN_VERSION=$(node -e "const p=require('./dist/plugin.json'); process.stdout.write(p.info.version)")
+          GRAFANA_PLUGIN_ARTIFACT="${GRAFANA_PLUGIN_ID}-${GRAFANA_PLUGIN_VERSION}.zip"
 
-          export GRAFANA_PLUGIN_ID=$(cat dist/plugin.json | jq -r .id)
-          export GRAFANA_PLUGIN_VERSION=$(cat dist/plugin.json | jq -r .info.version)
-          export GRAFANA_PLUGIN_ARTIFACT=${GRAFANA_PLUGIN_ID}-${GRAFANA_PLUGIN_VERSION}.zip
-
-          echo "plugin-id=${GRAFANA_PLUGIN_ID}" >> $GITHUB_OUTPUT
-          echo "plugin-version=${GRAFANA_PLUGIN_VERSION}" >> $GITHUB_OUTPUT
-          echo "archive=${GRAFANA_PLUGIN_ARTIFACT}" >> $GITHUB_OUTPUT
+          echo "plugin-id=${GRAFANA_PLUGIN_ID}" >> "$GITHUB_OUTPUT"
+          echo "plugin-version=${GRAFANA_PLUGIN_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "archive=${GRAFANA_PLUGIN_ARTIFACT}" >> "$GITHUB_OUTPUT"
 
       - name: Package plugin
         id: package-plugin
-        run: |
-          mv dist ${PLUGIN_ID}
-          zip ${ARCHIVE} ${PLUGIN_ID} -r
         env:
           ARCHIVE: ${{ steps.metadata.outputs.archive }}
           PLUGIN_ID: ${{ steps.metadata.outputs.plugin-id }}
+        run: |
+          mv dist "$PLUGIN_ID"
+          zip "$ARCHIVE" "$PLUGIN_ID" -r
 
       - name: Check plugin.json
-        run: |
-          docker run --pull=always \
-            -v $PWD/${ARCHIVE}:/archive.zip \
-            grafana/plugin-validator-cli -analyzer=metadatavalid /archive.zip
         env:
           ARCHIVE: ${{ steps.metadata.outputs.archive }}
+        run: |
+          docker run --pull=always \
+            -v "$PWD/$ARCHIVE:/archive.zip" \
+            grafana/plugin-validator-cli -analyzer=metadatavalid /archive.zip
 
       - name: Archive Build
         uses: actions/upload-artifact@v5
@@ -151,19 +286,96 @@ jobs:
           path: ${{ steps.metadata.outputs.plugin-id }}
           retention-days: 5
 
+  release-fast-package:
+    name: Release metadata fast package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    needs: classify
+    if: ${{ needs.classify.outputs.ci-scope == 'full' && needs.classify.outputs.mode == 'release-fast' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Prepare normalized npm cache key
+        run: node scripts/normalize-lockfile-cache-key.mjs --input package-lock.json --output .ci-cache/package-lock.normalized.json
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: .ci-cache/package-lock.normalized.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Check for backend
+        id: check-for-backend
+        run: |
+          if [ -f "Magefile.go" ]; then
+            echo "has-backend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-backend=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Go environment
+        if: steps.check-for-backend.outputs.has-backend == 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Build backend
+        if: steps.check-for-backend.outputs.has-backend == 'true'
+        uses: magefile/mage-action@6f50bbb8ea47d56e62dee92392788acbc8192d0b # v3.1.0
+        with:
+          version: v1.17.2
+          args: buildAll
+
+      - name: Get plugin metadata
+        id: metadata
+        run: |
+          GRAFANA_PLUGIN_ID=$(node -e "const p=require('./dist/plugin.json'); process.stdout.write(p.id)")
+          GRAFANA_PLUGIN_VERSION=$(node -e "const p=require('./dist/plugin.json'); process.stdout.write(p.info.version)")
+          GRAFANA_PLUGIN_ARTIFACT="${GRAFANA_PLUGIN_ID}-${GRAFANA_PLUGIN_VERSION}.zip"
+
+          echo "plugin-id=${GRAFANA_PLUGIN_ID}" >> "$GITHUB_OUTPUT"
+          echo "plugin-version=${GRAFANA_PLUGIN_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "archive=${GRAFANA_PLUGIN_ARTIFACT}" >> "$GITHUB_OUTPUT"
+
+      - name: Package plugin
+        id: package-plugin
+        env:
+          ARCHIVE: ${{ steps.metadata.outputs.archive }}
+          PLUGIN_ID: ${{ steps.metadata.outputs.plugin-id }}
+        run: |
+          mv dist "$PLUGIN_ID"
+          zip "$ARCHIVE" "$PLUGIN_ID" -r
+
+      - name: Check plugin.json
+        env:
+          ARCHIVE: ${{ steps.metadata.outputs.archive }}
+        run: |
+          docker run --pull=always \
+            -v "$PWD/$ARCHIVE:/archive.zip" \
+            grafana/plugin-validator-cli -analyzer=metadatavalid /archive.zip
+
   resolve-versions:
     name: Resolve e2e images
     runs-on: ubuntu-latest
     permissions:
       contents: read
     timeout-minutes: 3
-    needs: build
-    if: ${{ needs.build.outputs.has-e2e == 'true' }}
+    needs: [classify, full-build]
+    if: ${{ needs.classify.outputs.ci-scope == 'full' && needs.classify.outputs.mode == 'full' && needs.full-build.outputs.has-e2e == 'true' }}
     outputs:
       matrix: ${{ steps.resolve-versions.outputs.matrix }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
 
@@ -172,18 +384,17 @@ jobs:
         uses: grafana/plugin-actions/e2e-version@e2e-version/v1.1.2
 
   playwright-tests:
-    needs: [resolve-versions, build]
+    name: e2e test ${{ matrix.GRAFANA_IMAGE.name }}@${{ matrix.GRAFANA_IMAGE.VERSION }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
-      id-token: write
-      pull-requests: write
+    needs: [classify, resolve-versions, full-build]
+    if: ${{ needs.classify.outputs.ci-scope == 'full' && needs.classify.outputs.mode == 'full' && needs.full-build.outputs.has-e2e == 'true' }}
     strategy:
       fail-fast: false
       matrix:
-        GRAFANA_IMAGE: ${{fromJson(needs.resolve-versions.outputs.matrix)}}
-    name: e2e test ${{ matrix.GRAFANA_IMAGE.name }}@${{ matrix.GRAFANA_IMAGE.VERSION }}
-    runs-on: ubuntu-latest
+        GRAFANA_IMAGE: ${{ fromJson(needs.resolve-versions.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -193,12 +404,11 @@ jobs:
         uses: actions/download-artifact@v6
         with:
           path: dist
-          name: ${{ needs.build.outputs.plugin-id }}-${{ needs.build.outputs.plugin-version }}
+          name: ${{ needs.full-build.outputs.plugin-id }}-${{ needs.full-build.outputs.plugin-version }}
 
       - name: Execute permissions on binary
-        if: needs.build.outputs.has-backend == 'true'
-        run: |
-          chmod +x ./dist/gpx_*
+        if: needs.full-build.outputs.has-backend == 'true'
+        run: chmod +x ./dist/gpx_*
 
       - name: Setup Node.js environment
         uses: actions/setup-node@v6
@@ -227,44 +437,109 @@ jobs:
         run: npm run e2e
 
       - name: Upload e2e test summary
-        uses: grafana/plugin-actions/playwright-gh-pages/upload-report-artifacts@upload-report-artifacts/v1.0.1
+        uses: actions/upload-artifact@v5
         if: ${{ always() && !cancelled() }}
         with:
-          upload-report: false
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          test-outcome: ${{ steps.run-tests.outcome }}
+          name: e2e-summary-${{ matrix.GRAFANA_IMAGE.name }}-${{ matrix.GRAFANA_IMAGE.VERSION }}
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Docker logs
         if: ${{ always() && steps.run-tests.outcome == 'failure' }}
-        run: |
-          docker logs vikshana-graft-app >& grafana-server.log
+        run: docker logs vikshana-graft-app >& grafana-server.log
 
       - name: Stop grafana docker
         run: docker compose down
 
-      # Uncomment this step to upload the server log to Github artifacts. Remember Github artifacts are public on the Internet if the repository is public.
-      # - name: Upload server log
-      #   uses: actions/upload-artifact@v4
-      #   if: ${{ always() && steps.run-tests.outcome == 'failure' }}
-      #   with:
-      #     name: ${{ matrix.GRAFANA_IMAGE.NAME }}-v${{ matrix.GRAFANA_IMAGE.VERSION }}-${{github.run_id}}-server-log
-      #     path: grafana-server.log
-      #     retention-days: 5
-
   publish-report:
-    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-latest
     permissions:
       contents: write
-      id-token: write
-      pull-requests: write
-    needs: [playwright-tests]
-    runs-on: ubuntu-latest
+    needs: [classify, full-build, playwright-tests]
+    if: ${{ always() && !cancelled() && github.event_name == 'push' && needs.classify.outputs.ci-scope == 'full' && needs.classify.outputs.mode == 'full' && needs.full-build.outputs.has-e2e == 'true' }}
     steps:
       - uses: actions/checkout@v5
         with:
-          # required for playwright-gh-pages
           persist-credentials: true
+
       - name: Publish report
         uses: grafana/plugin-actions/playwright-gh-pages/deploy-report-pages@deploy-report-pages/v1.0.1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    name: Build, lint and unit tests
+    runs-on: ubuntu-latest
+    permissions: {}
+    if: ${{ always() }}
+    needs: [classify, full-build, release-fast-package, resolve-versions, playwright-tests]
+    env:
+      CLASSIFY_RESULT: ${{ needs.classify.result }}
+      MODE: ${{ needs.classify.outputs.mode }}
+      CI_SCOPE: ${{ needs.classify.outputs.ci-scope }}
+      FULL_BUILD_RESULT: ${{ needs.full-build.result }}
+      HAS_E2E: ${{ needs.full-build.outputs.has-e2e }}
+      RESOLVE_VERSIONS_RESULT: ${{ needs.resolve-versions.result }}
+      PLAYWRIGHT_RESULT: ${{ needs.playwright-tests.result }}
+      RELEASE_FAST_RESULT: ${{ needs.release-fast-package.result }}
+    steps:
+      - name: Validate workflow outcome
+        run: |
+          set -euo pipefail
+
+          if [ "$CLASSIFY_RESULT" != "success" ]; then
+            echo "Classification job failed"
+            exit 1
+          fi
+
+          case "$MODE" in
+            noop)
+              if [ "$CI_SCOPE" != "noop" ]; then
+                echo "noop mode must have noop scope"
+                exit 1
+              fi
+              echo "No-impact change; aggregate gate passes"
+              ;;
+            full)
+              if [ "$CI_SCOPE" != "full" ]; then
+                echo "full mode must have full ci scope"
+                exit 1
+              fi
+
+              if [ "$FULL_BUILD_RESULT" != "success" ]; then
+                echo "Full source validation failed"
+                exit 1
+              fi
+
+              if [ "$HAS_E2E" = "true" ]; then
+                if [ "$RESOLVE_VERSIONS_RESULT" != "success" ]; then
+                  echo "E2E version resolution failed"
+                  exit 1
+                fi
+                if [ "$PLAYWRIGHT_RESULT" != "success" ]; then
+                  echo "Playwright tests failed"
+                  exit 1
+                fi
+              fi
+
+              echo "Full CI path passed"
+              ;;
+            release-fast)
+              if [ "$CI_SCOPE" != "full" ]; then
+                echo "release-fast mode must have full ci scope"
+                exit 1
+              fi
+              if [ "$RELEASE_FAST_RESULT" != "success" ]; then
+                echo "Release fast package validation failed"
+                exit 1
+              fi
+              echo "Release fast package path passed"
+              ;;
+            *)
+              echo "Unexpected classification mode: $MODE"
+              exit 1
+              ;;
+          esac

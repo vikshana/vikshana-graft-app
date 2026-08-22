@@ -5,11 +5,9 @@ on:
   pull_request:
     branches:
       - main
-    paths:
-      - 'src/**'
-      - 'package*.json'
-      - '.config/**'
-      - '.github/workflows/bundle-stats.yml'
+  merge_group:
+    types:
+      - checks_requested
   push:
     branches:
       - main
@@ -17,17 +15,161 @@ on:
       - 'src/**'
       - 'package*.json'
       - '.config/**'
-      - '.github/workflows/bundle-stats.yml'
+      - '.release-please-manifest.json'
+      - 'CHANGELOG.md'
+      - 'scripts/classify-release-pr.mjs'
+      - 'scripts/normalize-lockfile-cache-key.mjs'
+      - '.github/workflows/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || format('ref-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
-  contents: write
-  pull-requests: write
-  actions: read
+  contents: read
 
 jobs:
-  compare:
+  classify:
+    name: Classify change set
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      mode: ${{ steps.classify.outputs.mode }}
+      reason: ${{ steps.classify.outputs.reason }}
+      bundle-scope: ${{ steps.classify.outputs.bundle-scope }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
+      - name: Resolve diff SHAs
+        id: resolve-shas
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
+          MG_BASE_SHA: ${{ github.event.merge_group.base_sha || '' }}
+          MG_HEAD_SHA: ${{ github.event.merge_group.head_sha || '' }}
+          PUSH_BASE_SHA: ${{ github.event.before || '' }}
+          FALLBACK_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          BASE_SHA=""
+          HEAD_SHA=""
+
+          case "$EVENT_NAME" in
+            pull_request)
+              BASE_SHA="$PR_BASE_SHA"
+              if [ -n "$FALLBACK_HEAD_SHA" ]; then
+                HEAD_SHA="$FALLBACK_HEAD_SHA"
+              else
+                HEAD_SHA="$PR_HEAD_SHA"
+              fi
+              ;;
+            merge_group)
+              BASE_SHA="$MG_BASE_SHA"
+              if [ -n "$MG_HEAD_SHA" ]; then
+                HEAD_SHA="$MG_HEAD_SHA"
+              else
+                HEAD_SHA="$FALLBACK_HEAD_SHA"
+              fi
+              ;;
+            push)
+              BASE_SHA="$PUSH_BASE_SHA"
+              HEAD_SHA="$FALLBACK_HEAD_SHA"
+              ;;
+            workflow_dispatch)
+              BASE_SHA=""
+              HEAD_SHA="$FALLBACK_HEAD_SHA"
+              ;;
+            *)
+              BASE_SHA=""
+              HEAD_SHA="$FALLBACK_HEAD_SHA"
+              ;;
+          esac
+
+          if [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            BASE_SHA=""
+          fi
+
+          if [ -z "$HEAD_SHA" ]; then
+            HEAD_SHA="$FALLBACK_HEAD_SHA"
+          fi
+
+          echo "base-sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "head-sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Run trusted classifier
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ steps.resolve-shas.outputs.base-sha }}
+          HEAD_SHA: ${{ steps.resolve-shas.outputs.head-sha }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$BASE_SHA" ] || [ -z "$HEAD_SHA" ]; then
+            echo "mode=full" >> "$GITHUB_OUTPUT"
+            echo "reason=non-diffable-event" >> "$GITHUB_OUTPUT"
+            echo "release-version-only=false" >> "$GITHUB_OUTPUT"
+            echo "release-version=" >> "$GITHUB_OUTPUT"
+            echo "changed-files-json=[]" >> "$GITHUB_OUTPUT"
+            echo "ci-scope=full" >> "$GITHUB_OUTPUT"
+            echo "compat-scope=full" >> "$GITHUB_OUTPUT"
+            echo "bundle-scope=full" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CLASSIFIER_PATH="$RUNNER_TEMP/classify-release-pr.mjs"
+          if git cat-file -e "$BASE_SHA:scripts/classify-release-pr.mjs" 2>/dev/null; then
+            git show "$BASE_SHA:scripts/classify-release-pr.mjs" > "$CLASSIFIER_PATH"
+            node "$CLASSIFIER_PATH" \
+              --event-name "$EVENT_NAME" \
+              --base-sha "$BASE_SHA" \
+              --head-sha "$HEAD_SHA"
+          else
+            case "$EVENT_NAME" in
+              pull_request|merge_group)
+                echo "mode=full" >> "$GITHUB_OUTPUT"
+                echo "reason=classifier-not-in-base" >> "$GITHUB_OUTPUT"
+                echo "release-version-only=false" >> "$GITHUB_OUTPUT"
+                echo "release-version=" >> "$GITHUB_OUTPUT"
+                echo "changed-files-json=[]" >> "$GITHUB_OUTPUT"
+                echo "ci-scope=full" >> "$GITHUB_OUTPUT"
+                echo "compat-scope=full" >> "$GITHUB_OUTPUT"
+                echo "bundle-scope=full" >> "$GITHUB_OUTPUT"
+                ;;
+              push|workflow_dispatch)
+                node scripts/classify-release-pr.mjs \
+                  --event-name "$EVENT_NAME" \
+                  --base-sha "$BASE_SHA" \
+                  --head-sha "$HEAD_SHA"
+                ;;
+              *)
+                echo "mode=full" >> "$GITHUB_OUTPUT"
+                echo "reason=classifier-missing-default-full" >> "$GITHUB_OUTPUT"
+                echo "release-version-only=false" >> "$GITHUB_OUTPUT"
+                echo "release-version=" >> "$GITHUB_OUTPUT"
+                echo "changed-files-json=[]" >> "$GITHUB_OUTPUT"
+                echo "ci-scope=full" >> "$GITHUB_OUTPUT"
+                echo "compat-scope=full" >> "$GITHUB_OUTPUT"
+                echo "bundle-scope=full" >> "$GITHUB_OUTPUT"
+                ;;
+            esac
+          fi
+
+  bundle-size:
+    name: Bundle size action
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    needs: classify
+    if: ${{ needs.classify.outputs.bundle-scope == 'full' && needs.classify.outputs.mode == 'full' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -35,3 +177,56 @@ jobs:
           persist-credentials: false
 
       - uses: grafana/plugin-actions/bundle-size@bundle-size/v1.0.2
+
+  compare:
+    name: compare
+    runs-on: ubuntu-latest
+    permissions: {}
+    if: ${{ always() }}
+    needs: [classify, bundle-size]
+    env:
+      CLASSIFY_RESULT: ${{ needs.classify.result }}
+      MODE: ${{ needs.classify.outputs.mode }}
+      BUNDLE_SCOPE: ${{ needs.classify.outputs.bundle-scope }}
+      BUNDLE_RESULT: ${{ needs.bundle-size.result }}
+    steps:
+      - name: Validate bundle stats workflow outcome
+        run: |
+          set -euo pipefail
+
+          if [ "$CLASSIFY_RESULT" != "success" ]; then
+            echo "Classification failed"
+            exit 1
+          fi
+
+          case "$MODE" in
+            noop)
+              if [ "$BUNDLE_SCOPE" != "noop" ]; then
+                echo "noop mode must have noop bundle scope"
+                exit 1
+              fi
+              echo "No-impact change; bundle gate passes"
+              ;;
+            full)
+              if [ "$BUNDLE_SCOPE" = "full" ]; then
+                if [ "$BUNDLE_RESULT" != "success" ]; then
+                  echo "Bundle size action failed"
+                  exit 1
+                fi
+                echo "Bundle size action passed"
+              else
+                echo "Bundle scope noop; gate passes"
+              fi
+              ;;
+            release-fast)
+              if [ "$BUNDLE_SCOPE" != "noop" ]; then
+                echo "release-fast mode must have noop bundle scope"
+                exit 1
+              fi
+              echo "Release version-only change; bundle gate passes"
+              ;;
+            *)
+              echo "Unexpected classification mode: $MODE"
+              exit 1
+              ;;
+          esac
