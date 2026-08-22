@@ -73,10 +73,17 @@ const getTimeBasedGreeting = (): string => {
   }
 };
 
+// Helper function to extract the first whitespace-delimited name (if any)
+const getFirstName = (value?: string): string | undefined => {
+  const firstName = value?.trim().split(/\s+/).find(Boolean);
+  return firstName || undefined;
+};
+
 // Helper function to get greeting message with optional user name
 const getGreetingMessage = (userName?: string): string => {
   const timeGreeting = getTimeBasedGreeting();
-  return userName ? `${timeGreeting}, ${userName}!` : timeGreeting;
+  const firstName = getFirstName(userName);
+  return firstName ? `${timeGreeting}, ${firstName}!` : timeGreeting;
 };
 
 // Custom hook for rolling placeholder text with typing animation
