@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.4](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.6.3...graft-v0.6.4) (2026-08-22)
+
+
+### Bug fixes
+
+* **chat:** greet users by first name ([#40](https://github.com/vikshana/vikshana-graft-app/issues/40)) ([8607463](https://github.com/vikshana/vikshana-graft-app/commit/8607463ba35ed0149e68a770f2719ce9d1702c2c))
+
 ## [0.6.3](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.6.2...graft-v0.6.3) (2026-08-20)
 
 
