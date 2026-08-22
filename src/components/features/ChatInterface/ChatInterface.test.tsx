@@ -117,6 +117,10 @@ describe('ChatInterface', () => {
         window.FileReader = MockFileReader;
     });
 
+    afterEach(() => {
+        jest.restoreAllMocks();
+    });
+
     it('renders the landing page initially', async () => {
         render(
             <MemoryRouter>
@@ -128,6 +132,37 @@ describe('ChatInterface', () => {
             expect(screen.getByTestId('landing-title')).toBeInTheDocument();
         });
         expect(screen.getByText('Previous Conversations')).toBeInTheDocument();
+    });
+
+    it('uses the first whitespace-delimited name in the landing greeting', async () => {
+        jest.spyOn(Date.prototype, 'getHours').mockReturnValue(9);
+        (contextService.getUserContext as jest.Mock).mockReturnValue({ login: 'testuser', name: '  Test   User  ' });
+
+        render(
+            <MemoryRouter>
+                <ChatInterface />
+            </MemoryRouter>
+        );
+
+        await waitFor(() => {
+            expect(screen.getByTestId('landing-title')).toHaveTextContent('Good Morning, Test!');
+        });
+    });
+
+    it('falls back to the time greeting when no selected name or login is available', async () => {
+        jest.spyOn(Date.prototype, 'getHours').mockReturnValue(9);
+        (contextService.getUserContext as jest.Mock).mockReturnValue({});
+
+        render(
+            <MemoryRouter>
+                <ChatInterface />
+            </MemoryRouter>
+        );
+
+        await waitFor(() => {
+            expect(screen.getByTestId('landing-title')).toHaveTextContent('Good Morning');
+        });
+        expect(screen.getByTestId('landing-title')).not.toHaveTextContent(',');
     });
 
     it('switches to chat view when sending a message', async () => {
