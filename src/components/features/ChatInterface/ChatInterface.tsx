@@ -73,7 +73,7 @@ const getTimeBasedGreeting = (): string => {
   }
 };
 
-// Helper function to get greeting message with optional user name
+// Helper function to extract the first whitespace-delimited name (if any)
 const getFirstName = (value?: string): string | undefined => {
   const firstName = value?.trim().split(/\s+/).find(Boolean);
   return firstName || undefined;
