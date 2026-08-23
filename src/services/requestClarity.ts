@@ -1,7 +1,10 @@
+import { extractClaimedVendorDashboardUid } from './dashboardMentionParse';
 import { isCloneHowToQuestion, parseCloneIntentMessage } from './dashboardCloneParse';
+import { resolveIntentRouteAmbiguity } from './programmaticIntentRouter';
 import { userWantsDashboardClone, userWantsDashboardPanelFix } from './dashboardCloneProgress';
 import { isDashboardDataInvestigationQuestion } from './dashboardInvestigation';
 import {
+    extractAllDashboardUids,
     extractDashboardUidFromMessage,
     extractPanelIdFromMessage,
     mentionsDashboard,
@@ -99,6 +102,15 @@ export function formatClarificationIfNeeded(userMessage: string): string | null 
         return null;
     }
 
+    const vendorUid = extractClaimedVendorDashboardUid(text);
+    if (vendorUid) {
+        return (
+            `### Need clarification\n\n` +
+            `**${vendorUid}** is a vendor or site name, not a Grafana dashboard uid. ` +
+            `Give a Grafana **uid** (for example \`idHkqdqnk\`) or a machine id (for example **2505-200033**).`
+        );
+    }
+
     if (isDashboardDataInvestigationQuestion(text)) {
         return null;
     }
@@ -110,7 +122,7 @@ export function formatClarificationIfNeeded(userMessage: string): string | null 
     const seemsGrafanaTask =
         /\b(dashboard|dash\s*board|panels?|grafana|clone|copy|rename|duplicate|fix|repair|prometheus|loki|machine|uid|plant|analytics|keysight|skywater|\bML\b)\b/i.test(
             text
-        );
+        ) || extractAllDashboardUids(text).length > 0;
     if (!seemsGrafanaTask) {
         return null;
     }
@@ -200,8 +212,12 @@ export function formatClarificationIfNeeded(userMessage: string): string | null 
     }
 
     const wantsChange =
-        /\b(add|create|clone|copy|rename|fix|remove|rebuild|duplicate|make|build|set\s+up)\b/i.test(text) ||
-        /\b(machine learning|\bML\b|random\s*forest|own history|peer band|history comparison|analytics)\b/i.test(text);
+        /\b(add|create|clone|copy|rename|retitle|fix|remove|rebuild|duplicate|make|build|set\s+up|plot|compare|put|need|want)\b/i.test(
+            text
+        ) ||
+        /\b(machine learning|\bML\b|random\s*forest|own history|peer band|peer average|history comparison|analytics|dashboard\s+name|historical\s+values)\b/i.test(
+            text
+        );
     if (wantsChange && !messageHasProgrammaticHandler(text)) {
         return (
             `### Need clarification\n\n` +

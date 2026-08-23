@@ -147,7 +147,7 @@ export function messageMentionsPeerBandPanelCreate(message: string): boolean {
     if (messageMentionsOwnHistoryPanel(text) && !/\bpeer\b/i.test(text)) {
         return false;
     }
-    if (!/\b(add|create|new|make)\b/i.test(text)) {
+    if (!/\b(add|create|new|make|plot|show|need|want|compare|build)\b/i.test(text)) {
         return false;
     }
     // Require creating a panel — do not match merely because free text contains "Pressure Panel".
@@ -156,13 +156,18 @@ export function messageMentionsPeerBandPanelCreate(message: string): boolean {
             text
         ) ||
         /\bnew\s+(?:machine\s+learning\s+)?(?:time\s+series\s+)?panel\b/i.test(text) ||
-        /\bpanel\s+titled\b/i.test(text);
+        /\bpanel\s+titled\b/i.test(text) ||
+        (/\b(create|add|plot|show|compare|overlay|build|need)\b/i.test(text) &&
+            /\bmodule\s*\d+\b/i.test(text) &&
+            /\b(peer\s*band|peer\s+average|vs\.?\s*peers?)\b/i.test(text));
     if (!createsPanel) {
         return false;
     }
 
     const hasPeerBandTitle =
-        /\bpeer\s*band\b/i.test(text) || /\balert\s+test\s+peer\s*band\b/i.test(text);
+        /\bpeer\s*band\b/i.test(text) ||
+        /\balert\s+test\s+peer\s*band\b/i.test(text) ||
+        /\bpeer\s+average\b/i.test(text);
     const hasPeerMeanLines =
         /\bpeer\s+mean\b/i.test(text) ||
         (/\bupper\s+peer\s+bound\b/i.test(text) && /\blower\s+peer\s+bound\b/i.test(text));

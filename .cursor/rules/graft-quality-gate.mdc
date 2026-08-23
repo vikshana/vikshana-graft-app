@@ -1,5 +1,5 @@
 ---
-description: Graft quality loop — self-check, Bugbot, Jest, random paraphrases, deploy, Playwright — until a full pass needs no fixes
+description: Graft quality loop — self-check, Jest, separate random paraphrases, Bugbot, deploy, Playwright — until a full pass needs no fixes
 alwaysApply: true
 ---
 
@@ -10,17 +10,16 @@ When changing Graft handlers, routing, replies, or operator English: **loop the 
 ## One pass (in this order)
 
 1. **Self-check** — re-read changed parsers/gates; look for false-success (`### Done` with no save), missing `contextService.getDashboardUid()`, handler order in `ChatInterface.tsx`, read-only questions blocked as unmatched jobs.
-2. **Jest** — `npm run test:regression` plus operator paraphrase files. Always run a **new random paraphrase set**:
+2. **Jest** — `npm run test:regression` (fixed fixtures only).
+3. **Randomize paraphrases** — **separate** test. Sample **natural operator English**: valid restatements *and* invalid/broken ones a human might type (vague ML, missing target, vendor-as-uid, incomplete clone). Each pass draws a **new** subset (`GRAFT_PARAPHRASE_SEED=$RANDOM`). Never skip, never reuse the last seed:
    ```bash
-   GRAFT_PARAPHRASE_SEED=$RANDOM npm run test:regression
-   GRAFT_PARAPHRASE_SEED=$RANDOM npx jest --watchAll=false --runInBand --forceExit \
-     src/services/regression/operatorParaphraseRegression.test.ts
+   GRAFT_PARAPHRASE_SEED=$RANDOM npm run test:regression:paraphrase
    ```
    Add the operator’s **exact** failing prompt to `graftRegressionFixtures.ts` when one fails.
-3. **Bugbot** — `/review-bugbot` on **branch changes** (or uncommitted if not committed yet). High/medium findings are blockers. Informational-only is not a restart.
-4. **Commit** remaining product/test/rule fixes (not secrets). Deploy needs a clean tree except the script’s own build bump.
-5. **Deploy** — `./scripts/deploy-electramet.sh` (sandbox EC2). Note the new **build** number.
-6. **Playwright** (not “playing”) against that build:
+4. **Bugbot** — `/review-bugbot` on **branch changes** (or uncommitted if not committed yet). High/medium findings are blockers. Informational-only is not a restart.
+5. **Commit** remaining product/test/rule fixes (not secrets). Deploy needs a clean tree except the script’s own build bump.
+6. **Deploy** — `./scripts/deploy-electramet.sh` (sandbox EC2). Note the new **build** number.
+7. **Playwright** (not “playing”) against that build:
    ```bash
    GRAFANA_E2E=1 GRAFANA_E2E_MUTATING=1 GRAFANA_MIN_BUILD=<deployed> \
    npm run test:regression:e2e:mutating
@@ -29,7 +28,8 @@ When changing Graft handlers, routing, replies, or operator English: **loop the 
 
 ## Stop condition
 
-Stop only when **all six** succeeded **and** that pass did not require another code, test, or rule change. A deploy-metadata-only commit after a green Playwright is allowed and does **not** by itself restart the loop.
+Stop only when **all seven** succeeded **and** that pass did not require another code, test, or rule change. A deploy-metadata-only commit after a green Playwright is allowed and does **not** by itself restart the loop.
 
+❌ BAD: Jest green → skip a new paraphrase seed because the last seed passed
 ❌ BAD: Jest green → deploy → skip Playwright because “it passed last time”
-✅ GOOD: Jest (new paraphrase seed) + Bugbot + deploy + Playwright, then stop because nothing else failed
+✅ GOOD: Jest + **new** paraphrase seed (separate test) + Bugbot + deploy + Playwright, then stop because nothing else failed

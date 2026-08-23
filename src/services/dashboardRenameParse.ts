@@ -25,13 +25,24 @@ export function messageDescribesDashboardRename(message: string): boolean {
     if (messageDescribesPanelRename(text)) {
         return false;
     }
-    return (
-        (/\brename\b/i.test(text) ||
-            /\bretitle\b/i.test(text) ||
-            /\bchange\s+the\s+dashboard\s+name\b/i.test(text) ||
-            /\bcall\s+the\s+dashboard\b/i.test(text)) &&
-        /\bdashboard\b/i.test(text)
-    );
+    const namesDashboard =
+        /\bdashboard\b/i.test(text) ||
+        (/\bboard\b/i.test(text) && /[0-9]{4}-[0-9]+/.test(text) && !/\bpanel\b/i.test(text));
+    const renameish =
+        /\brename\b/i.test(text) ||
+        /\bretitle\b/i.test(text) ||
+        /\bchange\s+the\s+dashboard\s+name\b/i.test(text) ||
+        /\bchange\s+(?:the\s+)?(?:name|title)\s+of\s+(?:the\s+)?(?:[0-9]{4}-[0-9]+\s+)?dashboard\b/i.test(
+            text
+        ) ||
+        /\bcall\s+the\s+dashboard\b/i.test(text) ||
+        /\bcall\s+(?:the\s+)?[A-Za-z0-9]{6,}\s+dashboard\b/i.test(text) ||
+        /\bshow\b.{0,80}\bas\s+the\s+dashboard\s+name\b/i.test(text) ||
+        /\bdashboard\s+(?:name|title)\s+(?:to|should|to be)\b/i.test(text) ||
+        (/\bupdate\s+the\s+title\b/i.test(text) && !/\bpanel\b/i.test(text)) ||
+        /\bhave\s+(?:the\s+)?[A-Za-z0-9]+\s+dashboard\s+be\b/i.test(text) ||
+        /\bso\s+it\s+reads\b/i.test(text);
+    return renameish && namesDashboard;
 }
 
 function extractNewLabel(text: string): string | undefined {
@@ -62,6 +73,24 @@ function extractNewLabel(text: string): string | undefined {
     );
     if (callInstead?.[1]) {
         return callInstead[1];
+    }
+    const showAs = text.match(/\bshow\s+([A-Za-z][A-Za-z0-9_-]*)\s+as\s+the\s+dashboard\s+name\b/i);
+    if (showAs?.[1]) {
+        return showAs[1];
+    }
+    const callUidDash = text.match(
+        /\bcall\s+(?:the\s+)?[A-Za-z0-9]{6,}\s+dashboard\s+([A-Z][A-Za-z0-9_-]*)/i
+    );
+    if (callUidDash?.[1]) {
+        return callUidDash[1];
+    }
+    const reads = text.match(/\b(?:so\s+it\s+reads|title\s+is)\s+([A-Za-z][A-Za-z0-9_-]*)/i);
+    if (reads?.[1]) {
+        return reads[1];
+    }
+    const dashBe = text.match(/\bdashboard\s+be\s+([A-Za-z][A-Za-z0-9_-]*)/i);
+    if (dashBe?.[1]) {
+        return dashBe[1];
     }
     return undefined;
 }

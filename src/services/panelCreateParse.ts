@@ -49,10 +49,12 @@ function normalizeMessageQuotes(text: string): string {
 
 function extractPanelTitle(text: string): string | undefined {
     const patterns = [
-        /\b(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?(?:(?:[\w-]+\s+)+)?panel\s+(?:called|named|titled)\s+"([^"]+)"/i,
+        /\b(?:create|add|make|put|build)\s+(?:a\s+)?(?:new\s+)?(?:(?:[\w-]+\s+)+)?panel\s+(?:called|named|titled)\s+"([^"]+)"/i,
         /\b(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?(?:(?:[\w-]+\s+)+)?panel\s+(?:called|named|titled)\s+'([^']+)'/i,
-        /\b(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?(?:bar\s*chart|gauge|stat|time\s*series|timeseries|table|chart)\s+panel\s+(?:called|named|titled)\s+"([^"]+)"/i,
-        /\b(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?(?:bar\s*chart|gauge|stat|time\s*series|timeseries|table|chart)\s+(?:called|named|titled)\s+"([^"]+)"/i,
+        /\b(?:create|add|make|put|build)\s+(?:a\s+)?(?:new\s+)?(?:bar\s*chart|gauge|stat|time\s*series|timeseries|table|chart)\s+panel\s+(?:called|named|titled)\s+"([^"]+)"/i,
+        /\b(?:create|add|make|put|build)\s+(?:a\s+)?(?:new\s+)?(?:bar\s*chart|gauge|stat|time\s*series|timeseries|table|chart)\s+panel\s+(?:called|named|titled)\s+([A-Za-z][\w -]{1,60}?)(?:\s+on\b|\s*$)/i,
+        /\b(?:need|want)\s+(?:a\s+)?([A-Za-z][\w -]{1,40}?)\s+gauge\b/i,
+        /\b(?:create|add|make|put|build)\s+(?:a\s+)?(?:new\s+)?(?:bar\s*chart|gauge|stat|time\s*series|timeseries|table|chart)\s+(?:called|named|titled)\s+"([^"]+)"/i,
         /\b(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?panel\s+(?:called|named|titled)\s+"([^"]+)"/i,
         /\b(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?(?:bar\s*chart|gauge|stat|time\s*series|timeseries|table|chart)\s+panel\s+(?:called|named|titled)\s+'([^']+)'/i,
         /\b(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?panel\s+(?:called|named|titled)\s+'([^']+)'/i,
@@ -127,14 +129,14 @@ export function messageDescribesPanelCreate(message: string): boolean {
     ) {
         return false;
     }
-    if (!/\b(create|add|make)\b/i.test(text)) {
+    if (!/\b(create|add|make|put|build|need|want)\b/i.test(text)) {
         return false;
     }
     const hasTypedPanel =
         /\b(bar\s*chart|gauge|stat|time\s*series|timeseries|table|chart)\b/i.test(text) &&
-        /\bpanel\b/i.test(text);
+        (/\bpanel\b/i.test(text) || /\bgauge\b/i.test(text) || /\bchart\b/i.test(text));
     const hasNamedPanel =
-        /\b(create|add|make)\b/i.test(text) &&
+        /\b(create|add|make|put|build|need|want)\b/i.test(text) &&
         /\bpanel\b/i.test(text) &&
         /\b(called|named|titled)\b/i.test(text);
   return Boolean(extractPanelTitle(text) && (hasTypedPanel || hasNamedPanel || /\bchart\b/i.test(text)));

@@ -3,6 +3,7 @@
  * Set GRAFT_PARAPHRASE_SEED to replay a failing run.
  * Set GRAFT_PARAPHRASE_COUNT to change how many random prompts each intent emits.
  */
+import { WRITEUP_PARAPHRASE_BANK, sampleParaphrases, type WriteupParaphraseKind } from './writeupParaphraseBank';
 
 function mulberry32(seed: number): () => number {
     return () => {
@@ -163,77 +164,23 @@ export function randomTemperaturePrompts(rng: () => number, count = PARAPHRASE_C
     return out;
 }
 
-/** Randomized restatements of the operator write-up PDF prompts. */
+/** AI-written write-up paraphrases (mutating jobs only). Different subset each seed. */
 export function randomWriteupPrompts(rng: () => number, count = PARAPHRASE_COUNT): string[] {
-    const templates = [
-        () =>
-            joinParts([
-                pick(rng, LEADINS),
-                pick(rng, ['clone', 'copy', 'duplicate']),
-                pick(rng, ['dashboard', 'the dashboard']),
-                '2103-176030',
-                pick(rng, ['and rename it to', 'for', 'with data for']),
-                '2505-200033',
-            ]),
-        () =>
-            joinParts([
-                pick(rng, LEADINS),
-                pick(rng, ['create', 'add', 'make']),
-                pick(rng, [
-                    'a machine learning panel that compares Sensing Voltage against its historical values',
-                    'a machine learning panel that compares Sensing Voltage against its own history',
-                    'a vs. Own History (±2σ) panel for Pressure',
-                ]),
-                pick(rng, UID_PHRASES),
-            ]),
-        () =>
-            joinParts([
-                pick(rng, LEADINS),
-                pick(rng, ['create', 'add']),
-                pick(rng, [
-                    'a RandomForest vs Peers panel for Module 2 Current',
-                    'a machine learning panel that compares Module 1 Current against the average of Modules 2–8',
-                ]),
-                pick(rng, UID_PHRASES),
-            ]),
-        () =>
-            joinParts([
-                pick(rng, LEADINS),
-                pick(rng, ['rename']),
-                pick(rng, [
-                    'the dashboard for the 6sFerv44k machine to be NewSkywater-FL instead of the current name',
-                    `the "Current" panel on the dashboard with UID = ${UID} to be "NewCurrent"`,
-                ]),
-            ]),
-        () =>
-            joinParts([
-                pick(rng, LEADINS),
-                pick(rng, ['add', 'create']),
-                'a gauge panel called "Pressure Monitoring"',
-                pick(rng, UID_PHRASES),
-            ]),
+    const mutating: WriteupParaphraseKind[] = [
+        'clone',
+        'renameDashboard',
+        'addPanel',
+        'copyPanel',
+        'renamePanel',
+        'ownHistory',
+        'peerCompare',
+        'randomForest',
+        'alert',
     ];
-    const out: string[] = [];
-    for (let i = 0; i < count; i++) {
-        out.push(pick(rng, templates)() + '.');
-    }
-    return out;
+    const pool = mutating.flatMap((kind) => WRITEUP_PARAPHRASE_BANK[kind]);
+    return sampleParaphrases(rng, pool, count);
 }
 
 export function randomUnmatchedPrompts(rng: () => number, count = PARAPHRASE_COUNT): string[] {
-    const bank = [
-        'Add the usual ML stuff to the Keysight dashboard.',
-        'Make the Skywater dashboard prettier.',
-        'Do the normal machine learning thing on uid=idHkqdqnk.',
-        'Can you set up analytics like last time?',
-        'Do the same analytics we did yesterday.',
-        'Add whatever machine learning we normally add.',
-        'Make this dashboard look nicer.',
-        'Set up the standard ML package on Keysight.',
-    ];
-    const out: string[] = [];
-    for (let i = 0; i < count; i++) {
-        out.push(pick(rng, bank));
-    }
-    return out;
+    return sampleParaphrases(rng, WRITEUP_PARAPHRASE_BANK.unmatched, count);
 }

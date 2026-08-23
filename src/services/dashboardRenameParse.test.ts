@@ -78,6 +78,20 @@ describe('dashboardRenameParse', () => {
         expect(req?.newLabel).toBe('NewSkywater-FL');
     });
 
+    it('parses "show Keysight as the dashboard name" with a machine id', () => {
+        const prompt =
+            'The 2505-200033 machine should show Keysight as the dashboard name, not the old label.';
+        expect(messageDescribesDashboardRename(prompt)).toBe(true);
+        expect(parseDashboardRenameRequest(prompt)?.newLabel).toBe('Keysight');
+        expect(parseDashboardRenameRequest(prompt)?.machineId).toBe('2505-200033');
+    });
+
+    it('parses "Call the 6sFerv44k dashboard NewSkywater-FL"', () => {
+        const prompt = 'Call the 6sFerv44k dashboard NewSkywater-FL.';
+        expect(messageDescribesDashboardRename(prompt)).toBe(true);
+        expect(parseDashboardRenameRequest(prompt)?.newLabel).toBe('NewSkywater-FL');
+    });
+
     it('still parses the unquoted "to be NewLabel" form', () => {
         const req = parseDashboardRenameRequest(
             'Rename the dashboard with UID = abc123 to be Keysight'

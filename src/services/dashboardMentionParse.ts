@@ -63,6 +63,33 @@ function looksLikeBareDashboardUid(token: string): boolean {
     return /^[a-z]/.test(token);
 }
 
+/** Vendor/site words operators sometimes type as uid=Keysight. */
+export function isVendorNameUsedAsDashboardUid(token: string): boolean {
+    const t = token.trim();
+    if (!t) {
+        return false;
+    }
+    if (NOT_A_DASHBOARD_UID.has(t.toLowerCase())) {
+        return true;
+    }
+    if (/\d/.test(t)) {
+        return false;
+    }
+    if (/^[a-z]/.test(t)) {
+        return false;
+    }
+    return /^[A-Z][A-Za-z-]*$/.test(t) && t.length <= 24;
+}
+
+/** `uid=Keysight` / `UID = Skywater` — not a Grafana uid. */
+export function extractClaimedVendorDashboardUid(message: string): string | undefined {
+    const m = message.match(/\buid\s*[=:#]?\s*["']?([A-Za-z][A-Za-z0-9_-]+)/i);
+    if (m?.[1] && isVendorNameUsedAsDashboardUid(m[1])) {
+        return m[1];
+    }
+    return undefined;
+}
+
 /** User referred to a Grafana dashboard (incl. "dash board" typo and uid-in-quotes). */
 export function mentionsDashboard(message: string): boolean {
     return (
@@ -89,7 +116,7 @@ export function extractDashboardUidFromMessage(message: string): string | undefi
     ];
     for (const re of patterns) {
         const m = text.match(re);
-        if (m?.[1]) {
+        if (m?.[1] && !isVendorNameUsedAsDashboardUid(m[1])) {
             return m[1];
         }
     }
@@ -122,7 +149,7 @@ export function extractAllDashboardUids(message: string): string[] {
     ids.push(
         ...collectUidMatches(
             text,
-            /\b(?:rename|retitle)\s+(?:the\s+)?([A-Za-z0-9]{8,})\s+dashboard\b/gi
+            /\b(?:rename|retitle|call)\s+(?:the\s+)?([A-Za-z0-9]{8,})\s+dashboard\b/gi
         ).filter(
             looksLikeBareDashboardUid
         )
@@ -133,11 +160,23 @@ export function extractAllDashboardUids(message: string): string[] {
         )
     );
     ids.push(
+        ...collectUidMatches(text, /\bon\s+([A-Za-z][A-Za-z0-9]{7,})\b/gi).filter(looksLikeBareDashboardUid)
+    );
+    ids.push(
         ...collectUidMatches(text, /\b(?:on|to)\s+([A-Za-z][A-Za-z0-9]{7,})\s*[.]?$/gi).filter(
             looksLikeBareDashboardUid
         )
     );
-    return [...new Set(ids.filter((id) => !/^[0-9]{4}-[0-9]{6,}$/.test(id)))];
+    ids.push(
+        ...collectUidMatches(text, /\b(?:the\s+)?([A-Za-z0-9]{8,})\s+dashboard\b/gi).filter(
+            looksLikeBareDashboardUid
+        )
+    );
+    return [
+        ...new Set(
+            ids.filter((id) => !/^[0-9]{4}-[0-9]{6,}$/.test(id) && !isVendorNameUsedAsDashboardUid(id))
+        ),
+    ];
 }
 
 /** Grafana panel id from "panel id 35" — NOT the same as array index. */

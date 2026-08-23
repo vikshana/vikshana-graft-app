@@ -16,6 +16,7 @@
     "test:watch": "jest --watch --onlyChanged",
     "test:ci": "jest --watchAll=false --passWithNoTests --maxWorkers 4",
     "test:regression": "jest --watchAll=false --runInBand --forceExit --testPathPattern=graftFailureRegression",
+    "test:regression:paraphrase": "jest --watchAll=false --runInBand --forceExit src/services/regression/operatorParaphraseRegression.test.ts src/services/regression/writeupPromptRegression.test.ts src/services/regression/writeupAiParaphraseRegression.test.ts",
     "test:regression:e2e": "GRAFANA_URL=${GRAFANA_URL:-https://35.175.68.13} GRAFANA_E2E_DASHBOARD_UID=${GRAFANA_E2E_DASHBOARD_UID:-grafte2ekeysht} GRAFANA_E2E=1 playwright test tests/graftRegression.spec.ts --project=graft-regression",
     "test:regression:e2e:mutating": "GRAFANA_URL=${GRAFANA_URL:-https://35.175.68.13} GRAFANA_E2E_DASHBOARD_UID=${GRAFANA_E2E_DASHBOARD_UID:-grafte2ekeysht} GRAFANA_E2E=1 GRAFANA_E2E_MUTATING=1 playwright test tests/graftRegression.spec.ts --project=graft-regression",
     "test:regression:sandbox-gate": "npm run test:regression && npm run test:regression:e2e && npm run test:regression:e2e:mutating",

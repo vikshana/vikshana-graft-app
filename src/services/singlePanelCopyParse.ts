@@ -27,7 +27,7 @@ function normalizeMessageQuotes(text: string): string {
 /** One named panel copied to another dashboard — not a full layout clone. */
 export function isExplicitSinglePanelCopyRequest(userContent: string): boolean {
     const text = normalizeMessageQuotes(userContent.trim());
-    if (!/\bpanel/i.test(text) || !/\b(copy|same as)\b/i.test(text)) {
+    if (!/\bpanel/i.test(text) || !/\b(copy|same as|same panel)\b/i.test(text)) {
         return false;
     }
     if (/\b(?:all panels|every panel|entire dashboard|whole dashboard|visual copy of)\b/i.test(text)) {
@@ -46,6 +46,7 @@ export function extractPanelTitleFromCopyMessage(message: string): string | unde
         /\bsame as the\s+'([^']+)'\s+panel/i,
         /\bpanel(?:\s+titled|\s+title|\s+named|\s+called)?\s+"([^"]+)"/i,
         /"([^"]+)"\s+panel\s+on/i,
+        /\btake\s+"([^"]+)"\s+off\b/i,
         /\bcopy(?:\s+the)?\s+"([^"]+)"\s+panel/i,
         /\b(?:add|create)\s+(?:a\s+)?(?:new\s+)?panel\s+(?:titled|called|named)?\s+"([^"]+)"/i,
         /\b(?:add|create)\s+(?:a\s+)?(?:new\s+)?panel\s+(?:titled|called|named)?\s+'([^']+)'/i,
@@ -193,7 +194,8 @@ export function messageMentionsSinglePanelCopyIntent(message: string): boolean {
 
     const describesCopy =
         /\bsame as\b/i.test(text) ||
-        (/\b(copy|add|create|duplicate)\b/i.test(text) && /\bpanel/i.test(text));
+        /\bsame panel\b/i.test(text) ||
+        (/\b(copy|add|create|duplicate|put)\b/i.test(text) && /\bpanel/i.test(text));
 
     return hasCrossDashboardSignal && describesCopy;
 }

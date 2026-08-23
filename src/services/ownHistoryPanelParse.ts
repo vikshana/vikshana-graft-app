@@ -52,6 +52,8 @@ export function messageMentionsOwnHistoryPanel(message: string): boolean {
         /\bown[- ]history\b/i.test(text) ||
         /\bown\s+past\b/i.test(text) ||
         /\bagainst\s+its\s+historical\s+(?:values|data|trend|behavior|behaviour)\b/i.test(text) ||
+        /\bhistorical\s*(?:±\s*)?2?\s*(?:σ|sigma)?\s*band\b/i.test(text) ||
+        /\bhistorical\b.{0,24}\b(?:±\s*2|2σ|2\s*sigma)\b/i.test(text) ||
         /\bcompared?\s+(?:to|with|against)\s+its\s+histor(?:y|ical\s+values)\b/i.test(text) ||
         (/\bvs\.?\s*own\b/i.test(text) && hasTwoSigma) ||
         (/\bhistorical\s+mean\b/i.test(text) && hasTwoSigma && !/\bpeer\b/i.test(text)) ||
