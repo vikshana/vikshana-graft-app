@@ -88,11 +88,17 @@ export function extractOwnHistoryPanelTitle(message: string): string | undefined
  */
 export function extractOwnHistoryMetricLabel(message: string): string | undefined {
     const text = normalizeMessageQuotes(message.trim());
-    const stop = '(?=\\s+(?:on|for|in)\\s+(?:the\\s+)?dashboard\\b|\\s+with\\s+uid\\b|\\s+uid\\b|[,.;]|$)';
-    const m =
-        text.match(/\bcompares?\s+(.+?)\s+against\s+its\s+(?:own\s+history|historical\s+(?:values|data|trend))\b/i) ??
-        text.match(new RegExp(`\\bpanel\\s+for\\s+(.+?)${stop}`, 'i')) ??
-        text.match(new RegExp(`\\bfor\\s+(?:the\\s+)?(.+?)${stop}`, 'i'));
+    const stop =
+        '(?=\\s+(?:on|for|in)\\s+(?:the\\s+)?dashboard\\b|\\s+that\\s+compares\\b|\\s+with\\s+uid\\b|\\s+uid\\b|[,.;]|$)';
+    const compared = text.match(
+        /\bcompares?\s+(.+?)\s+against\s+its\s+(?:own\s+history|historical\s+(?:values|data|trend))\b/i
+    )?.[1];
+    const comparedIsGeneric =
+        compared && /^(?:the\s+)?(?:current\s+)?(?:trend|value|reading|signal|data)\s*$/i.test(compared.trim());
+    const m = compared && !comparedIsGeneric
+        ? [undefined, compared]
+        : text.match(new RegExp(`\\bpanel\\s+for\\s+(.+?)${stop}`, 'i')) ??
+          text.match(new RegExp(`\\bfor\\s+(?:the\\s+)?(.+?)${stop}`, 'i'));
     if (!m?.[1]) {
         return undefined;
     }

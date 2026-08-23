@@ -6,6 +6,15 @@ import {
 import { messageDescribesPanelCreate, parsePanelCreateRequest } from './panelCreateParse';
 
 describe('ownHistoryPanelParse — target metric', () => {
+    it('uses Module 4 Current, not "the current trend", for write-up own-history wording', () => {
+        const prompt =
+            'Create a machine learning panel for Module 4 Current that compares the current trend against its own history';
+        expect(extractOwnHistoryMetricLabel(prompt)).toBe('Module 4 Current');
+        const req = parseAddOwnHistoryPanelRequest(prompt, { contextDashboardUid: 'idHkqdqnk' });
+        expect(req?.moduleNumber).toBe(4);
+        expect(req?.metricLabel).toBeUndefined();
+    });
+
     it('treats "against its historical values" as own-history (write-up wording)', () => {
         const prompt =
             'Create a machine learning panel that compares Sensing Voltage against its historical values';

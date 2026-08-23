@@ -147,6 +147,9 @@ describe('write-up PDF — clone / rename / panel details', () => {
 
     it('own-history vs historical values vs RF vs peer band stay distinct', () => {
         expect(messageMentionsOwnHistoryPanel(ML_OWN_HISTORY_MODULE4)).toBe(true);
+        expect(
+            parseAddOwnHistoryPanelRequest(ML_OWN_HISTORY_MODULE4, { contextDashboardUid: UID })?.moduleNumber
+        ).toBe(4);
         expect(messageMentionsOwnHistoryPanel(ML_OWN_HISTORY_DOC)).toBe(true);
         expect(messageMentionsOwnHistoryPanel(ML_HISTORICAL)).toBe(true);
         expect(
