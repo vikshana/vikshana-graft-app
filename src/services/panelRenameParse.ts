@@ -73,6 +73,13 @@ function extractMachineIdForPanelRename(message: string): string | undefined {
 /** User wants to rename a panel title, not the dashboard title. */
 export function messageDescribesPanelRename(message: string): boolean {
     const text = normalizeMessageQuotes(message.trim());
+    // "Rename 6sFerv44k dashboard to NewSkywater-FL" is a dashboard rename, not a panel.
+    if (
+        /\brename\s+(?:the\s+)?[A-Za-z0-9]{6,}\s+dashboard\b/i.test(text) &&
+        !/\bpanel\b/i.test(text)
+    ) {
+        return false;
+    }
     const renameVerb =
         /\brename\b/i.test(text) ||
         /\bchange\s+(?:the\s+)?name\b/i.test(text) ||

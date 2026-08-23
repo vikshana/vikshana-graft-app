@@ -61,6 +61,15 @@ describe('dashboardRenameParse', () => {
         expect(req?.newLabel).toBe('Keysight');
     });
 
+    it('parses uid-first "rename UID dashboard to NewLabel"', () => {
+        const prompt = 'Please rename 6sFerv44k dashboard to NewSkywater-FL';
+        expect(messageDescribesDashboardRename(prompt)).toBe(true);
+        const req = parseDashboardRenameRequest(prompt);
+        expect(req?.dashboardUid).toBe('6sFerv44k');
+        expect(req?.newLabel).toBe('NewSkywater-FL');
+        expect(userWantsDashboardRename(prompt)).toBe(true);
+    });
+
     it('still parses the unquoted "to be NewLabel" form', () => {
         const req = parseDashboardRenameRequest(
             'Rename the dashboard with UID = abc123 to be Keysight'

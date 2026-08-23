@@ -60,6 +60,17 @@ describe('panelRenameParse', () => {
         expect(userWantsDashboardRename(pressureGauge)).toBe(false);
     });
 
+    it('does not steal uid-first dashboard rename', () => {
+        const prompt = 'Please rename 6sFerv44k dashboard to NewSkywater-FL';
+        expect(messageDescribesPanelRename(prompt)).toBe(false);
+        expect(parsePanelRenameRequest(prompt)).toBeNull();
+        expect(userWantsPanelRename(prompt)).toBe(false);
+        expect(messageDescribesDashboardRename(prompt)).toBe(true);
+        const dash = parseDashboardRenameRequest(prompt);
+        expect(dash?.dashboardUid).toBe('6sFerv44k');
+        expect(dash?.newLabel).toBe('NewSkywater-FL');
+    });
+
     it('keeps unquoted multi-word new titles', () => {
         const req = parsePanelRenameRequest(
             'Rename the Current panel to New Current on dashboard uid=idHkqdqnk'
