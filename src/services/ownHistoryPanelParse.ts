@@ -1,4 +1,8 @@
-import { extractAllDashboardUids, extractDashboardUidFromMessage } from './dashboardMentionParse';
+import {
+    extractAllDashboardUids,
+    extractDashboardUidFromMessage,
+    extractClaimedVendorDashboardUid,
+} from './dashboardMentionParse';
 import { extractRequestedDashboardTitle, findMachineIdsInText } from './dashboardCloneParse';
 import { extractOnDashboardMachineTitle } from './modulePanelReorderParse';
 import { canonicalOwnHistoryTitle } from './modulePanelTitles';
@@ -92,15 +96,18 @@ export function extractOwnHistoryMetricLabel(message: string): string | undefine
     const text = normalizeMessageQuotes(message.trim());
     const stop =
         '(?=\\s+(?:on|for|in)\\s+(?:the\\s+)?dashboard\\b|\\s+that\\s+compares\\b|\\s+with\\s+uid\\b|\\s+uid\\b|[,.;]|$)';
+    const ofPanel = text.match(/\bpanel\s+of\s+(.+?)\s+compared\b/i)?.[1];
     const compared = text.match(
-        /\bcompares?\s+(.+?)\s+against\s+its\s+(?:own\s+history|historical\s+(?:values|data|trend))\b/i
+        /\bcompar(?:es?|ed)\s+(.+?)\s+(?:to|with|against)\s+its\s+(?:own\s+history|historical\s+(?:values|data|trend))\b/i
     )?.[1];
     const comparedIsGeneric =
         compared && /^(?:the\s+)?(?:current\s+)?(?:trend|value|reading|signal|data)\s*$/i.test(compared.trim());
-    const m = compared && !comparedIsGeneric
-        ? [undefined, compared]
-        : text.match(new RegExp(`\\bpanel\\s+for\\s+(.+?)${stop}`, 'i')) ??
-          text.match(new RegExp(`\\bfor\\s+(?:the\\s+)?(.+?)${stop}`, 'i'));
+    const m = ofPanel
+        ? [undefined, ofPanel]
+        : compared && !comparedIsGeneric
+          ? [undefined, compared]
+          : text.match(new RegExp(`\\bpanel\\s+for\\s+(.+?)${stop}`, 'i')) ??
+            text.match(new RegExp(`\\bfor\\s+(?:the\\s+)?(.+?)${stop}`, 'i'));
     if (!m?.[1]) {
         return undefined;
     }
@@ -127,7 +134,10 @@ export function parseAddOwnHistoryPanelRequest(
     if (!messageMentionsOwnHistoryPanel(text)) {
         return null;
     }
-    if (!/\b(add|create|new|make|plot|want)\b/i.test(text)) {
+    if (extractClaimedVendorDashboardUid(text)) {
+        return null;
+    }
+    if (!/\b(add|create|new|make|plot|want|need)\b/i.test(text)) {
         return null;
     }
     if (/\bcopy\b/i.test(text) && /\bmodules?\s+(1|2|3|4|6|7|8)\b/i.test(text)) {

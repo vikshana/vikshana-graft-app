@@ -1,4 +1,4 @@
-import { extractAllDashboardUids } from './dashboardMentionParse';
+import { extractAllDashboardUids, extractClaimedVendorDashboardUid } from './dashboardMentionParse';
 import { findMachineIdsInText, isMachineId, MACHINE_ID_PATTERN } from './dashboardCloneParse';
 import { userWantsDashboardMetricPanels } from './dashboardMetricPanelsParse';
 import { messageMentionsOwnHistoryPanel } from './ownHistoryPanelParse';
@@ -54,6 +54,8 @@ function extractPanelTitle(text: string): string | undefined {
         /\b(?:create|add|make|put|build)\s+(?:a\s+)?(?:new\s+)?(?:bar\s*chart|gauge|stat|time\s*series|timeseries|table|chart)\s+panel\s+(?:called|named|titled)\s+"([^"]+)"/i,
         /\b(?:create|add|make|put|build)\s+(?:a\s+)?(?:new\s+)?(?:bar\s*chart|gauge|stat|time\s*series|timeseries|table|chart)\s+panel\s+(?:called|named|titled)\s+([A-Za-z][\w -]{1,60}?)(?:\s+on\b|\s*$)/i,
         /\b(?:need|want)\s+(?:a\s+)?([A-Za-z][\w -]{1,40}?)\s+gauge\b/i,
+        /\bbar\s*chart\s+(?:of|that shows)\s+(.+?)(?=\s+for\b|\s+on\b|$)/i,
+        /\b(?:create|add|make|put|build|need|want)\s+(?:a\s+)?(?:new\s+)?gauge(?:\s+panel)?\s+(?:called|named|titled)\s+"?([^"\n]+?)"?(?=\s+on\b|\s+for\b|\s*$)/i,
         /\b(?:create|add|make|put|build)\s+(?:a\s+)?(?:new\s+)?(?:bar\s*chart|gauge|stat|time\s*series|timeseries|table|chart)\s+(?:called|named|titled)\s+"([^"]+)"/i,
         /\b(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?panel\s+(?:called|named|titled)\s+"([^"]+)"/i,
         /\b(?:create|add|make)\s+(?:a\s+)?(?:new\s+)?(?:bar\s*chart|gauge|stat|time\s*series|timeseries|table|chart)\s+panel\s+(?:called|named|titled)\s+'([^']+)'/i,
@@ -88,6 +90,9 @@ function inferPanelType(text: string): PanelCreateType {
 }
 
 function extractTitleLabel(text: string): string | undefined {
+    if (extractClaimedVendorDashboardUid(text)) {
+        return undefined;
+    }
     if (/\bkeysight\b/i.test(text)) {
         return 'keysight';
     }
@@ -151,6 +156,9 @@ export function parsePanelCreateRequest(
     opts?: { contextDashboardUid?: string }
 ): PanelCreateRequest | null {
     const text = normalizeMessageQuotes(message.trim());
+    if (extractClaimedVendorDashboardUid(text)) {
+        return null;
+    }
     if (!messageDescribesPanelCreate(text)) {
         return null;
     }

@@ -1,4 +1,8 @@
-import { extractAllDashboardUids, extractDashboardUidFromMessage } from './dashboardMentionParse';
+import {
+    extractAllDashboardUids,
+    extractDashboardUidFromMessage,
+    extractClaimedVendorDashboardUid,
+} from './dashboardMentionParse';
 import { extractRequestedDashboardTitle, findMachineIdsInText } from './dashboardCloneParse';
 import { extractOnDashboardMachineTitle } from './modulePanelReorderParse';
 import { messageMentionsOwnHistoryPanel } from './ownHistoryPanelParse';
@@ -173,6 +177,7 @@ export function messageMentionsPeerBandPanelCreate(message: string): boolean {
         (/\bupper\s+peer\s+bound\b/i.test(text) && /\blower\s+peer\s+bound\b/i.test(text));
     const hasPeerCompare =
         /\baverage\s+of\s+modules?\b/i.test(text) ||
+        /\bmean\s+of\s+(?:the\s+)?(?:other\s+)?modules?\b/i.test(text) ||
         /\bcompare\s+module\s*\d+\b/i.test(text) ||
         /\bagainst\s+(?:the\s+)?(?:average|avg|mean)\b/i.test(text);
 
@@ -234,9 +239,15 @@ export function extractPeerModulesFromMessage(message: string, excludeModule?: n
     return undefined;
 }
 
-export function parseAddPeerBandPanelRequest(message: string): AddPeerBandPanelRequest | null {
+export function parseAddPeerBandPanelRequest(
+    message: string,
+    opts?: { contextDashboardUid?: string }
+): AddPeerBandPanelRequest | null {
     const text = normalizeMessageQuotes(message.trim());
     if (!messageMentionsPeerBandPanelCreate(text)) {
+        return null;
+    }
+    if (extractClaimedVendorDashboardUid(text)) {
         return null;
     }
 
@@ -245,7 +256,7 @@ export function parseAddPeerBandPanelRequest(message: string): AddPeerBandPanelR
     const machineId = machines[0];
     const dashboardTitle =
         extractRequestedDashboardTitle(text, machineId) ?? extractOnDashboardMachineTitle(text);
-    const dashboardUid = uids[0] ?? extractDashboardUidFromMessage(text);
+    const dashboardUid = uids[0] ?? extractDashboardUidFromMessage(text) ?? opts?.contextDashboardUid;
     const panelTitle = extractPeerBandPanelTitle(text);
 
     let moduleNumber: number | undefined;

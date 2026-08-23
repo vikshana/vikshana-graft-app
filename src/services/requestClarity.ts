@@ -1,4 +1,3 @@
-import { extractClaimedVendorDashboardUid } from './dashboardMentionParse';
 import { isCloneHowToQuestion, parseCloneIntentMessage } from './dashboardCloneParse';
 import { resolveIntentRouteAmbiguity } from './programmaticIntentRouter';
 import { userWantsDashboardClone, userWantsDashboardPanelFix } from './dashboardCloneProgress';
@@ -7,6 +6,7 @@ import {
     extractAllDashboardUids,
     extractDashboardUidFromMessage,
     extractPanelIdFromMessage,
+    extractClaimedVendorDashboardUid,
     mentionsDashboard,
 } from './dashboardMentionParse';
 import { extractDashboardTitleFromFixRequest } from './dashboardPanelFixReply';
@@ -231,4 +231,15 @@ export function formatClarificationIfNeeded(userMessage: string): string | null 
     }
 
     return null;
+}
+
+/** Intent-route ASK, then unmatched-English ASK. Never a fake ### Done. */
+export function formatOperatorClarificationIfNeeded(
+    userMessage: string,
+    contextDashboardUid?: string
+): string | null {
+    return (
+        resolveIntentRouteAmbiguity(userMessage, 1, contextDashboardUid) ??
+        formatClarificationIfNeeded(userMessage)
+    );
 }
