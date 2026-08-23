@@ -86,12 +86,18 @@ export function extractOwnHistoryMetricLabel(message: string): string | undefine
     const text = normalizeMessageQuotes(message.trim());
     const stop = '(?=\\s+(?:on|for|in)\\s+(?:the\\s+)?dashboard\\b|\\s+with\\s+uid\\b|\\s+uid\\b|[,.;]|$)';
     const m =
+        text.match(/\bcompares?\s+(.+?)\s+against\s+its\s+own\s+history\b/i) ??
         text.match(new RegExp(`\\bpanel\\s+for\\s+(.+?)${stop}`, 'i')) ??
-        text.match(new RegExp(`\\bfor\\s+(.+?)${stop}`, 'i'));
+        text.match(new RegExp(`\\bfor\\s+(?:the\\s+)?(.+?)${stop}`, 'i'));
     if (!m?.[1]) {
         return undefined;
     }
-    const label = m[1].replace(/^["']|["']$/g, '').replace(/\s+/g, ' ').trim();
+    const label = m[1]
+        .replace(/^["']|["']$/g, '')
+        .replace(/^(?:the\s+)?/i, '')
+        .replace(/\s+parameter\s*$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
     if (!label || label.length > 48 || /[=]|uid|dashboard/i.test(label)) {
         return undefined;
     }

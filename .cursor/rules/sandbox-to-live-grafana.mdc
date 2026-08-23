@@ -1,0 +1,17 @@
+---
+description: Promote Graft from sandbox Grafana to live grafana.electramet.com — no dashboards, alerts, or peer-RF inventory
+alwaysApply: true
+---
+
+# Sandbox → live Grafana
+
+Full runbook: `docs/sandbox-to-live-grafana.md`.
+
+When the user asks to promote sandbox to **live** (`grafana.electramet.com:3000`):
+
+- Merge **Graft + grafana-llm-app + org plugin settings + TIG scripts** only.
+- **Never** copy dashboards, Grafana alert rules, `grafana.db`, whole `plugins/`, or `[auth*]` (live has a 2FA plugin).
+- Live **peer-RF/ML list starts empty**: `peer_rf_config.json` → `{"machines": {}}`. Do not copy sandbox enrollments or `ml_predictions`.
+- Need live SSH (`user@host` + key) before executing. Sandbox remains `ec2-user@35.175.68.13`.
+- Provision orgs with Grafana **admin basic auth on localhost in Docker**, not a service-account token (cannot list/switch orgs) and not the 2FA browser login.
+- Git branch `reconstruct/build-87` is historical; plugin badge is **build 213+**.

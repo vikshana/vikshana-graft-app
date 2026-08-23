@@ -49,14 +49,22 @@ export function extractAllDashboardUids(message: string): string[] {
     const text = message.trim();
     const ids: string[] = [];
     ids.push(...collectUidMatches(text, /\bhas\s+the\s+UID\s*["']([a-zA-Z0-9]+)["']/gi));
+    ids.push(...collectUidMatches(text, /\bwith\s+the\s+UID\s*[=:#]?\s*["']?([a-zA-Z0-9]{6,})["']?/gi));
     ids.push(...collectUidMatches(text, /\bUID\s*["']([a-zA-Z0-9]+)["']/gi));
     ids.push(...collectUidMatches(text, /\bdash\s*board\s*["']([a-zA-Z0-9]+)["']/gi));
     ids.push(
-        ...collectUidMatches(text, /\bdashboard\s+(?:with\s+)?uid\s*[=:#]?\s*["']?([a-zA-Z0-9]{6,})["']?/gi)
+        ...collectUidMatches(text, /\bdashboard\s+(?:with\s+(?:the\s+)?)?uid\s*[=:#]?\s*["']?([a-zA-Z0-9]{6,})["']?/gi)
     );
     ids.push(...collectUidMatches(text, /\bdashboard\s*["']([a-zA-Z0-9]{6,})["']/gi));
     ids.push(...collectUidMatches(text, new RegExp(`\\b${DASHBOARD_UID_AFTER_LABEL.source}`, 'gi')));
-    return [...new Set(ids)];
+    // "for the 6sFerv44k machine" — Grafana uid used as a machine handle
+    ids.push(
+        ...collectUidMatches(
+            text,
+            /\bfor\s+(?:the\s+)?([A-Za-z0-9]*[A-Za-z][A-Za-z0-9]{5,13})\s+machine\b/gi
+        )
+    );
+    return [...new Set(ids.filter((id) => !/^[0-9]{4}-[0-9]{6,}$/.test(id)))];
 }
 
 /** Grafana panel id from "panel id 35" — NOT the same as array index. */

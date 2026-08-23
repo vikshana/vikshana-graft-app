@@ -109,6 +109,16 @@ export function resolveHistoryComparisonSignal(
                 unit: 'volt',
             };
         }
+        if (/\btemperatures?\b/i.test(lc)) {
+            const titleBase = 'Temperature';
+            return {
+                field: 'Temperature_C',
+                titleBase,
+                panelTitle: canonicalLiveHistoryComparisonTitleForLabel(titleBase),
+                unit: 'celsius',
+                moduleNumber: undefined,
+            };
+        }
         // Unknown free-text label (e.g. bare "pressure") — caller should clarify.
         return undefined;
     }
@@ -166,7 +176,11 @@ export function messageMentionsPredictiveAnalyticsPanel(message: string): boolea
     if (/\bown\s+history\b/i.test(text) || (/\bvs\.?\s*own\b/i.test(text) && /\b2\s*σ|2\s*sigma/i.test(text))) {
         return false;
     }
-    if (/\brandomforest\s+vs\s+peers\b/i.test(text) || /\bpeer\s*rf\b/i.test(text)) {
+    // Module-scoped "RF vs Peers" is peer-RF. Plant metrics (Temperature) are not.
+    if (
+        (/\brandomforest\s+vs\s+peers\b/i.test(text) || /\bpeer\s*rf\b/i.test(text)) &&
+        /\bmodule\s*\d+\b/i.test(text)
+    ) {
         return false;
     }
     // Peer Band ±2σ (Flux peer mean) — not History Comparison / RandomForest.
@@ -182,7 +196,9 @@ export function messageMentionsPredictiveAnalyticsPanel(message: string): boolea
     return (
         /\bpredictive\s+analytics\b/i.test(text) ||
         /\bhistory\s+comparison\b/i.test(text) ||
-        (/\brandom\s*forest\b/i.test(text) && !/\bvs\s+peers\b/i.test(text) && !/\binflux\b/i.test(text)) ||
+        (/\brandom\s*forest\b/i.test(text) &&
+            (!/\bvs\s+peers\b/i.test(text) || !/\bmodule\s*\d+\b/i.test(text)) &&
+            !(/\binflux\b/i.test(text) && /\bmodule\s*\d+\b/i.test(text))) ||
         (/\bmachine\s+learning\b/i.test(text) &&
             /\bmodule\s*\d+\b/i.test(text) &&
             !/\bown\s+history\b/i.test(text) &&

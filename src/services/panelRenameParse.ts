@@ -38,17 +38,19 @@ function extractNewPanelTitle(text: string): string | undefined {
         /\bpanel\s+to\s+'([^']+)'/i,
         /\bpanel\s+to\s+be\s+"([^"]+)"/i,
         /\bpanel\s+to\s+be\s+'([^']+)'/i,
+        // Unclosed quote / trailing period: to be "NewCurrent.
+        /\bto\s+be\s+"([^"\n]+?)(?:[".]|\s*$)/i,
+        /\bto\s+"([^"\n]+?)(?:[".]|\s*$)/i,
         /\bpanel\s+to\s+be\s+([A-Za-z][A-Za-z0-9_ -]+?)(?:\s+on\s+|\s*$|\.)/i,
         /\bpanel\s+to\s+([A-Za-z][A-Za-z0-9_ -]+?)(?:\s+on\s+(?:the\s+)?dashboard|\s*$|\.)/i,
-        // Fallback for "Rename panel titled "Old" to "New"" where the new title
-        // is the quoted string after "to" (not immediately after "panel").
+        /\bto\s+be\s+([A-Za-z][A-Za-z0-9_ -]+?)(?:\s+on\s+|\s*$|\.)/i,
         /\bto\s+"([^"]+)"/i,
         /\bto\s+'([^']+)'/i,
     ];
     for (const re of patterns) {
         const match = text.match(re);
         if (match?.[1]?.trim()) {
-            return match[1].trim();
+            return match[1].trim().replace(/[."']+$/g, '');
         }
     }
     return undefined;

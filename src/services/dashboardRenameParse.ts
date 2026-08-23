@@ -54,7 +54,7 @@ function extractNewLabel(text: string): string | undefined {
 
 function extractReplaceLabel(text: string): string | undefined {
     const instead = text.match(/\binstead of\s+([A-Za-z][A-Za-z0-9_-]*)/i);
-    if (instead?.[1]) {
+    if (instead?.[1] && !/^(?:the|current|name|old|existing)$/i.test(instead[1])) {
         return instead[1];
     }
     const fromSlash = text.match(new RegExp(`\\b(${MACHINE_ID_PATTERN.source})\\s*/\\s*([A-Za-z][A-Za-z0-9_-]+)`, 'i'));

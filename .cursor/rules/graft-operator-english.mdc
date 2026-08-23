@@ -1,0 +1,33 @@
+---
+description: Graft must interpret natural English; decide when clear, ask only when ambiguous
+alwaysApply: true
+---
+
+# Graft operator English
+
+Operators do not speak fixture strings. Graft **interprets English**, then **does the job** or **asks one clear question**.
+
+## Decide vs clarify
+
+- **Decide** when the intent is obvious: clone/copy dashboard, rename dashboard/panel, add ML panel, even if ids vs titles vs UIDs are mixed.
+- **Clarify** only when two actions are equally likely or a required target is missing (no machine, no uid, no dashboard name).
+- **Never** fail a complete request because it did not match a template (`copy of 2103-176030`, `uid=`).
+
+## Accept as equivalent
+
+- Dashboard **title** (`Skywater-FL`) = template, not only `####-######`
+- Grafana **UID** (`6sFerv44k`, `uid = idHkqdqnk`) = dashboard, including “the X machine”
+- Unclosed quotes, “to be X”, “instead of the current name”
+- “Own history” / ±2σ / Influx ≠ RandomForest History Comparison ≠ “vs Peers”
+- Do not add Grafana **alerts** unless the prompt asks for an alert
+
+## Tests
+
+Add the **operator’s exact prompt** to `src/services/regression/graftRegressionFixtures.ts` (and `operatorPhrasingRegression.test.ts`) when a phrasing fails. Template-only tests are not enough.
+
+```text
+❌ BAD: "Template and target ids must be different" for copy of Skywater-FL + 2505-200033
+✅ GOOD: copy of <title> + data for <machine id> → clone
+❌ BAD: ignore 6sFerv44k because it is not ####-######
+✅ GOOD: treat it as dashboard uid
+```

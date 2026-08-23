@@ -1,6 +1,11 @@
 import type { ToolExecution } from '../types/llm.types';
 import { callMcpTool, parseJsonFromMcpText } from './mcpToolClient';
-import { getEffectiveCloneFieldsFromIntent, isMachineId, parseCloneIntentMessage } from './dashboardCloneParse';
+import {
+    findMachineIdsInText,
+    getEffectiveCloneFieldsFromIntent,
+    isMachineId,
+    parseCloneIntentMessage,
+} from './dashboardCloneParse';
 import { findDashboardByTitle, parseSearchHitsFromMcpText } from './dashboardSearchParse';
 import {
     enrichDashboardToolResult,
@@ -211,16 +216,17 @@ export async function runProgrammaticDashboardClone(
         };
     }
 
-    const sourceMachine = effective.sourceMachineId ?? parsed.sourceMachineId;
+    const sourceTitleHint = effective.sourceDashboardTitle ?? parsed.sourceDashboardTitle;
+    let sourceMachine = effective.sourceMachineId ?? parsed.sourceMachineId;
     const targetMachine =
         effective.requestedMachine ??
         (meta?.requestedMachine && isMachineId(meta.requestedMachine) ? meta.requestedMachine : undefined);
     let targetTitle = effective.requestedTitle ?? parsed.requestedTitle;
 
-    if (!sourceMachine || !targetMachine || !targetTitle) {
+    if ((!sourceMachine && !sourceTitleHint) || !targetMachine || !targetTitle) {
         return {
             ok: false,
-            error: 'Missing target title, target machine, or source machine in clone request',
+            error: 'Missing target title, target machine, or source machine/dashboard name in clone request',
             toolExecutions: [],
         };
     }
@@ -229,7 +235,7 @@ export async function runProgrammaticDashboardClone(
 
     const sourceResolved = await resolveSourceUid(
         mcpClient,
-        sourceMachine,
+        sourceTitleHint ?? sourceMachine!,
         meta?.sourceUid,
         toolExecutions
     );
@@ -252,6 +258,21 @@ export async function runProgrammaticDashboardClone(
     const extracted = extractDashboardFromGetByUid(sourceFetch.text);
     if (!extracted) {
         return { ok: false, error: 'Could not parse source dashboard JSON', toolExecutions };
+    }
+
+    if (!sourceMachine) {
+        const fromTitle = findMachineIdsInText(String(extracted.dashboard.title ?? ''))[0];
+        const fromJson = findMachineIdsInText(JSON.stringify(extracted.dashboard))[0];
+        sourceMachine = fromTitle ?? fromJson;
+    }
+    if (!sourceMachine) {
+        return {
+            ok: false,
+            error:
+                `Found template dashboard "${sourceTitleHint ?? sourceResolved.uid}" but could not infer its machine id. ` +
+                `Name the template machine (e.g. copy of 2103-176030) or use that dashboard's uid.`,
+            toolExecutions,
+        };
     }
 
     const searchTargetStep = pendingTool('search_dashboards');

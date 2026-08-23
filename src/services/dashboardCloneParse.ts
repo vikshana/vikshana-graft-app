@@ -28,6 +28,26 @@ export function findMachineIdsInText(message: string): string[] {
     return [...new Set(ids)];
 }
 
+/**
+ * Template dashboard title when the operator says "copy of Skywater-FL" (not a machine id).
+ */
+export function extractSourceDashboardTitle(cloneIntentMessage: string): string | undefined {
+    const copyOf = cloneIntentMessage.match(
+        /\b(?:visual\s+)?copy of\s+([^,]+?)(?=\s*,|\s+but\b|\s+with\s+data\b|\s+with\s+data\s+for\b|$)/i
+    );
+    if (!copyOf?.[1]) {
+        return undefined;
+    }
+    const title = copyOf[1].replace(/^["']|["']$/g, '').trim();
+    if (!title || isMachineId(title) || title.length < 2 || title.length > 80) {
+        return undefined;
+    }
+    if (/^(?:it|this|that|the dashboard)$/i.test(title)) {
+        return undefined;
+    }
+    return title;
+}
+
 /** Template machine to copy (e.g. 2103-176030 from "copy of 2103-176030"). */
 export function extractSourceMachineId(cloneIntentMessage: string): string | undefined {
     const idGroup = MACHINE_ID_PATTERN.source;
@@ -38,6 +58,10 @@ export function extractSourceMachineId(cloneIntentMessage: string): string | und
     const copyOf = cloneIntentMessage.match(new RegExp(`\\bcopy of\\s+(${idGroup})`, 'i'));
     if (copyOf?.[1] && isMachineId(copyOf[1])) {
         return copyOf[1];
+    }
+    // "copy of Skywater-FL" — the only ####-###### in the prompt is the *target*.
+    if (extractSourceDashboardTitle(cloneIntentMessage)) {
+        return undefined;
     }
     const ids = findMachineIdsInText(cloneIntentMessage);
     if (ids.length >= 2) {
@@ -176,6 +200,7 @@ export function getEffectiveCloneFieldsFromIntent(intent: string): {
     requestedTitle?: string;
     requestedMachine?: string;
     sourceMachineId?: string;
+    sourceDashboardTitle?: string;
     valid: boolean;
 } {
     const parsed = parseCloneIntentMessage(intent);
@@ -185,6 +210,7 @@ export function getEffectiveCloneFieldsFromIntent(intent: string): {
                 parsed.requestedTitle ?? inferDefaultDashboardTitle(intent, parsed.targetMachineId!),
             requestedMachine: parsed.targetMachineId,
             sourceMachineId: parsed.sourceMachineId,
+            sourceDashboardTitle: parsed.sourceDashboardTitle,
             valid: true,
         };
     }
@@ -196,12 +222,15 @@ export function getEffectiveCloneFieldsFromIntent(intent: string): {
             : undefined,
         requestedMachine: isMachineId(targetMachineId) ? targetMachineId : undefined,
         sourceMachineId: isMachineId(sourceMachineId) ? sourceMachineId : undefined,
+        sourceDashboardTitle: extractSourceDashboardTitle(intent),
         valid: false,
     };
 }
 
 export interface ParsedCloneIntent {
     sourceMachineId?: string;
+    /** When template is named by dashboard title ("copy of Skywater-FL"), not a machine id. */
+    sourceDashboardTitle?: string;
     targetMachineId?: string;
     requestedTitle?: string;
     valid: boolean;
@@ -209,18 +238,22 @@ export interface ParsedCloneIntent {
 }
 
 export function parseCloneIntentMessage(message: string): ParsedCloneIntent {
+    const sourceDashboardTitle = extractSourceDashboardTitle(message);
     const sourceMachineId = extractSourceMachineId(message);
     const targetMachineId = extractTargetMachineId(message);
     const requestedTitle =
         extractRequestedDashboardTitle(message, targetMachineId) ??
         (targetMachineId ? inferDefaultDashboardTitle(message, targetMachineId) : undefined);
 
-    if (!sourceMachineId || !isMachineId(sourceMachineId)) {
+    const hasSource =
+        (sourceMachineId && isMachineId(sourceMachineId)) || Boolean(sourceDashboardTitle);
+    if (!hasSource) {
         return {
             valid: false,
             error:
-                'Could not find template machine id (e.g. "copy of 2103-176030" or "copy of ElectraMetBRC-SIM-177121").',
+                'Could not find template machine id or dashboard name (e.g. "copy of 2103-176030" or "copy of Skywater-FL").',
             sourceMachineId,
+            sourceDashboardTitle,
             targetMachineId,
         };
     }
@@ -230,14 +263,16 @@ export function parseCloneIntentMessage(message: string): ParsedCloneIntent {
             error:
                 'Could not find target machine id (e.g. "data for 2505-200033" or "data for ElectraMetBRC-SIM-177121"). Avoid phrasing like "machine from Vendor" without the id.',
             sourceMachineId,
+            sourceDashboardTitle,
             targetMachineId,
         };
     }
-    if (sourceMachineId === targetMachineId) {
+    if (sourceMachineId && sourceMachineId === targetMachineId) {
         return {
             valid: false,
             error: 'Template and target machine ids must be different.',
             sourceMachineId,
+            sourceDashboardTitle,
             targetMachineId,
         };
     }
@@ -245,6 +280,7 @@ export function parseCloneIntentMessage(message: string): ParsedCloneIntent {
     return {
         valid: true,
         sourceMachineId,
+        sourceDashboardTitle,
         targetMachineId,
         requestedTitle,
     };
