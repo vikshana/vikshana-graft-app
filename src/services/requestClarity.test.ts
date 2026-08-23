@@ -38,4 +38,18 @@ describe('formatClarificationIfNeeded', () => {
         expect(formatClarificationIfNeeded('How do I copy a dashboard in Grafana?')).toBeNull();
         expect(formatClarificationIfNeeded('What is the process to copy dashboards?')).toBeNull();
     });
+
+    it('does not block read-only questions that mention ML or analytics', () => {
+        expect(
+            formatClarificationIfNeeded(
+                'What does ML temperature mean on the dashboard with UID = idHkqdqnk?'
+            )
+        ).toBeNull();
+        expect(
+            formatClarificationIfNeeded(
+                'Explain the History Comparison panel on uid=idHkqdqnk.'
+            )
+        ).toBeNull();
+        expect(formatClarificationIfNeeded('List the peer band panels on this dashboard.')).toBeNull();
+    });
 });

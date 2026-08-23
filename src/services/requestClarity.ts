@@ -41,6 +41,20 @@ import {
 import { recordClarificationShown } from './graftPromptLearning';
 import { messageHasProgrammaticHandler } from './programmaticChatIntents';
 
+/** Questions about Grafana (what/why/list/explain) that are not a create/fix/copy job. */
+function isInformationalGrafanaQuestion(text: string): boolean {
+    const asks =
+        /^(?:\s*(?:please\s+|can you\s+|could you\s+)?)?(?:what|why|who|where|which|how|explain|describe|list|show|tell)\b/i.test(
+            text
+        ) ||
+        (/\?/.test(text) && /\b(what|why|how|explain|mean|meaning)\b/i.test(text));
+    const mutating =
+        /\b(add|create|clone|copy|rename|fix|remove|rebuild|duplicate|make|build|set\s+up|do the)\b/i.test(
+            text
+        );
+    return asks && !mutating;
+}
+
 /** Enough to identify a dashboard for panel fix (uid, machine id, or title). */
 export function hasDashboardIdentityForPanelFix(message: string): boolean {
     if (isScopedPanelFixRequest(message) || parseScopedPanelFixRequest(message)) {
@@ -78,6 +92,10 @@ export function formatClarificationIfNeeded(userMessage: string): string | null 
     }
 
     if (isCloneHowToQuestion(text)) {
+        return null;
+    }
+
+    if (isInformationalGrafanaQuestion(text)) {
         return null;
     }
 
