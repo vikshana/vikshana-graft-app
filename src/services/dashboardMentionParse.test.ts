@@ -1,4 +1,9 @@
-import { extractDashboardUidFromMessage, extractPanelIdFromMessage } from './dashboardMentionParse';
+import {
+    extractAllDashboardUids,
+    extractDashboardUidFromMessage,
+    extractPanelIdFromMessage,
+    looksLikeGrafanaDashboardUid,
+} from './dashboardMentionParse';
 import { userWantsDashboardPanelFix } from './dashboardCloneProgress';
 import { formatClarificationIfNeeded } from './requestClarity';
 
@@ -13,6 +18,21 @@ describe('dashboardMentionParse', () => {
 
     it('parses panel 35 from "in panel 35"', () => {
         expect(extractPanelIdFromMessage(userMsg)).toBe(35);
+    });
+
+    it('does not treat vendor names like Keysight as Grafana uids', () => {
+        expect(looksLikeGrafanaDashboardUid('Keysight')).toBe(false);
+        expect(looksLikeGrafanaDashboardUid('Skywater')).toBe(false);
+        expect(looksLikeGrafanaDashboardUid('6sFerv44k')).toBe(true);
+        expect(looksLikeGrafanaDashboardUid('idHkqdqnk')).toBe(true);
+        expect(
+            extractAllDashboardUids(
+                'Create useful graphs for the Keysight machine on the dashboard with UID = cfo0wckufbdhce.'
+            )
+        ).toEqual(['cfo0wckufbdhce']);
+        expect(
+            extractAllDashboardUids('Rename the dashboard for the Keysight machine to be NewMachine.')
+        ).not.toContain('Keysight');
     });
 });
 

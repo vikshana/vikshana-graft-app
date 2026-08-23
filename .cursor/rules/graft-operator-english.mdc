@@ -20,6 +20,9 @@ Operators do not speak fixture strings. Graft **interprets English**, then **doe
 - Unclosed quotes, “to be X”, “instead of the current name”
 - “Own history” / ±2σ / Influx ≠ RandomForest History Comparison ≠ “vs Peers”
 - Do not add Grafana **alerts** unless the prompt asks for an alert
+- Vendor/site words (**Keysight**, **Skywater**) are titles, never Grafana uids
+- **Module N Temperature** is plant `Temperature_C`, not Module N Current
+- Clone by title: exact title or `####-###### / Title` — never the first search hit that merely contains the string
 
 ## Tests
 

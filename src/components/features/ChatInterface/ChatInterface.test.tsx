@@ -979,14 +979,46 @@ describe('ChatInterface', () => {
             expect(calledClient).toBeTruthy();
             expect(calledContent).toContain('2103-176030');
 
-            // The reply is the programmatic clone summary — NOT a generic LLM turn,
-            // and NOT the "cannot create users" admin reply.
             await waitFor(() => {
                 expect(screen.getByText('CLONE_DONE_NO_CONTINUE_MARKER')).toBeInTheDocument();
             });
             expect(runGraftChatTurn).not.toHaveBeenCalled();
             expect(screen.queryByText(/create new users/i)).not.toBeInTheDocument();
             expect(screen.queryByText(/cannot create/i)).not.toBeInTheDocument();
+        });
+
+        it('routes copy-of-Skywater-FL (dashboard title, not machine id) to the clone handler', async () => {
+            const SKYWATER_CLONE =
+                'I have a machine from Keysight for 2505-200033. Create a dashboard for it that is a copy of Skywater-FL, but with data for 2505-200033.';
+            (runProgrammaticDashboardClone as jest.Mock).mockResolvedValue({
+                ok: true,
+                targetUid: 'cloned-uid',
+                targetTitle: '2505-200033 / Keysight',
+                panelCount: 34,
+                totalChunks: 4,
+                toolExecutions: [],
+            });
+
+            render(
+                <MemoryRouter>
+                    <ChatInterface />
+                </MemoryRouter>
+            );
+            await waitFor(() => {
+                expect(screen.getByTestId('send-message-button')).not.toBeDisabled();
+            });
+
+            fireEvent.change(screen.getByTestId('chat-input'), { target: { value: SKYWATER_CLONE } });
+            await act(async () => {
+                fireEvent.click(screen.getByLabelText('Send message'));
+            });
+
+            await waitFor(() => {
+                expect(runProgrammaticDashboardClone as jest.Mock).toHaveBeenCalledTimes(1);
+            });
+            const [, calledContent] = (runProgrammaticDashboardClone as jest.Mock).mock.calls[0];
+            expect(calledContent).toMatch(/Skywater-FL/i);
+            expect(runGraftChatTurn).not.toHaveBeenCalled();
         });
 
         it('does not misclassify a clone prompt as an unsupported admin request', async () => {

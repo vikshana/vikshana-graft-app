@@ -19,7 +19,8 @@ export type RegressionHandlerId =
     | 'history-comparison'
     | 'peer-rf-create'
     | 'history-comparison-clarify'
-    | 'intent-route-clarify';
+    | 'intent-route-clarify'
+    | 'dashboard-clone';
 
 export interface RegressionCase {
     id: string;
@@ -35,6 +36,8 @@ export interface RegressionCase {
     contextDashboardUid?: string;
     expectReplyContains?: string[];
     expectReplyNotContains?: string[];
+    /** History Comparison PromQL/Influx field when expectHandler is history-comparison */
+    expectSignalField?: string;
 }
 
 export const KEYSIGHT_DASHBOARD_UID = 'cfo0wckufbdhce';
@@ -293,5 +296,26 @@ export const REGRESSION_CASES: RegressionCase[] = [
             'Peer Band panel — saved',
             '### Done',
         ],
+    },
+    {
+        id: 'clone-title-skywater-fl',
+        failure:
+            'copy of Skywater-FL (dashboard title) was rejected or cloned the first substring search hit',
+        prompt:
+            'I have a machine from Keysight for 2505-200033. Create a dashboard for it that is a copy of Skywater-FL, but with data for 2505-200033.',
+        expectHandler: 'dashboard-clone',
+        expectProgrammatic: true,
+        expectLlmIntent: 'programmatic',
+    },
+    {
+        id: 'rf-temperature-not-module-current',
+        failure:
+            'RandomForest vs Peers Temperature (no module, or Module 2 Temperature) collapsed to Module N Current',
+        prompt:
+            'Create a RandomForest vs Peers machine learning panel for the Temperature parameter on the dashboard with UID = idHkqdqnk.',
+        expectHandler: 'history-comparison',
+        expectProgrammatic: true,
+        expectLlmIntent: 'programmatic',
+        expectSignalField: 'Temperature_C',
     },
 ];

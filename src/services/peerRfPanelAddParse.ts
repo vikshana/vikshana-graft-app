@@ -35,11 +35,8 @@ export function messageMentionsAddPeerRfPanel(message: string): boolean {
     if (messageMentionsGrafanaAlertCreate(text) || messageMentionsGrafanaAlertUpdate(text)) {
         return false;
     }
-    // Plant-level signals (Temperature, Pressure, …) are not peer-RF modules.
-    if (
-        /\b(temperature|pressure|flow|sensing\s+voltage)\b/i.test(text) &&
-        !/\bmodule\s*\d+\b/i.test(text)
-    ) {
+    // Plant-level signals are not peer-RF (peer-RF is module current only).
+    if (/\b(temperature|pressure|flow|sensing\s+voltage)\b/i.test(text)) {
         return false;
     }
     return (

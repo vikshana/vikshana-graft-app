@@ -45,6 +45,12 @@ describe('single-panel copy vs full clone', () => {
         expect(resolveDashboardCloneIntent([totalCuMassPanelCopy])).toBeUndefined();
         expect(resolveDashboardCloneIntent([totalCuMassPanelCopy, 'Continue'])).toBeUndefined();
     });
+
+    it('does not treat "based on last review" as a dashboard clone', () => {
+        expect(
+            userWantsDashboardClone('Fix panels on the dashboard based on the last review.')
+        ).toBe(false);
+    });
 });
 
 describe('resolveDashboardCloneIntent', () => {

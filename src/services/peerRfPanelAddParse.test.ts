@@ -31,6 +31,19 @@ describe('peerRfPanelAddParse', () => {
         expect(peerRfPanelTitle(5)).toBe('Module 5 Current — RandomForest vs Peers (Influx)');
     });
 
+    it('does not treat Temperature (even with Module N) as peer-RF', () => {
+        expect(
+            messageMentionsAddPeerRfPanel(
+                'Create a RandomForest vs Peers machine learning panel for Module 2 Temperature on the dashboard with UID = idHkqdqnk.'
+            )
+        ).toBe(false);
+        expect(
+            messageMentionsAddPeerRfPanel(
+                'Create a RandomForest vs Peers machine learning panel for the Temperature parameter on the dashboard with UID = idHkqdqnk.'
+            )
+        ).toBe(false);
+    });
+
     it('does not treat RandomForest vs Peers alert create as panel create', () => {
         const prompt =
             'Create a Grafana-managed alert for the panel titled "Module 2 Current — RandomForest vs Peers" on the dashboard with UID idHkqdqnk. Compare Module 2 Current against its peer modules. Configure the alert to notify the Alex Test Email contact point.';

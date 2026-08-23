@@ -10,6 +10,7 @@ import {
     isExplicitSinglePanelCopyRequest,
     messageMentionsSinglePanelCopyIntent,
 } from './singlePanelCopyParse';
+import { extractSourceDashboardTitle } from './dashboardCloneParse';
 
 export { isExplicitSinglePanelCopyRequest };
 
@@ -42,10 +43,22 @@ export function describesDashboardCloneLayoutIntent(userContent: string): boolea
     if (isExplicitSinglePanelCopyRequest(userContent)) {
         return false;
     }
-    const wantsCopy =
-        /\b(visual copy|clone|copy of|new dashboard)\b/i.test(userContent) ||
-        (/\bcreate a dashboard\b/i.test(userContent) && /\bcopy of\b/i.test(userContent));
-    return wantsCopy && /\b(dashboard|panel)/i.test(userContent);
+    const explicitCopy =
+        /\b(visual copy|clone|copy of|duplicate|replica|dashboard like|new dashboard)\b/i.test(
+            userContent
+        ) ||
+        (/\b(create|make|build)\b/i.test(userContent) &&
+            /\b(copy|clone|duplicate)\b/i.test(userContent));
+    const namedTemplate = Boolean(extractSourceDashboardTitle(userContent));
+    if (explicitCopy) {
+        // Do not treat "duplicate the Pressure panel" as a dashboard clone.
+        return /\bdashboard\b/i.test(userContent) || namedTemplate;
+    }
+    // "based on" / "same as" only when a real template title was parsed (not "based on last review").
+    if (/\b(based on|same as)\b/i.test(userContent)) {
+        return namedTemplate;
+    }
+    return false;
 }
 
 /** User asked to clone/copy a dashboard layout to another machine or title. */

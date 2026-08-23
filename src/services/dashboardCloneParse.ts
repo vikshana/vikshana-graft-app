@@ -28,21 +28,42 @@ export function findMachineIdsInText(message: string): string[] {
     return [...new Set(ids)];
 }
 
+const TEMPLATE_TITLE_STOP =
+    '(?=\\s*,|\\s+but\\b|\\s+with\\s+data\\b|\\s+with\\s+data\\s+for\\b|\\s+for\\s+(?:machine\\s+)?(?:[0-9]{4}-|[A-Za-z][A-Za-z0-9]*-SIM-)|$)';
+
 /**
- * Template dashboard title when the operator says "copy of Skywater-FL" (not a machine id).
+ * Template dashboard title when the operator names it in English
+ * ("copy of Skywater-FL", "duplicate Skywater FL", "based on Skywater-FL").
  */
 export function extractSourceDashboardTitle(cloneIntentMessage: string): string | undefined {
-    const copyOf = cloneIntentMessage.match(
-        /\b(?:visual\s+)?copy of\s+([^,]+?)(?=\s*,|\s+but\b|\s+with\s+data\b|\s+with\s+data\s+for\b|$)/i
-    );
-    if (!copyOf?.[1]) {
+    const prefixes = [
+        `\\b(?:visual\\s+)?(?:copy|clone|duplicate|replica)\\s+of\\s+(?:the\\s+)?(?:dashboard\\s+)?`,
+        `\\b(?:based\\s+on|same\\s+as|dashboard\\s+like)\\s+(?:the\\s+)?`,
+        `\\b(?:duplicate|clone)\\s+(?:the\\s+)?(?:dashboard\\s+)?`,
+    ];
+    let raw: string | undefined;
+    for (const prefix of prefixes) {
+        const m = cloneIntentMessage.match(new RegExp(`${prefix}([^,]+?)${TEMPLATE_TITLE_STOP}`, 'i'));
+        if (m?.[1]) {
+            raw = m[1];
+            break;
+        }
+    }
+    if (!raw) {
         return undefined;
     }
-    const title = copyOf[1].replace(/^["']|["']$/g, '').trim();
+    const title = raw.replace(/^["']|["']$/g, '').trim();
     if (!title || isMachineId(title) || title.length < 2 || title.length > 80) {
         return undefined;
     }
     if (/^(?:it|this|that|the dashboard)$/i.test(title)) {
+        return undefined;
+    }
+    if (/^(?:the\s+)?(?:last|previous|existing|current|same)\b/i.test(title)) {
+        return undefined;
+    }
+    // "duplicate the Pressure panel" is a panel copy, not a dashboard template.
+    if (/\bpanel\b/i.test(title) && !/\bdashboard\b/i.test(title)) {
         return undefined;
     }
     return title;
@@ -55,9 +76,17 @@ export function extractSourceMachineId(cloneIntentMessage: string): string | und
     if (visual?.[1] && isMachineId(visual[1])) {
         return visual[1];
     }
-    const copyOf = cloneIntentMessage.match(new RegExp(`\\bcopy of\\s+(${idGroup})`, 'i'));
+    const copyOf = cloneIntentMessage.match(
+        new RegExp(`\\b(?:copy|clone|duplicate|replica)\\s+of\\s+(${idGroup})`, 'i')
+    );
     if (copyOf?.[1] && isMachineId(copyOf[1])) {
         return copyOf[1];
+    }
+    const basedOn = cloneIntentMessage.match(
+        new RegExp(`\\b(?:based\\s+on|same\\s+as)\\s+(${idGroup})`, 'i')
+    );
+    if (basedOn?.[1] && isMachineId(basedOn[1])) {
+        return basedOn[1];
     }
     // "copy of Skywater-FL" — the only ####-###### in the prompt is the *target*.
     if (extractSourceDashboardTitle(cloneIntentMessage)) {
@@ -251,7 +280,7 @@ export function parseCloneIntentMessage(message: string): ParsedCloneIntent {
         return {
             valid: false,
             error:
-                'Could not find template machine id or dashboard name (e.g. "copy of 2103-176030" or "copy of Skywater-FL").',
+                'Which dashboard should Graft copy? Name the template title (for example Skywater-FL) or the template machine id (for example 2103-176030).',
             sourceMachineId,
             sourceDashboardTitle,
             targetMachineId,
@@ -261,7 +290,7 @@ export function parseCloneIntentMessage(message: string): ParsedCloneIntent {
         return {
             valid: false,
             error:
-                'Could not find target machine id (e.g. "data for 2505-200033" or "data for ElectraMetBRC-SIM-177121"). Avoid phrasing like "machine from Vendor" without the id.',
+                'Which machine should the new dashboard use? Include the target machine id (for example 2505-200033). A vendor name like Keysight is not the machine id.',
             sourceMachineId,
             sourceDashboardTitle,
             targetMachineId,
@@ -270,7 +299,7 @@ export function parseCloneIntentMessage(message: string): ParsedCloneIntent {
     if (sourceMachineId && sourceMachineId === targetMachineId) {
         return {
             valid: false,
-            error: 'Template and target machine ids must be different.',
+            error: 'The template and the new machine have to be different. Which machine is the copy for?',
             sourceMachineId,
             sourceDashboardTitle,
             targetMachineId,

@@ -4,9 +4,14 @@ import {
     findMachineIdsInText,
     getEffectiveCloneFieldsFromIntent,
     isMachineId,
+    MACHINE_ID_PATTERN,
     parseCloneIntentMessage,
 } from './dashboardCloneParse';
-import { findDashboardByTitle, parseSearchHitsFromMcpText } from './dashboardSearchParse';
+import {
+    findBestDashboardHitForLabel,
+    findDashboardByTitle,
+    parseSearchHitsFromMcpText,
+} from './dashboardSearchParse';
 import {
     enrichDashboardToolResult,
     formatPanelIndexFromDashboardJson,
@@ -43,6 +48,44 @@ interface DashboardSearchHit {
 
 function parseSearchHits(text: string): DashboardSearchHit[] {
     return parseSearchHitsFromMcpText(text);
+}
+
+/**
+ * Template machine for title-based clones. Prefer the id in the dashboard title.
+ * Never take the first ####-###### anywhere in JSON (annotations / other machines).
+ */
+export function inferSourceMachineIdFromDashboard(dashboard: Record<string, unknown>): string | undefined {
+    const fromTitle = findMachineIdsInText(String(dashboard.title ?? ''))[0];
+    if (fromTitle) {
+        return fromTitle;
+    }
+    const tagged: string[] = [];
+    const re = new RegExp(`machine\\s*=\\s*"?(${MACHINE_ID_PATTERN.source})"?`, 'gi');
+    const visit = (value: unknown): void => {
+        if (typeof value === 'string') {
+            re.lastIndex = 0;
+            for (const m of value.matchAll(re)) {
+                if (m[1] && isMachineId(m[1])) {
+                    tagged.push(m[1]);
+                }
+            }
+            return;
+        }
+        if (Array.isArray(value)) {
+            for (const item of value) {
+                visit(item);
+            }
+            return;
+        }
+        if (value && typeof value === 'object') {
+            for (const item of Object.values(value as Record<string, unknown>)) {
+                visit(item);
+            }
+        }
+    };
+    visit(dashboard);
+    const unique = [...new Set(tagged)];
+    return unique.length === 1 ? unique[0] : undefined;
 }
 
 export function extractDashboardFromGetByUid(text: string): {
@@ -177,13 +220,15 @@ async function resolveSourceUid(
     }
 
     const hits = parseSearchHits(search.text);
-    const match =
-        hits.find((h) => h.title.includes(sourceMachine)) ??
-        hits.find((h) => h.title.toLowerCase().includes(sourceMachine.toLowerCase())) ??
-        hits[0];
+    const match = findBestDashboardHitForLabel(hits, sourceMachine);
 
     if (!match?.uid) {
-        return { error: `No dashboard found for machine ${sourceMachine}` };
+        return {
+            error:
+                hits.length > 1
+                    ? `Several dashboards match "${sourceMachine}". Name the template uid or the exact title.`
+                    : `No dashboard found for "${sourceMachine}"`,
+        };
     }
 
     updateCloneSessionMeta({ sourceUid: match.uid, sourceTitle: match.title });
@@ -261,9 +306,7 @@ export async function runProgrammaticDashboardClone(
     }
 
     if (!sourceMachine) {
-        const fromTitle = findMachineIdsInText(String(extracted.dashboard.title ?? ''))[0];
-        const fromJson = findMachineIdsInText(JSON.stringify(extracted.dashboard))[0];
-        sourceMachine = fromTitle ?? fromJson;
+        sourceMachine = inferSourceMachineIdFromDashboard(extracted.dashboard);
     }
     if (!sourceMachine) {
         return {
@@ -282,9 +325,7 @@ export async function runProgrammaticDashboardClone(
 
     if (targetSearch.ok) {
         const hits = parseSearchHits(targetSearch.text);
-        const byMachine =
-            hits.find((h) => h.title.includes(targetMachine)) ??
-            hits.find((h) => h.title.toLowerCase().includes(targetMachine.toLowerCase()));
+        const byMachine = findBestDashboardHitForLabel(hits, targetMachine);
         if (byMachine) {
             targetTitle = byMachine.title;
         }

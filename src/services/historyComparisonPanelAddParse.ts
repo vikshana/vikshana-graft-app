@@ -79,7 +79,7 @@ export function resolveHistoryComparisonSignal(
             }
         }
         const modCurrent = lc.match(/\bmodule\s*(\d+)(?:\s+current)?\b/);
-        if (modCurrent?.[1] && !/\bvoltage|pressure|flow|sensing\b/i.test(lc)) {
+        if (modCurrent?.[1] && !/\bvoltage|pressure|flow|sensing|temperatures?\b/i.test(lc)) {
             const n = Number.parseInt(modCurrent[1], 10);
             if (Number.isFinite(n) && n >= 1 && n <= 8) {
                 return {
@@ -176,10 +176,12 @@ export function messageMentionsPredictiveAnalyticsPanel(message: string): boolea
     if (/\bown\s+history\b/i.test(text) || (/\bvs\.?\s*own\b/i.test(text) && /\b2\s*σ|2\s*sigma/i.test(text))) {
         return false;
     }
+    const plantMetric = /\b(temperature|pressure|flow|sensing\s+voltage)\b/i.test(text);
     // Module-scoped "RF vs Peers" is peer-RF. Plant metrics (Temperature) are not.
     if (
         (/\brandomforest\s+vs\s+peers\b/i.test(text) || /\bpeer\s*rf\b/i.test(text)) &&
-        /\bmodule\s*\d+\b/i.test(text)
+        /\bmodule\s*\d+\b/i.test(text) &&
+        !plantMetric
     ) {
         return false;
     }
@@ -239,7 +241,7 @@ export function parseAddHistoryComparisonPanelRequest(message: string): AddHisto
         // collapse "Module 2 Voltage" into Module 2 Current via moduleNumber alone.
         if (
             moduleNumber == null ||
-            /\b(voltage|pressure|flow|sensing|current)\b/i.test(phrase)
+            /\b(voltage|pressure|flow|sensing|current|temperatures?)\b/i.test(phrase)
         ) {
             metricLabel = phrase;
             // Pure "Module N Current" still resolves via moduleNumber in signal helper.

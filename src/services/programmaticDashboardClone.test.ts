@@ -2,6 +2,7 @@ import { splitPanelsIntoChunks } from './dashboardCloneChunks';
 import {
     countPanelsInDashboard,
     formatDashboardCloneReply,
+    inferSourceMachineIdFromDashboard,
     prepareClonedDashboard,
     replaceMachineLabelsInValue,
     runProgrammaticDashboardClone,
@@ -162,5 +163,112 @@ describe('runProgrammaticDashboardClone', () => {
         const firstDash = JSON.stringify(updateCalls[0].dashboard);
         expect(firstDash).toContain('2505-200033');
         expect(firstDash).not.toContain('2103-176030');
+    });
+
+    it('copies Skywater-FL by title, not a substring hit, and remaps the title machine id', async () => {
+        const sourcePanels = [
+            {
+                id: 1,
+                type: 'timeseries',
+                title: 'Overview',
+                targets: [{ refId: 'A', expr: 'machine_metrics{machine="2103-176030"}' }],
+                gridPos: { x: 0, y: 0, w: 12, h: 8 },
+            },
+        ];
+        const updateCalls: Array<Record<string, unknown>> = [];
+        const mcpClient = {
+            callTool: async ({ name, arguments: args }: { name: string; arguments: Record<string, unknown> }) => {
+                if (name === 'search_dashboards') {
+                    const query = String(args.query ?? '');
+                    if (/skywater-fl/i.test(query)) {
+                        return {
+                            content: [
+                                {
+                                    type: 'text',
+                                    text: JSON.stringify({
+                                        dashboards: [
+                                            { uid: 'wrong-uid', title: 'Notes about Skywater-FL plant' },
+                                            { uid: 'src-uid', title: '2103-176030 / Skywater-FL' },
+                                        ],
+                                    }),
+                                },
+                            ],
+                        };
+                    }
+                    return { content: [{ type: 'text', text: JSON.stringify({ dashboards: [] }) }] };
+                }
+                if (name === 'get_dashboard_by_uid') {
+                    expect(args.uid).toBe('src-uid');
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: JSON.stringify({
+                                    dashboard: {
+                                        uid: 'src-uid',
+                                        title: '2103-176030 / Skywater-FL',
+                                        panels: sourcePanels,
+                                        annotations: { list: [{ text: 'see also 9999-000001' }] },
+                                    },
+                                    meta: { folderUid: 'folder1' },
+                                }),
+                            },
+                        ],
+                    };
+                }
+                if (name === 'update_dashboard') {
+                    updateCalls.push(args);
+                    return { content: [{ type: 'text', text: JSON.stringify({ uid: 'new-uid', version: 1 }) }] };
+                }
+                if (name === 'get_dashboard_summary') {
+                    return { content: [{ type: 'text', text: JSON.stringify({ uid: 'new-uid', title: '2505-200033 / Keysight' }) }] };
+                }
+                throw new Error(`unexpected tool ${name}`);
+            },
+        };
+
+        const result = await runProgrammaticDashboardClone(
+            mcpClient,
+            'I have a machine from Keysight for 2505-200033. Create a dashboard for it that is a copy of Skywater-FL, but with data for 2505-200033.'
+        );
+
+        expect(result.ok).toBe(true);
+        const saved = JSON.stringify(updateCalls[0].dashboard);
+        expect(saved).toContain('2505-200033');
+        expect(saved).not.toContain('2103-176030');
+        // Annotation ids must not be treated as the template machine (they stay put).
+        expect(saved).toContain('9999-000001');
+    });
+});
+
+describe('inferSourceMachineIdFromDashboard', () => {
+    it('uses the title machine id, not the first id buried in JSON', () => {
+        expect(
+            inferSourceMachineIdFromDashboard({
+                title: '2103-176030 / Skywater-FL',
+                panels: [{ targets: [{ expr: 'machine="9999-000001"' }] }],
+            })
+        ).toBe('2103-176030');
+    });
+
+    it('uses a unique PromQL machine= label when the title has no id', () => {
+        expect(
+            inferSourceMachineIdFromDashboard({
+                title: 'Skywater-FL',
+                panels: [{ targets: [{ expr: 'machine_metrics{machine="2103-176030"}' }] }],
+            })
+        ).toBe('2103-176030');
+    });
+
+    it('does not guess when JSON contains several machine ids and the title has none', () => {
+        expect(
+            inferSourceMachineIdFromDashboard({
+                title: 'Plant overview',
+                panels: [
+                    { targets: [{ expr: 'machine="2103-176030"' }] },
+                    { targets: [{ expr: 'machine="2505-200033"' }] },
+                ],
+            })
+        ).toBeUndefined();
     });
 });

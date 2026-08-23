@@ -62,6 +62,24 @@ describe('historyComparisonPanelAddParse', () => {
         expect(req?.moduleNumber).toBe(2);
     });
 
+    it('routes Module 2 Temperature RandomForest vs Peers to Temperature_C, not peer-RF Current', () => {
+        const prompt =
+            'Create a RandomForest vs Peers machine learning panel for Module 2 Temperature on the dashboard with UID = afq7tc6hl1m9sb.';
+        expect(messageMentionsPredictiveAnalyticsPanel(prompt)).toBe(true);
+        const req = parseAddHistoryComparisonPanelRequest(prompt);
+        expect(req?.signal?.field).toBe('Temperature_C');
+        expect(req?.signal?.field).not.toBe('Module2_Current_A');
+    });
+
+    it('parses Module 2 Temperature as Temperature_C, not Module 2 Current', () => {
+        const prompt =
+            'Create a Random Forest machine learning panel for Module 2 Temperature on the dashboard with UID = afq7tc6hl1m9sb.';
+        const req = parseAddHistoryComparisonPanelRequest(prompt);
+        expect(req?.signal?.field).toBe('Temperature_C');
+        expect(req?.signal?.panelTitle).toMatch(/Temperature/);
+        expect(req?.signal?.field).not.toBe('Module2_Current_A');
+    });
+
     it('clarifies bare pressure RF creates instead of defaulting to Module 5', () => {
         const prompt =
             'Create a Random Forest machine learning panel for pressure on the dashboard with UID = afq7tc6hl1m9sb.';

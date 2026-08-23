@@ -11,6 +11,47 @@ function collectUidMatches(text: string, pattern: RegExp): string[] {
     return ids;
 }
 
+const NOT_A_DASHBOARD_UID = new Set([
+    'keysight',
+    'skywater',
+    'electramet',
+    'exsolve',
+    'grafana',
+    'overview',
+    'sandbox',
+    'production',
+    'machine',
+    'dashboard',
+    'current',
+    'pressure',
+    'temperature',
+    'module',
+    'glentest',
+]);
+
+/** Grafana short uids are mixed-case and/or contain digits — not vendor words like Keysight. */
+export function looksLikeGrafanaDashboardUid(token: string): boolean {
+    if (!token || token.length < 8 || token.length > 40) {
+        return false;
+    }
+    if (!/^[A-Za-z0-9]+$/.test(token)) {
+        return false;
+    }
+    if (/^[0-9]{4}-[0-9]{6,}$/.test(token)) {
+        return false;
+    }
+    if (NOT_A_DASHBOARD_UID.has(token.toLowerCase())) {
+        return false;
+    }
+    if (/^[A-Z][a-z]{5,}$/.test(token)) {
+        return false;
+    }
+    const hasLetter = /[A-Za-z]/.test(token);
+    const hasDigit = /\d/.test(token);
+    const mixedCase = /[a-z]/.test(token) && /[A-Z]/.test(token);
+    return hasLetter && (hasDigit || mixedCase);
+}
+
 /** User referred to a Grafana dashboard (incl. "dash board" typo and uid-in-quotes). */
 export function mentionsDashboard(message: string): boolean {
     return (
@@ -57,12 +98,12 @@ export function extractAllDashboardUids(message: string): string[] {
     );
     ids.push(...collectUidMatches(text, /\bdashboard\s*["']([a-zA-Z0-9]{6,})["']/gi));
     ids.push(...collectUidMatches(text, new RegExp(`\\b${DASHBOARD_UID_AFTER_LABEL.source}`, 'gi')));
-    // "for the 6sFerv44k machine" — Grafana uid used as a machine handle
+    // "for the 6sFerv44k machine" — Grafana uid used as a machine handle, not "Keysight"
     ids.push(
         ...collectUidMatches(
             text,
             /\bfor\s+(?:the\s+)?([A-Za-z0-9]*[A-Za-z][A-Za-z0-9]{5,13})\s+machine\b/gi
-        )
+        ).filter(looksLikeGrafanaDashboardUid)
     );
     return [...new Set(ids.filter((id) => !/^[0-9]{4}-[0-9]{6,}$/.test(id)))];
 }

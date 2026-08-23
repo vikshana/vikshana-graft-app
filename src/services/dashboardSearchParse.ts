@@ -81,3 +81,46 @@ export function findDashboardByTitle(
     const want = requestedTitle.trim().toLowerCase();
     return hits.find((h) => h.title.toLowerCase() === want);
 }
+
+/**
+ * Resolve a clone template label (machine id or dashboard name) without taking the
+ * first substring hit (that copies the wrong dashboard when titles overlap).
+ * Ambiguous matches return undefined so the caller can ask.
+ * "Skywater FL" and "Skywater-FL" are treated as the same label.
+ */
+function foldDashboardLabel(value: string): string {
+    return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+export function findBestDashboardHitForLabel(
+    hits: DashboardSearchHit[],
+    label: string
+): DashboardSearchHit | undefined {
+    const want = label.trim().toLowerCase();
+    const wantFold = foldDashboardLabel(label);
+    if (!want || !wantFold || hits.length === 0) {
+        return undefined;
+    }
+    const exact = hits.filter((h) => foldDashboardLabel(h.title) === wantFold);
+    if (exact.length === 1) {
+        return exact[0];
+    }
+    const structured = hits.filter((h) => {
+        const t = h.title.trim();
+        const folded = foldDashboardLabel(t);
+        if (folded === wantFold) {
+            return true;
+        }
+        const parts = t.split('/');
+        const last = parts[parts.length - 1] ?? '';
+        const first = parts[0] ?? '';
+        return foldDashboardLabel(last) === wantFold || foldDashboardLabel(first) === wantFold;
+    });
+    if (structured.length === 1) {
+        return structured[0];
+    }
+    if (structured.length > 1) {
+        return undefined;
+    }
+    return undefined;
+}

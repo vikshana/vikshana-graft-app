@@ -61,6 +61,8 @@ import {
     parsePanelRenameRequest,
     userWantsPanelRename,
 } from '../panelRenameParse';
+import { parseCloneIntentMessage } from '../dashboardCloneParse';
+import { userWantsDashboardClone } from '../dashboardCloneProgress';
 import { messageHasProgrammaticHandler } from '../programmaticChatIntents';
 import { formatDashboardReviewReply } from '../programmaticDashboardReview';
 import { formatMultiPanelCreateReply, formatPanelCreateReply } from '../programmaticPanelCreate';
@@ -221,10 +223,17 @@ function assertHandlerRouting(c: RegressionCase): void {
         case 'history-comparison':
             expect(messageMentionsPredictiveAnalyticsPanel(prompt)).toBe(true);
             expect(parseAddHistoryComparisonPanelRequest(prompt)?.signal?.field).toBe(
-                'Cartridge_Sensing_Voltage'
+                c.expectSignalField ?? 'Cartridge_Sensing_Voltage'
             );
             expect(messageMentionsPeerBandPanelCreate(prompt)).toBe(false);
             expect(messageMentionsAddPeerRfPanel(prompt)).toBe(false);
+            break;
+        case 'dashboard-clone':
+            expect(userWantsDashboardClone(prompt)).toBe(true);
+            expect(parseCloneIntentMessage(prompt).valid).toBe(true);
+            expect(parseCloneIntentMessage(prompt).sourceDashboardTitle).toMatch(/Skywater-FL/i);
+            expect(messageDescribesUnsupportedAdminRequest(prompt)).toBeNull();
+            expect(messageMentionsPredictiveAnalyticsPanel(prompt)).toBe(false);
             break;
         case 'peer-rf-create': {
             expect(messageMentionsAddPeerRfPanel(prompt)).toBe(true);
@@ -270,7 +279,7 @@ function assertHandlerRouting(c: RegressionCase): void {
 describe('graft historical failure regression', () => {
     describe('fixture catalog', () => {
         it('documents known failure patterns', () => {
-            expect(REGRESSION_CASES).toHaveLength(23);
+            expect(REGRESSION_CASES).toHaveLength(25);
             const ids = REGRESSION_CASES.map((c) => c.id);
             expect(new Set(ids).size).toBe(ids.length);
         });
@@ -554,6 +563,7 @@ describe('graft historical failure regression', () => {
             'peer-rf-create',
             'history-comparison-clarify',
             'intent-route-clarify',
+            'dashboard-clone',
         ];
 
         it.each(handlers)('%s prompt does not collide with unrelated handlers', (handlerId) => {
@@ -610,6 +620,9 @@ describe('graft historical failure regression', () => {
             }
             if (handlerId !== 'peer-rf-create') {
                 expect(messageMentionsAddPeerRfPanel(c.prompt)).toBe(false);
+            }
+            if (handlerId !== 'dashboard-clone') {
+                expect(userWantsDashboardClone(c.prompt)).toBe(false);
             }
             if (handlerId === 'intent-route-clarify') {
                 expect(messageNeedsIntentRouteClarification(c.prompt)).toBe(true);
