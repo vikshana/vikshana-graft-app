@@ -1,5 +1,6 @@
 import {
     extractAllDashboardUids,
+    extractClaimedVendorDashboardUid,
     extractDashboardUidFromMessage,
     extractPanelIdFromMessage,
     looksLikeGrafanaDashboardUid,
@@ -33,6 +34,13 @@ describe('dashboardMentionParse', () => {
         expect(
             extractAllDashboardUids('Rename the dashboard for the Keysight machine to be NewMachine.')
         ).not.toContain('Keysight');
+        expect(extractAllDashboardUids('Rename dashboard uid=Keysight to NewSkywater-FL')).not.toContain(
+            'Keysight'
+        );
+        expect(extractClaimedVendorDashboardUid('Rename dashboard uid=Keysight to NewSkywater-FL')).toBe(
+            'Keysight'
+        );
+        expect(extractClaimedVendorDashboardUid('on uid=idHkqdqnk')).toBeUndefined();
     });
 
     it('extracts uid from rename UID dashboard and rename the UID dashboard', () => {

@@ -20,7 +20,8 @@ export type RegressionHandlerId =
     | 'peer-rf-create'
     | 'history-comparison-clarify'
     | 'intent-route-clarify'
-    | 'dashboard-clone';
+    | 'dashboard-clone'
+    | 'dashboard-rename';
 
 export interface RegressionCase {
     id: string;
@@ -304,6 +305,16 @@ export const REGRESSION_CASES: RegressionCase[] = [
         prompt:
             'I have a machine from Keysight for 2505-200033. Create a dashboard for it that is a copy of Skywater-FL, but with data for 2505-200033.',
         expectHandler: 'dashboard-clone',
+        expectProgrammatic: true,
+        expectLlmIntent: 'programmatic',
+    },
+    {
+        id: 'dashboard-rename-should-show-name',
+        failure:
+            'should show Keysight as the dashboard name was treated as unmatched or LLM Done',
+        prompt:
+            'The 2505-200033 machine should show Keysight as the dashboard name, not the old label.',
+        expectHandler: 'dashboard-rename',
         expectProgrammatic: true,
         expectLlmIntent: 'programmatic',
     },

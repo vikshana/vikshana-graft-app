@@ -181,7 +181,11 @@ export function messageMentionsPeerBandPanelCreate(message: string): boolean {
         /\bcompare\s+module\s*\d+\b/i.test(text) ||
         /\bagainst\s+(?:the\s+)?(?:average|avg|mean)\b/i.test(text);
 
-    return hasPeerBandTitle || (hasPeerMeanLines && hasPeerCompare) || (hasPeerMeanLines && hasPeerBandTitle);
+    return (
+        hasPeerBandTitle ||
+        (hasPeerCompare && /\b(average|mean|peer)\b/i.test(text)) ||
+        (hasPeerMeanLines && hasPeerCompare)
+    );
 }
 
 /**

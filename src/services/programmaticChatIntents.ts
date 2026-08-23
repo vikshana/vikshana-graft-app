@@ -105,9 +105,9 @@ export function messageHasProgrammaticHandler(message: string, contextDashboardU
         userWantsMultiPanelCreateProgrammatic(text, contextDashboardUid) ||
         messageDescribesMultiPanelCreate(text, contextDashboardUid) ||
         parseMultiPanelCreateRequest(text, { contextDashboardUid }) != null ||
-        userWantsPanelCreateProgrammatic(text) ||
+        userWantsPanelCreateProgrammatic(text, contextDashboardUid) ||
         messageDescribesPanelCreate(text) ||
-        parsePanelCreateRequest(text) != null ||
+        parsePanelCreateRequest(text, { contextDashboardUid }) != null ||
         userWantsPanelRename(text) ||
         messageDescribesPanelRename(text) ||
         parsePanelRenameRequest(text) != null ||
@@ -135,14 +135,14 @@ export function messageHasProgrammaticHandler(message: string, contextDashboardU
         messageMentionsGrafanaEvalGroupIntervalChange(text) ||
         parseAddHistoryComparisonPanelRequest(text) != null ||
         messageMentionsPredictiveAnalyticsPanel(text) ||
-        parseAddOwnHistoryPanelRequest(text) != null ||
+        parseAddOwnHistoryPanelRequest(text, { contextDashboardUid }) != null ||
         messageMentionsOwnHistoryPanel(text) ||
         userWantsDashboardRebuild(text) ||
         parseDashboardRebuildRequest(text) != null ||
-        parseAddPeerRfPanelRequest(text) != null ||
+        parseAddPeerRfPanelRequest(text, { contextDashboardUid }) != null ||
         messageMentionsAddPeerRfPanel(text) ||
         messageRequestsPeerRfEnroll(text) ||
-        parseAddPeerBandPanelRequest(text) != null ||
+        parseAddPeerBandPanelRequest(text, { contextDashboardUid }) != null ||
         messageMentionsPeerBandPanelCreate(text) ||
         messageMentionsPeerBandPanelsButNotBulkFix(text) ||
         userWantsDashboardClone(text) ||

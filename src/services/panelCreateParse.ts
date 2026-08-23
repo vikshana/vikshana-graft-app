@@ -54,6 +54,7 @@ function extractPanelTitle(text: string): string | undefined {
         /\b(?:create|add|make|put|build)\s+(?:a\s+)?(?:new\s+)?(?:bar\s*chart|gauge|stat|time\s*series|timeseries|table|chart)\s+panel\s+(?:called|named|titled)\s+"([^"]+)"/i,
         /\b(?:create|add|make|put|build)\s+(?:a\s+)?(?:new\s+)?(?:bar\s*chart|gauge|stat|time\s*series|timeseries|table|chart)\s+panel\s+(?:called|named|titled)\s+([A-Za-z][\w -]{1,60}?)(?:\s+on\b|\s*$)/i,
         /\b(?:need|want)\s+(?:a\s+)?([A-Za-z][\w -]{1,40}?)\s+gauge\b/i,
+        /\b(?:create|add|make|put|build)\s+(?:a\s+)?(?:new\s+)?([A-Za-z][\w -]{1,40}?)\s+gauge\b/i,
         /\bbar\s*chart\s+(?:of|that shows)\s+(.+?)(?=\s+for\b|\s+on\b|$)/i,
         /\b(?:create|add|make|put|build|need|want)\s+(?:a\s+)?(?:new\s+)?gauge(?:\s+panel)?\s+(?:called|named|titled)\s+"?([^"\n]+?)"?(?=\s+on\b|\s+for\b|\s*$)/i,
         /\b(?:create|add|make|put|build)\s+(?:a\s+)?(?:new\s+)?(?:bar\s*chart|gauge|stat|time\s*series|timeseries|table|chart)\s+(?:called|named|titled)\s+"([^"]+)"/i,
@@ -120,6 +121,9 @@ function extractMachineId(text: string): string | undefined {
 export function messageDescribesPanelCreate(message: string): boolean {
     const text = normalizeMessageQuotes(message.trim());
     if (!text || userWantsDashboardMetricPanels(text)) {
+        return false;
+    }
+    if (extractClaimedVendorDashboardUid(text)) {
         return false;
     }
     // Own-history / peer-band / peer-RF / History Comparison / Grafana alerts need specialized

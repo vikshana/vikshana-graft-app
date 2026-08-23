@@ -235,6 +235,13 @@ function assertHandlerRouting(c: RegressionCase): void {
             expect(messageDescribesUnsupportedAdminRequest(prompt)).toBeNull();
             expect(messageMentionsPredictiveAnalyticsPanel(prompt)).toBe(false);
             break;
+        case 'dashboard-rename':
+            expect(userWantsDashboardRename(prompt)).toBe(true);
+            expect(parseDashboardRenameRequest(prompt)?.newLabel).toBe('Keysight');
+            expect(parseDashboardRenameRequest(prompt)?.machineId).toBe('2505-200033');
+            expect(userWantsPanelRename(prompt)).toBe(false);
+            expect(userWantsDashboardClone(prompt)).toBe(false);
+            break;
         case 'peer-rf-create': {
             expect(messageMentionsAddPeerRfPanel(prompt)).toBe(true);
             const peerReq = parseAddPeerRfPanelRequest(prompt);
@@ -279,7 +286,7 @@ function assertHandlerRouting(c: RegressionCase): void {
 describe('graft historical failure regression', () => {
     describe('fixture catalog', () => {
         it('documents known failure patterns', () => {
-            expect(REGRESSION_CASES).toHaveLength(25);
+            expect(REGRESSION_CASES).toHaveLength(26);
             const ids = REGRESSION_CASES.map((c) => c.id);
             expect(new Set(ids).size).toBe(ids.length);
         });
@@ -564,6 +571,7 @@ describe('graft historical failure regression', () => {
             'history-comparison-clarify',
             'intent-route-clarify',
             'dashboard-clone',
+            'dashboard-rename',
         ];
 
         it.each(handlers)('%s prompt does not collide with unrelated handlers', (handlerId) => {
@@ -623,6 +631,9 @@ describe('graft historical failure regression', () => {
             }
             if (handlerId !== 'dashboard-clone') {
                 expect(userWantsDashboardClone(c.prompt)).toBe(false);
+            }
+            if (handlerId !== 'dashboard-rename' && handlerId !== 'panel-rename') {
+                expect(userWantsDashboardRename(c.prompt)).toBe(false);
             }
             if (handlerId === 'intent-route-clarify') {
                 expect(messageNeedsIntentRouteClarification(c.prompt)).toBe(true);

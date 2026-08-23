@@ -212,10 +212,10 @@ export function formatClarificationIfNeeded(userMessage: string): string | null 
     }
 
     const wantsChange =
-        /\b(add|create|clone|copy|rename|retitle|fix|remove|rebuild|duplicate|make|build|set\s+up|plot|compare|put|need|want)\b/i.test(
+        /\b(add|create|clone|copy|rename|retitle|fix|remove|rebuild|duplicate|make|build|set\s+up|plot|compared?|put|need|want)\b/i.test(
             text
         ) ||
-        /\b(machine learning|\bML\b|random\s*forest|own history|peer band|peer average|history comparison|analytics|dashboard\s+name|historical\s+values)\b/i.test(
+        /\b(machine learning|\bML\b|random\s*forest|own history|peer band|peer average|peer mean|history comparison|analytics|dashboard\s+name|historical\s+values|mean of (?:the\s+)?(?:other\s+)?modules?)\b/i.test(
             text
         );
     if (wantsChange && !messageHasProgrammaticHandler(text)) {

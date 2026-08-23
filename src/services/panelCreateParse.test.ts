@@ -114,4 +114,10 @@ describe('panelCreateParse', () => {
             });
         });
     });
+
+    it('does not claim panel-create when uid is a vendor name', () => {
+        const prompt = 'Add a Pressure Monitoring gauge on uid=Keysight.';
+        expect(messageDescribesPanelCreate(prompt)).toBe(false);
+        expect(parsePanelCreateRequest(prompt)).toBeNull();
+    });
 });

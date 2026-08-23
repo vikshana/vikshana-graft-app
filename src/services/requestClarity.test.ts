@@ -51,5 +51,35 @@ describe('formatClarificationIfNeeded', () => {
             )
         ).toBeNull();
         expect(formatClarificationIfNeeded('List the peer band panels on this dashboard.')).toBeNull();
+        expect(
+            formatClarificationIfNeeded(
+                'What other panels might we still need on uid=idHkqdqnk?'
+            )
+        ).toBeNull();
+    });
+
+    it('asks when a vendor name is used as a Grafana uid', () => {
+        expect(formatClarificationIfNeeded('Rename dashboard uid=Keysight to NewSkywater-FL.')).toMatch(
+            /Need clarification/i
+        );
+        expect(
+            formatClarificationIfNeeded('Put a new gauge panel called Pressure Monitoring on uid=Keysight.')
+        ).toMatch(/Need clarification/i);
+        expect(
+            formatClarificationIfNeeded('Rename dashboard uid=Keysight to NewSkywater-FL.')
+        ).not.toMatch(/### Done/);
+    });
+
+    it('asks when peer compare has no create verb', () => {
+        expect(
+            formatClarificationIfNeeded(
+                'Module 2 Current against its peer band on dashboard uid=idHkqdqnk.'
+            )
+        ).toMatch(/Need clarification/i);
+        expect(
+            formatClarificationIfNeeded(
+                'Module 1 Current compared with the mean of the other modules on uid=idHkqdqnk.'
+            )
+        ).toMatch(/Need clarification/i);
     });
 });

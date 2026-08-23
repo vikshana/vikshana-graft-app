@@ -138,4 +138,29 @@ describe('operator phrasing (lab PDF)', () => {
         expect(formatClarificationIfNeeded(prompt)).toMatch(/Need clarification/i);
         expect(formatClarificationIfNeeded(prompt)).toMatch(/machine/i);
     });
+
+    it('should-show Keysight as dashboard name is a complete rename', () => {
+        const prompt =
+            'The 2505-200033 machine should show Keysight as the dashboard name, not the old label.';
+        expect(userWantsDashboardRename(prompt)).toBe(true);
+        expect(parseDashboardRenameRequest(prompt)?.newLabel).toBe('Keysight');
+        expect(parseDashboardRenameRequest(prompt)?.machineId).toBe('2505-200033');
+    });
+
+    it('vendor name as uid asks, not a fake save', () => {
+        const prompt = 'Rename dashboard uid=Keysight to NewSkywater-FL.';
+        expect(formatClarificationIfNeeded(prompt)).toMatch(/Need clarification/i);
+        expect(formatClarificationIfNeeded(prompt)).not.toMatch(/### Done/);
+        expect(extractAllDashboardUids(prompt)).not.toContain('Keysight');
+    });
+
+    it('peer compare without create asks', () => {
+        const prompt = 'Module 2 Current against its peer band on dashboard uid=idHkqdqnk.';
+        expect(formatClarificationIfNeeded(prompt)).toMatch(/Need clarification/i);
+        expect(
+            formatClarificationIfNeeded(
+                'Module 1 Current compared with the mean of the other modules on uid=idHkqdqnk.'
+            )
+        ).toMatch(/Need clarification/i);
+    });
 });

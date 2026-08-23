@@ -1,4 +1,8 @@
-import { extractAllDashboardUids, extractDashboardUidFromMessage } from './dashboardMentionParse';
+import {
+    extractAllDashboardUids,
+    extractDashboardUidFromMessage,
+    extractClaimedVendorDashboardUid,
+} from './dashboardMentionParse';
 import { extractRequestedDashboardTitle, findMachineIdsInText } from './dashboardCloneParse';
 import { messageMentionsGrafanaAlertCreate, messageMentionsGrafanaAlertUpdate } from './grafanaAlertParse';
 
@@ -61,6 +65,9 @@ export function parseAddPeerRfPanelRequest(
 ): AddPeerRfPanelRequest | null {
     const text = normalizeMessageQuotes(message.trim());
     if (!messageMentionsAddPeerRfPanel(text)) {
+        return null;
+    }
+    if (extractClaimedVendorDashboardUid(text)) {
         return null;
     }
     const uids = extractAllDashboardUids(text);

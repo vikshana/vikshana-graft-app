@@ -23,6 +23,13 @@ describe('peerBandPanelAddParse', () => {
     const PROMPT_PRESSURE =
         'Create a new machine learning time series panel titled "Module 2 Pressure — Alert Test Peer Band ±2σ" on the dashboard with UID afq7tc6hl1m9sb. Compare Module 2 Pressure against the average of Modules 1 and 3 through 8. Create four visible lines: Module 2 Actual Peer Mean Upper Peer Bound (Peer Mean + 2 × Standard Deviation) Lower Peer Bound (Peer Mean - 2 × Standard Deviation) Calculate the Upper and Lower Peer Bounds in the Flux query itself.';
 
+    it('matches write-up average-of-modules peer compare without the words peer band', () => {
+        const prompt =
+            'Create a machine learning panel that compares Module 1 Current against the average of Modules 2 through 8 on uid=idHkqdqnk.';
+        expect(messageMentionsPeerBandPanelCreate(prompt)).toBe(true);
+        expect(parseAddPeerBandPanelRequest(prompt)?.moduleNumber).toBe(1);
+    });
+
     it('parses the Alert Test Peer Band create prompt', () => {
         expect(messageMentionsPeerBandPanelCreate(PROMPT)).toBe(true);
         const req = parseAddPeerBandPanelRequest(PROMPT);

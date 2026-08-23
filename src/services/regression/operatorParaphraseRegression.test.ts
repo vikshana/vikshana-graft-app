@@ -22,7 +22,7 @@ import {
     parseAddPeerRfPanelRequest,
 } from '../peerRfPanelAddParse';
 import { messageHasProgrammaticHandler } from '../programmaticChatIntents';
-import { formatClarificationIfNeeded } from '../requestClarity';
+import { formatClarificationIfNeeded, formatOperatorClarificationIfNeeded } from '../requestClarity';
 import {
     PARAPHRASE_COUNT,
     PARAPHRASE_SEED,
@@ -213,7 +213,9 @@ describe(`random paraphrases each run (seed ${PARAPHRASE_SEED}, n=${PARAPHRASE_C
     });
 
     it.each(randomUnmatchedPrompts(rng))('unmatched asks: %s', (prompt) => {
-        expect(formatClarificationIfNeeded(prompt)).toMatch(/Need clarification/i);
+        const clarification = formatOperatorClarificationIfNeeded(prompt);
+        expect(clarification).toMatch(/Need clarification/i);
+        expect(clarification).not.toMatch(/### Done/);
     });
 
     it.each(randomWriteupPrompts(rng))('write-up paraphrase: %s', (prompt) => {
@@ -228,6 +230,8 @@ describe('unmatched English must ask, not silently LLM', () => {
         'Do the normal machine learning thing on uid=idHkqdqnk.',
         'Can you set up analytics like last time?',
     ])('%s', (prompt) => {
-        expect(formatClarificationIfNeeded(prompt)).toMatch(/Need clarification/i);
+        const clarification = formatOperatorClarificationIfNeeded(prompt);
+        expect(clarification).toMatch(/Need clarification/i);
+        expect(clarification).not.toMatch(/### Done/);
     });
 });

@@ -24,6 +24,15 @@ describe('ownHistoryPanelParse — target metric', () => {
         ).toMatch(/sensing voltage/);
     });
 
+    it('parses "panel of X compared to its historical values" with an open dashboard', () => {
+        const prompt =
+            'I want a machine learning panel of Sensing Voltage compared to its historical values on dashboard idHkqdqnk.';
+        expect(messageMentionsOwnHistoryPanel(prompt)).toBe(true);
+        expect(
+            parseAddOwnHistoryPanelRequest(prompt, { contextDashboardUid: 'idHkqdqnk' })?.metricLabel?.toLowerCase()
+        ).toMatch(/sensing voltage/);
+    });
+
     it('extracts a named signal from the prompt', () => {
         expect(
             extractOwnHistoryMetricLabel(
