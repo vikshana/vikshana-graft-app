@@ -1,4 +1,5 @@
 import { splitPanelsIntoChunks } from './dashboardCloneChunks';
+import { updateCloneSessionMeta } from './cloneSessionStorage';
 import {
     countPanelsInDashboard,
     formatDashboardCloneReply,
@@ -238,6 +239,74 @@ describe('runProgrammaticDashboardClone', () => {
         expect(saved).not.toContain('2103-176030');
         // Annotation ids must not be treated as the template machine (they stay put).
         expect(saved).toContain('9999-000001');
+    });
+
+    it('does not reuse a stale Keysight E2E sourceUid when the prompt names Skywater-FL', async () => {
+        updateCloneSessionMeta({
+            sourceUid: 'grafte2ekeysht',
+            sourceTitle: '2505-200033 / Keysight — Graft E2E',
+            sourceMachineId: '2105-172302',
+            requestedMachine: '2505-200033',
+        });
+        const mcpClient = {
+            callTool: async ({ name, arguments: args }: { name: string; arguments: Record<string, unknown> }) => {
+                if (name === 'search_dashboards') {
+                    const query = String(args.query ?? '');
+                    if (/skywater-fl/i.test(query)) {
+                        return {
+                            content: [
+                                {
+                                    type: 'text',
+                                    text: JSON.stringify({
+                                        dashboards: [{ uid: 'src-uid', title: '2103-176030 / Skywater-FL' }],
+                                    }),
+                                },
+                            ],
+                        };
+                    }
+                    return { content: [{ type: 'text', text: JSON.stringify({ dashboards: [] }) }] };
+                }
+                if (name === 'get_dashboard_by_uid') {
+                    expect(args.uid).toBe('src-uid');
+                    expect(args.uid).not.toBe('grafte2ekeysht');
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: JSON.stringify({
+                                    dashboard: {
+                                        uid: 'src-uid',
+                                        title: '2103-176030 / Skywater-FL',
+                                        panels: [
+                                            {
+                                                id: 1,
+                                                type: 'timeseries',
+                                                targets: [{ expr: 'machine_metrics{machine="2103-176030"}' }],
+                                            },
+                                        ],
+                                    },
+                                    meta: {},
+                                }),
+                            },
+                        ],
+                    };
+                }
+                if (name === 'update_dashboard') {
+                    return { content: [{ type: 'text', text: JSON.stringify({ uid: 'new-uid', version: 1 }) }] };
+                }
+                if (name === 'get_dashboard_summary') {
+                    return { content: [{ type: 'text', text: JSON.stringify({ uid: 'new-uid' }) }] };
+                }
+                throw new Error(`unexpected tool ${name}`);
+            },
+        };
+
+        const result = await runProgrammaticDashboardClone(
+            mcpClient,
+            'I have a machine from Keysight for 2505-200033. Create a dashboard for it that is a copy of Skywater-FL, but with data for 2505-200033.'
+        );
+        expect(result.ok).toBe(true);
+        expect(result.sourceMachine).toBe('2103-176030');
     });
 });
 

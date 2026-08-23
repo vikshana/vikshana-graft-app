@@ -208,7 +208,19 @@ async function resolveSourceUid(
     toolExecutions: ToolExecution[]
 ): Promise<{ uid?: string; error?: string }> {
     if (metaUid) {
-        return { uid: metaUid };
+        const meta = getCloneSessionMeta();
+        const want = sourceMachine.trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+        const storedTitle = (meta?.sourceTitle ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+        const storedMachine = (meta?.sourceMachineId ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+        if (
+            want &&
+            (storedTitle === want ||
+                storedTitle.endsWith(want) ||
+                storedMachine === want)
+        ) {
+            return { uid: metaUid };
+        }
+        // Stale session from a prior clone (e.g. Keysight E2E) — search for this template.
     }
 
     const searchStep = pendingTool('search_dashboards');
