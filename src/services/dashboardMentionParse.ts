@@ -120,7 +120,10 @@ export function extractAllDashboardUids(message: string): string[] {
         ...collectUidMatches(text, /\bfor\s+([A-Za-z][A-Za-z0-9]{7,})\b/gi).filter(looksLikeBareDashboardUid)
     );
     ids.push(
-        ...collectUidMatches(text, /\b(?:rename|retitle)\s+([A-Za-z0-9]{8,})\s+dashboard\b/gi).filter(
+        ...collectUidMatches(
+            text,
+            /\b(?:rename|retitle)\s+(?:the\s+)?([A-Za-z0-9]{8,})\s+dashboard\b/gi
+        ).filter(
             looksLikeBareDashboardUid
         )
     );

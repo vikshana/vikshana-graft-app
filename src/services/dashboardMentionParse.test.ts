@@ -34,6 +34,15 @@ describe('dashboardMentionParse', () => {
             extractAllDashboardUids('Rename the dashboard for the Keysight machine to be NewMachine.')
         ).not.toContain('Keysight');
     });
+
+    it('extracts uid from rename UID dashboard and rename the UID dashboard', () => {
+        expect(extractAllDashboardUids('Please rename 6sFerv44k dashboard to NewSkywater-FL')).toContain(
+            '6sFerv44k'
+        );
+        expect(
+            extractAllDashboardUids('Rename the 6sFerv44k dashboard to NewSkywater-FL')
+        ).toContain('6sFerv44k');
+    });
 });
 
 describe('panel fix + clarification', () => {
