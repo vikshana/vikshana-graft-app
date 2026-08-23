@@ -10,7 +10,11 @@ import {
     isExplicitSinglePanelCopyRequest,
     messageMentionsSinglePanelCopyIntent,
 } from './singlePanelCopyParse';
-import { extractSourceDashboardTitle } from './dashboardCloneParse';
+import {
+    extractSourceDashboardTitle,
+    isCloneHowToQuestion,
+    parseCloneIntentMessage,
+} from './dashboardCloneParse';
 
 export { isExplicitSinglePanelCopyRequest };
 
@@ -34,6 +38,9 @@ export interface IncompleteCloneProgress {
  * messageMentionsSinglePanelCopyIntent).
  */
 export function describesDashboardCloneLayoutIntent(userContent: string): boolean {
+    if (isCloneHowToQuestion(userContent)) {
+        return false;
+    }
     if (isCrossDashboardPeerBandCopyIntent(userContent)) {
         return false;
     }
@@ -44,11 +51,11 @@ export function describesDashboardCloneLayoutIntent(userContent: string): boolea
         return false;
     }
     const explicitCopy =
-        /\b(visual copy|clone|copy of|duplicate|replica|dashboard like|new dashboard)\b/i.test(
+        /\b(visual copy|clone|copy of|duplicate|replica|replicate|dashboard like|new dashboard|as the template|same dashboard as)\b/i.test(
             userContent
         ) ||
-        (/\b(create|make|build)\b/i.test(userContent) &&
-            /\b(copy|clone|duplicate)\b/i.test(userContent));
+        (/\b(create|make|build|stand up)\b/i.test(userContent) &&
+            /\b(copy|clone|duplicate|template|from)\b/i.test(userContent));
     const namedTemplate = Boolean(extractSourceDashboardTitle(userContent));
     if (explicitCopy) {
         // Do not treat "duplicate the Pressure panel" as a dashboard clone.
@@ -58,6 +65,10 @@ export function describesDashboardCloneLayoutIntent(userContent: string): boolea
     if (/\b(based on|same as)\b/i.test(userContent)) {
         return namedTemplate;
     }
+    // "Copy Skywater-FL for 2505-200033" (no "copy of") is still a dashboard clone.
+    if (namedTemplate && /\bcopy\b/i.test(userContent)) {
+        return true;
+    }
     return false;
 }
 
@@ -66,7 +77,20 @@ export function userWantsDashboardClone(userContent: string): boolean {
     if (isExplicitSinglePanelCopyRequest(userContent) || messageMentionsSinglePanelCopyIntent(userContent)) {
         return false;
     }
-    return describesDashboardCloneLayoutIntent(userContent);
+    if (isCloneHowToQuestion(userContent)) {
+        return false;
+    }
+    if (describesDashboardCloneLayoutIntent(userContent)) {
+        return true;
+    }
+    // "Copy 2103-176030 for 2505-200033" — not a panel-fix with two machine ids.
+    if (/\bfix\b/i.test(userContent)) {
+        return false;
+    }
+    if (!/\b(copy|clone|duplicate|replicate)\b/i.test(userContent)) {
+        return false;
+    }
+    return parseCloneIntentMessage(userContent).valid;
 }
 
 /** User asked to fix or troubleshoot a panel on an existing dashboard (not a new clone). */

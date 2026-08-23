@@ -25,7 +25,13 @@ export function messageDescribesDashboardRename(message: string): boolean {
     if (messageDescribesPanelRename(text)) {
         return false;
     }
-    return /\brename\b/i.test(text) && /\bdashboard\b/i.test(text);
+    return (
+        (/\brename\b/i.test(text) ||
+            /\bretitle\b/i.test(text) ||
+            /\bchange\s+the\s+dashboard\s+name\b/i.test(text) ||
+            /\bcall\s+the\s+dashboard\b/i.test(text)) &&
+        /\bdashboard\b/i.test(text)
+    );
 }
 
 function extractNewLabel(text: string): string | undefined {
@@ -45,9 +51,17 @@ function extractNewLabel(text: string): string | undefined {
     }
     // Bare `to NewLabel` — but never the filler "be"/"instead" (e.g. `to be "X"` where the
     // quote was missed, or `to instead …`); those are connectors, not the new name.
-    const toWord = text.match(/\brename\b[^.\n]{0,80}?\bto\s+([A-Za-z][A-Za-z0-9_-]*)/i);
-    if (toWord?.[1] && !/^(?:instead|be)$/i.test(toWord[1])) {
+    const toWord = text.match(
+        /\b(?:rename|retitle|change)\b[^.\n]{0,80}?\bto\s+([A-Za-z][A-Za-z0-9_-]*)/i
+    );
+    if (toWord?.[1] && !/^(?:instead|be|begin|start|have)$/i.test(toWord[1])) {
         return toWord[1];
+    }
+    const callInstead = text.match(
+        /\bcall\s+the\s+dashboard\b[^.\n]{0,80}?\s([A-Z][A-Za-z0-9_-]*)\s+instead\b/i
+    );
+    if (callInstead?.[1]) {
+        return callInstead[1];
     }
     return undefined;
 }

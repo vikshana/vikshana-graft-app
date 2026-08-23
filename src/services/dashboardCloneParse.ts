@@ -31,15 +31,36 @@ export function findMachineIdsInText(message: string): string[] {
 const TEMPLATE_TITLE_STOP =
     '(?=\\s*,|\\s+but\\b|\\s+with\\s+data\\b|\\s+with\\s+data\\s+for\\b|\\s+for\\s+(?:machine\\s+)?(?:[0-9]{4}-|[A-Za-z][A-Za-z0-9]*-SIM-)|$)';
 
+/** Help / how-to questions about copying — not a clone job. */
+export function isCloneHowToQuestion(message: string): boolean {
+    const text = message.trim();
+    if (!/\b(copy|clone|duplicate)\b/i.test(text)) {
+        return false;
+    }
+    if (findMachineIdsInText(text).length > 0) {
+        return false;
+    }
+    return (
+        /^\s*how\s+(do|can|would|should|to)\b/i.test(text) ||
+        /\bin grafana\b/i.test(text) ||
+        /\bwhat\s+(is|are)\s+the\s+(process|steps|way)\b/i.test(text) ||
+        /\bwhat\s+is\s+the\s+process\s+to\s+(copy|clone|duplicate)\b/i.test(text) ||
+        /\bcan\s+you\s+(explain|tell)\s+how\b/i.test(text)
+    );
+}
+
 /**
  * Template dashboard title when the operator names it in English
  * ("copy of Skywater-FL", "duplicate Skywater FL", "based on Skywater-FL").
  */
 export function extractSourceDashboardTitle(cloneIntentMessage: string): string | undefined {
+    if (isCloneHowToQuestion(cloneIntentMessage)) {
+        return undefined;
+    }
     const prefixes = [
         `\\b(?:visual\\s+)?(?:copy|clone|duplicate|replica)\\s+of\\s+(?:the\\s+)?(?:dashboard\\s+)?`,
         `\\b(?:based\\s+on|same\\s+as|dashboard\\s+like)\\s+(?:the\\s+)?`,
-        `\\b(?:duplicate|clone)\\s+(?:the\\s+)?(?:dashboard\\s+)?`,
+        `\\b(?:duplicate|clone|copy|replicate)\\s+(?:the\\s+)?(?:dashboard\\s+)?`,
     ];
     let raw: string | undefined;
     for (const prefix of prefixes) {
@@ -47,6 +68,20 @@ export function extractSourceDashboardTitle(cloneIntentMessage: string): string 
         if (m?.[1]) {
             raw = m[1];
             break;
+        }
+    }
+    if (!raw) {
+        const extras = [
+            /\b(?:use|using)\s+([^,]+?)\s+as\s+(?:the\s+)?template\b/i,
+            /\bsame\s+dashboard\s+as\s+([^,]+?)(?=\s+but\b|\s+pointed\b|\s+for\b|$)/i,
+            /\bfrom\s+([A-Za-z][\w.-]{2,40})\s*[.]?$/i,
+        ];
+        for (const re of extras) {
+            const m = cloneIntentMessage.match(re);
+            if (m?.[1]) {
+                raw = m[1];
+                break;
+            }
         }
     }
     if (!raw) {

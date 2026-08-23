@@ -128,4 +128,9 @@ describe('historyComparisonPanelAddParse', () => {
         expect(msg).toContain('Machine learning panels');
         expect(msg).toContain('Module 2 Current');
     });
+
+    it('does not create a Temperature panel from an informational ML question', () => {
+        const prompt = 'What does ML temperature mean on the dashboard with UID = idHkqdqnk?';
+        expect(parseAddHistoryComparisonPanelRequest(prompt)).toBeNull();
+    });
 });

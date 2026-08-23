@@ -256,6 +256,7 @@ import {
     intentRouteWinnerScore,
     resolveIntentRouteAmbiguity,
 } from '../../../services/programmaticIntentRouter';
+import { formatClarificationIfNeeded } from '../../../services/requestClarity';
 import {
   parseBulkModulePanelMatchRequest,
   userWantsBulkModulePanelMatch,
@@ -2839,6 +2840,36 @@ export const ChatInterface = () => {
           setCurrentSessionId(savedSession.id);
           currentSessionIdRef.current = savedSession.id;
           replaceChatSessionInUrl(savedSession.id);
+        }
+        return;
+      }
+
+      const unmatchedEnglishClarification = formatClarificationIfNeeded(content);
+      if (unmatchedEnglishClarification) {
+        errorPathTag = 'unmatched-english-clarification';
+        recordClarificationShown(
+          'generic-clarification',
+          content,
+          contextService.getDashboardUid() ?? undefined
+        );
+        finalContent = unmatchedEnglishClarification;
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last?.role === 'assistant') {
+            updated[updated.length - 1] = { ...last, content: finalContent };
+          }
+          return updated;
+        });
+        const unmatchedClarifyMessage: Message = { role: 'assistant', content: finalContent };
+        const unmatchedClarifySession = chatHistoryService.saveSession(
+          [...newMessages, unmatchedClarifyMessage],
+          currentSessionId
+        );
+        if (unmatchedClarifySession) {
+          setCurrentSessionId(unmatchedClarifySession.id);
+          currentSessionIdRef.current = unmatchedClarifySession.id;
+          replaceChatSessionInUrl(unmatchedClarifySession.id);
         }
         return;
       }

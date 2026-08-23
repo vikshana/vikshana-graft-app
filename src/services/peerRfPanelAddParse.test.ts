@@ -50,4 +50,11 @@ describe('peerRfPanelAddParse', () => {
         expect(messageMentionsAddPeerRfPanel(prompt)).toBe(false);
         expect(parseAddPeerRfPanelRequest(prompt)).toBeNull();
     });
+
+    it('does not treat a passive RandomForest vs peer-modules statement as create', () => {
+        const prompt =
+            'Module 3 Current uses a RandomForest against its peer modules on the dashboard with UID = idHkqdqnk.';
+        expect(messageMentionsAddPeerRfPanel(prompt)).toBe(false);
+        expect(parseAddPeerRfPanelRequest(prompt)).toBeNull();
+    });
 });

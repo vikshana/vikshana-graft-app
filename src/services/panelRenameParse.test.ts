@@ -59,4 +59,12 @@ describe('panelRenameParse', () => {
         expect(parseDashboardRenameRequest(pressureGauge)).toBeNull();
         expect(userWantsDashboardRename(pressureGauge)).toBe(false);
     });
+
+    it('keeps unquoted multi-word new titles', () => {
+        const req = parsePanelRenameRequest(
+            'Rename the Current panel to New Current on dashboard uid=idHkqdqnk'
+        );
+        expect(req?.newPanelTitle).toBe('New Current');
+        expect(req?.currentPanelTitle).toBe('Current');
+    });
 });

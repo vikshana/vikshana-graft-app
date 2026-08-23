@@ -46,6 +46,14 @@ describe('single-panel copy vs full clone', () => {
         expect(resolveDashboardCloneIntent([totalCuMassPanelCopy, 'Continue'])).toBeUndefined();
     });
 
+    it('clones Copy <machine> for <machine> shorthand', () => {
+        expect(userWantsDashboardClone('Copy 2103-176030 for 2505-200033.')).toBe(true);
+    });
+
+    it('does not treat Grafana how-to copy questions as a clone', () => {
+        expect(userWantsDashboardClone('How do I copy a dashboard in Grafana?')).toBe(false);
+    });
+
     it('does not treat "based on last review" as a dashboard clone', () => {
         expect(
             userWantsDashboardClone('Fix panels on the dashboard based on the last review.')

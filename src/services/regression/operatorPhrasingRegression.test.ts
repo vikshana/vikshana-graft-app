@@ -112,6 +112,7 @@ describe('operator phrasing (lab PDF)', () => {
     });
 
     it.each([
+        'Copy Skywater-FL for 2505-200033.',
         'Duplicate Skywater-FL for 2505-200033.',
         'Make a dashboard like Skywater FL with data for 2505-200033.',
         'Clone Skywater-FL for machine 2505-200033.',

@@ -22,6 +22,8 @@ function extractCurrentPanelTitle(text: string): string | undefined {
         /\brename\s+(?:the\s+)?panel(?:\s+titled|\s+named|\s+called)?\s+"([^"]+)"/i,
         /\brename\s+(?:the\s+)?panel(?:\s+titled|\s+named|\s+called)?\s+'([^']+)'/i,
         /\brename\s+(?:the\s+)?([A-Za-z][A-Za-z0-9_ -]{1,80}?)\s+panel\b/i,
+        /\bchange\s+(?:the\s+)?([A-Za-z][A-Za-z0-9_ -]{1,40}?)\s+panel\s+title\b/i,
+        /\brename\s+(?:the\s+)?([A-Za-z][A-Za-z0-9_ -]{1,40}?)\s+to\s+/i,
     ];
     for (const re of patterns) {
         const match = text.match(re);
@@ -42,7 +44,7 @@ function extractNewPanelTitle(text: string): string | undefined {
         /\bto\s+be\s+"([^"\n]+?)(?:[".]|\s*$)/i,
         /\bto\s+"([^"\n]+?)(?:[".]|\s*$)/i,
         /\bpanel\s+to\s+be\s+([A-Za-z][A-Za-z0-9_ -]+?)(?:\s+on\s+|\s*$|\.)/i,
-        /\bpanel\s+to\s+([A-Za-z][A-Za-z0-9_ -]+?)(?:\s+on\s+(?:the\s+)?dashboard|\s*$|\.)/i,
+        /\bpanel\s+to\s+([A-Za-z][A-Za-z0-9_ -]+?)(?:\s+on\s+|\s*\(|\s*$|\.)/i,
         /\bto\s+be\s+([A-Za-z][A-Za-z0-9_ -]+?)(?:\s+on\s+|\s*$|\.)/i,
         /\bto\s+"([^"]+)"/i,
         /\bto\s+'([^']+)'/i,
@@ -72,8 +74,18 @@ function extractMachineIdForPanelRename(message: string): string | undefined {
 export function messageDescribesPanelRename(message: string): boolean {
     const text = normalizeMessageQuotes(message.trim());
     const renameVerb =
-        /\brename\b/i.test(text) || /\bchange\s+(?:the\s+)?name\b/i.test(text);
-    if (!renameVerb || !/\bpanel\b/i.test(text)) {
+        /\brename\b/i.test(text) ||
+        /\bchange\s+(?:the\s+)?name\b/i.test(text) ||
+        /\bchange\s+(?:the\s+)?(?:[A-Za-z].{0,40}?)panel\s+title\b/i.test(text);
+    const panelWord = /\bpanel\b/i.test(text);
+    const renameTitleTo =
+        /\brename\s+(?:the\s+)?(?!dashboard\b)(?!all\b)([A-Za-z][A-Za-z0-9_ -]{0,30}?)\s+to\s+(?!begin\b)(?!start\b)/i.test(
+            text
+        ) &&
+        extractAllDashboardUids(text).length > 0 &&
+        !/\brename\s+(?:the\s+)?dashboard\b/i.test(text) &&
+        !/\ball\s+gauge\s+panels\b/i.test(text);
+    if (!renameVerb || (!panelWord && !renameTitleTo)) {
         return false;
     }
     if (/\brename\s+(?:the\s+)?dashboard\b/i.test(text) && !extractCurrentPanelTitle(text)) {

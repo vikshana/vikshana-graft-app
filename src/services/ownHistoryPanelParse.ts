@@ -46,9 +46,11 @@ export function messageMentionsOwnHistoryPanel(message: string): boolean {
         /\b±\s*2\s*σ\b/i.test(text) ||
         /\b2\s*sigma\b/i.test(text) ||
         /\b2\s*[×x*]\s*standard\s+dev/i.test(text) ||
+        /\b2\s+standard\s+dev/i.test(text) ||
         /\bstd(?:ard)?\s*dev(?:iation)?\b/i.test(text);
     return (
-        /\bown\s+history\b/i.test(text) ||
+        /\bown[- ]history\b/i.test(text) ||
+        /\bown\s+past\b/i.test(text) ||
         (/\bvs\.?\s*own\b/i.test(text) && hasTwoSigma) ||
         (/\bhistorical\s+mean\b/i.test(text) && hasTwoSigma && !/\bpeer\b/i.test(text)) ||
         (/\bstatistical\b/i.test(text) && hasTwoSigma && !/\bpeer\b/i.test(text)) ||
@@ -112,7 +114,7 @@ export function parseAddOwnHistoryPanelRequest(message: string): AddOwnHistoryPa
     if (!messageMentionsOwnHistoryPanel(text)) {
         return null;
     }
-    if (!/\b(add|create|new)\b/i.test(text)) {
+    if (!/\b(add|create|new|make|plot|want)\b/i.test(text)) {
         return null;
     }
     if (/\bcopy\b/i.test(text) && /\bmodules?\s+(1|2|3|4|6|7|8)\b/i.test(text)) {

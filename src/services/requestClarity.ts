@@ -1,4 +1,4 @@
-import { parseCloneIntentMessage } from './dashboardCloneParse';
+import { isCloneHowToQuestion, parseCloneIntentMessage } from './dashboardCloneParse';
 import { userWantsDashboardClone, userWantsDashboardPanelFix } from './dashboardCloneProgress';
 import { isDashboardDataInvestigationQuestion } from './dashboardInvestigation';
 import {
@@ -39,6 +39,7 @@ import {
     messageDescribesAmbiguousGraphCreate,
 } from './ambiguousGraphCreateParse';
 import { recordClarificationShown } from './graftPromptLearning';
+import { messageHasProgrammaticHandler } from './programmaticChatIntents';
 
 /** Enough to identify a dashboard for panel fix (uid, machine id, or title). */
 export function hasDashboardIdentityForPanelFix(message: string): boolean {
@@ -76,6 +77,10 @@ export function formatClarificationIfNeeded(userMessage: string): string | null 
         return null;
     }
 
+    if (isCloneHowToQuestion(text)) {
+        return null;
+    }
+
     if (isDashboardDataInvestigationQuestion(text)) {
         return null;
     }
@@ -85,7 +90,7 @@ export function formatClarificationIfNeeded(userMessage: string): string | null 
     }
 
     const seemsGrafanaTask =
-        /\b(dashboard|dash\s*board|panels?|grafana|clone|copy of|fix|repair|prometheus|loki|machine|uid)\b/i.test(
+        /\b(dashboard|dash\s*board|panels?|grafana|clone|copy|rename|duplicate|fix|repair|prometheus|loki|machine|uid|plant|analytics|keysight|skywater|\bML\b)\b/i.test(
             text
         );
     if (!seemsGrafanaTask) {
@@ -169,6 +174,25 @@ export function formatClarificationIfNeeded(userMessage: string): string | null 
             `- Dashboard title or machine id (e.g. **2505-200033 / Keysight**)\n` +
             `- What to fix (errors, wrong machine id, or a panel name)\n\n` +
             `**Example:** \`Fix panels on 2505-200033 / Keysight that still use 2103-176030.\``
+        );
+    }
+
+    if (isCloneHowToQuestion(text)) {
+        return null;
+    }
+
+    const wantsChange =
+        /\b(add|create|clone|copy|rename|fix|remove|rebuild|duplicate|make|build|set\s+up)\b/i.test(text) ||
+        /\b(machine learning|\bML\b|random\s*forest|own history|peer band|history comparison|analytics)\b/i.test(text);
+    if (wantsChange && !messageHasProgrammaticHandler(text)) {
+        return (
+            `### Need clarification\n\n` +
+            `Graft did not match that wording to a known action. Say which of these you mean, and include a dashboard **uid** or title:\n` +
+            `- Copy/clone a dashboard\n` +
+            `- Rename a dashboard or panel\n` +
+            `- Add Own History, History Comparison, RandomForest vs Peers, or Peer Band\n` +
+            `- Fix or remove a panel\n\n` +
+            `**Example:** \`Create a RandomForest vs Peers panel for Module 3 Current on the dashboard with UID = idHkqdqnk.\``
         );
     }
 

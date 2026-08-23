@@ -40,13 +40,15 @@ export function messageMentionsAddPeerRfPanel(message: string): boolean {
         return false;
     }
     return (
-        (/\b(add|create|new)\b/i.test(text) && /\bpeer\s*rf\b/i.test(text)) ||
-        (/\brandom\s*forest\s+vs\s+peers\b/i.test(text) && /\b(add|create|panel)\b/i.test(text)) ||
+        (/\b(add|create|new|need|please)\b/i.test(text) && /\bpeer\s*rf\b/i.test(text)) ||
+        (/\brf\s+vs\s+peers\b/i.test(text) && /\b(add|create|panel|need|please)\b/i.test(text)) ||
+        (/\brandom\s*forest\s+vs\s+peers\b/i.test(text) &&
+            /\b(add|create|panel|need|please)\b/i.test(text)) ||
         (/\bpeer\s+random\s*forest\b/i.test(text) && /\b(influx|panel|dashboard)\b/i.test(text)) ||
         // "RandomForest anomaly detection" + module + peer modules
         (/\brandom\s*forest\b/i.test(text) &&
             /\bpeer\s+modules?\b/i.test(text) &&
-            /\b(add|create|panel)\b/i.test(text) &&
+            /\b(add|create|panel|need|please)\b/i.test(text) &&
             !/\bhistory\s+comparison\b/i.test(text) &&
             !/\bown\s+history\b/i.test(text) &&
             !/\bpeer\s*band\b/i.test(text))

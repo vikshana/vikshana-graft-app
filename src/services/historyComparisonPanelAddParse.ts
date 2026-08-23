@@ -51,7 +51,8 @@ function normalizeMessageQuotes(text: string): string {
 function userWantsPanelAction(text: string): boolean {
     return (
         /\b(add|create|new|make|build|set\s+up)\b/i.test(text) ||
-        /\bwould\s+like\s+to\s+(?:add|create|make|build|set\s+up)\b/i.test(text)
+        /\bwould\s+like\s+to\s+(?:add|create|make|build|set\s+up)\b/i.test(text) ||
+        /\bplease\s+(?:add|create|make|build)\b/i.test(text)
     );
 }
 
@@ -198,6 +199,9 @@ export function messageMentionsPredictiveAnalyticsPanel(message: string): boolea
     return (
         /\bpredictive\s+analytics\b/i.test(text) ||
         /\bhistory\s+comparison\b/i.test(text) ||
+        (/\bML\b/i.test(text) &&
+            /\btemperature/i.test(text) &&
+            /\b(add|create|new|make|build|set\s+up|please)\b/i.test(text)) ||
         (/\brandom\s*forest\b/i.test(text) &&
             (!/\bvs\s+peers\b/i.test(text) || !/\bmodule\s*\d+\b/i.test(text)) &&
             !(/\binflux\b/i.test(text) && /\bmodule\s*\d+\b/i.test(text))) ||
@@ -258,6 +262,9 @@ export function parseAddHistoryComparisonPanelRequest(message: string): AddHisto
                 moduleNumber = n;
             }
         }
+    }
+    if (moduleNumber == null && metricLabel == null && /\btemperatures?\b/i.test(text)) {
+        metricLabel = 'temperature';
     }
     if (moduleNumber == null && metricLabel == null) {
         // Do not invent Module 5 — require an explicit module or metric label.

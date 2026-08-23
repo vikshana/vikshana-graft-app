@@ -22,4 +22,20 @@ describe('formatClarificationIfNeeded', () => {
         expect(clarification).toContain('fix all panels whose title contains');
         expect(clarification).toContain('vs. Peer Band');
     });
+
+    it('asks instead of guessing on unmatched operator English', () => {
+        const vague = 'Add the usual ML stuff to the Keysight dashboard.';
+        const clarification = formatClarificationIfNeeded(vague);
+        expect(clarification).toContain('Need clarification');
+        expect(clarification).toMatch(/did not match|known action/i);
+    });
+
+    it('does not treat Copy Skywater-FL for a machine as unmatched English', () => {
+        expect(formatClarificationIfNeeded('Copy Skywater-FL for 2505-200033.')).toBeNull();
+    });
+
+    it('does not block Grafana how-to copy questions as unmatched jobs', () => {
+        expect(formatClarificationIfNeeded('How do I copy a dashboard in Grafana?')).toBeNull();
+        expect(formatClarificationIfNeeded('What is the process to copy dashboards?')).toBeNull();
+    });
 });

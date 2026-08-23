@@ -52,6 +52,17 @@ export function looksLikeGrafanaDashboardUid(token: string): boolean {
     return hasLetter && (hasDigit || mixedCase);
 }
 
+/** Trailing / "on dashboard X" uids: require a digit or a leading lowercase (idHkqdqnk), not CamelCase names. */
+function looksLikeBareDashboardUid(token: string): boolean {
+    if (!looksLikeGrafanaDashboardUid(token)) {
+        return false;
+    }
+    if (/\d/.test(token)) {
+        return true;
+    }
+    return /^[a-z]/.test(token);
+}
+
 /** User referred to a Grafana dashboard (incl. "dash board" typo and uid-in-quotes). */
 export function mentionsDashboard(message: string): boolean {
     return (
@@ -104,6 +115,24 @@ export function extractAllDashboardUids(message: string): string[] {
             text,
             /\bfor\s+(?:the\s+)?([A-Za-z0-9]*[A-Za-z][A-Za-z0-9]{5,13})\s+machine\b/gi
         ).filter(looksLikeGrafanaDashboardUid)
+    );
+    ids.push(
+        ...collectUidMatches(text, /\bfor\s+([A-Za-z][A-Za-z0-9]{7,})\b/gi).filter(looksLikeBareDashboardUid)
+    );
+    ids.push(
+        ...collectUidMatches(text, /\b(?:rename|retitle)\s+([A-Za-z0-9]{8,})\s+dashboard\b/gi).filter(
+            looksLikeBareDashboardUid
+        )
+    );
+    ids.push(
+        ...collectUidMatches(text, /\bon\s+(?:the\s+)?dashboard\s+([A-Za-z0-9]{8,})\b/gi).filter(
+            looksLikeBareDashboardUid
+        )
+    );
+    ids.push(
+        ...collectUidMatches(text, /\b(?:on|to)\s+([A-Za-z][A-Za-z0-9]{7,})\s*[.]?$/gi).filter(
+            looksLikeBareDashboardUid
+        )
     );
     return [...new Set(ids.filter((id) => !/^[0-9]{4}-[0-9]{6,}$/.test(id)))];
 }
