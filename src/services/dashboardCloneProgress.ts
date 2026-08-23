@@ -44,7 +44,11 @@ export function describesDashboardCloneLayoutIntent(userContent: string): boolea
     if (isCrossDashboardPeerBandCopyIntent(userContent)) {
         return false;
     }
-    if (messageDescribesDashboardRename(userContent)) {
+    // "Clone dashboard 2103-176030 and rename it to 2505-200033" is a clone, not a retitle.
+    if (
+        messageDescribesDashboardRename(userContent) &&
+        !/\b(clone|copy|duplicate|replicate)\b/i.test(userContent)
+    ) {
         return false;
     }
     if (isExplicitSinglePanelCopyRequest(userContent)) {

@@ -1,3 +1,4 @@
+import { parseCloneIntentMessage } from './dashboardCloneParse';
 import {
     resolveDashboardCloneIntent,
     userWantsDashboardClone,
@@ -48,6 +49,14 @@ describe('single-panel copy vs full clone', () => {
 
     it('clones Copy <machine> for <machine> shorthand', () => {
         expect(userWantsDashboardClone('Copy 2103-176030 for 2505-200033.')).toBe(true);
+    });
+
+    it('clones "Clone dashboard <id> and rename it to <id>" from the write-up', () => {
+        const prompt = 'Clone dashboard 2103-176030 and rename it to 2505-200033';
+        expect(userWantsDashboardClone(prompt)).toBe(true);
+        expect(parseCloneIntentMessage(prompt).valid).toBe(true);
+        expect(parseCloneIntentMessage(prompt).sourceMachineId).toBe('2103-176030');
+        expect(parseCloneIntentMessage(prompt).targetMachineId).toBe('2505-200033');
     });
 
     it('does not treat Grafana how-to copy questions as a clone', () => {

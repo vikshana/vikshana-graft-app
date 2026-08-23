@@ -212,7 +212,10 @@ export function messageMentionsPredictiveAnalyticsPanel(message: string): boolea
     );
 }
 
-export function parseAddHistoryComparisonPanelRequest(message: string): AddHistoryComparisonPanelRequest | null {
+export function parseAddHistoryComparisonPanelRequest(
+    message: string,
+    opts?: { contextDashboardUid?: string }
+): AddHistoryComparisonPanelRequest | null {
     const text = normalizeMessageQuotes(message.trim());
     if (!messageMentionsPredictiveAnalyticsPanel(text)) {
         return null;
@@ -228,7 +231,7 @@ export function parseAddHistoryComparisonPanelRequest(message: string): AddHisto
         extractRequestedDashboardTitle(text, machineId) ??
         extractOnDashboardMachineTitle(text) ??
         titleLabel;
-    const dashboardUid = uids[0] ?? extractDashboardUidFromMessage(text);
+    const dashboardUid = uids[0] ?? extractDashboardUidFromMessage(text) ?? opts?.contextDashboardUid;
 
     let moduleNumber: number | undefined;
     let metricLabel: string | undefined;

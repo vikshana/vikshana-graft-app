@@ -6,6 +6,15 @@ import {
 import { messageDescribesPanelCreate, parsePanelCreateRequest } from './panelCreateParse';
 
 describe('ownHistoryPanelParse — target metric', () => {
+    it('treats "against its historical values" as own-history (write-up wording)', () => {
+        const prompt =
+            'Create a machine learning panel that compares Sensing Voltage against its historical values';
+        expect(messageMentionsOwnHistoryPanel(prompt)).toBe(true);
+        expect(
+            parseAddOwnHistoryPanelRequest(prompt, { contextDashboardUid: 'idHkqdqnk' })?.metricLabel?.toLowerCase()
+        ).toMatch(/sensing voltage/);
+    });
+
     it('extracts a named signal from the prompt', () => {
         expect(
             extractOwnHistoryMetricLabel(

@@ -55,7 +55,10 @@ export function messageMentionsAddPeerRfPanel(message: string): boolean {
     );
 }
 
-export function parseAddPeerRfPanelRequest(message: string): AddPeerRfPanelRequest | null {
+export function parseAddPeerRfPanelRequest(
+    message: string,
+    opts?: { contextDashboardUid?: string }
+): AddPeerRfPanelRequest | null {
     const text = normalizeMessageQuotes(message.trim());
     if (!messageMentionsAddPeerRfPanel(text)) {
         return null;
@@ -64,7 +67,7 @@ export function parseAddPeerRfPanelRequest(message: string): AddPeerRfPanelReque
     const machines = findMachineIdsInText(text);
     const machineId = machines[0];
     const dashboardTitle = extractRequestedDashboardTitle(text, machineId);
-    const dashboardUid = uids[0] ?? extractDashboardUidFromMessage(text);
+    const dashboardUid = uids[0] ?? extractDashboardUidFromMessage(text) ?? opts?.contextDashboardUid;
     let moduleNumber: number | undefined;
     const modMatch = text.match(/\bmodule\s*(\d+)\b/i);
     if (modMatch?.[1]) {

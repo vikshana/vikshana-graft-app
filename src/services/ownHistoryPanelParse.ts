@@ -51,6 +51,8 @@ export function messageMentionsOwnHistoryPanel(message: string): boolean {
     return (
         /\bown[- ]history\b/i.test(text) ||
         /\bown\s+past\b/i.test(text) ||
+        /\bagainst\s+its\s+historical\s+(?:values|data|trend|behavior|behaviour)\b/i.test(text) ||
+        /\bcompared?\s+(?:to|with|against)\s+its\s+histor(?:y|ical\s+values)\b/i.test(text) ||
         (/\bvs\.?\s*own\b/i.test(text) && hasTwoSigma) ||
         (/\bhistorical\s+mean\b/i.test(text) && hasTwoSigma && !/\bpeer\b/i.test(text)) ||
         (/\bstatistical\b/i.test(text) && hasTwoSigma && !/\bpeer\b/i.test(text)) ||
@@ -88,7 +90,7 @@ export function extractOwnHistoryMetricLabel(message: string): string | undefine
     const text = normalizeMessageQuotes(message.trim());
     const stop = '(?=\\s+(?:on|for|in)\\s+(?:the\\s+)?dashboard\\b|\\s+with\\s+uid\\b|\\s+uid\\b|[,.;]|$)';
     const m =
-        text.match(/\bcompares?\s+(.+?)\s+against\s+its\s+own\s+history\b/i) ??
+        text.match(/\bcompares?\s+(.+?)\s+against\s+its\s+(?:own\s+history|historical\s+(?:values|data|trend))\b/i) ??
         text.match(new RegExp(`\\bpanel\\s+for\\s+(.+?)${stop}`, 'i')) ??
         text.match(new RegExp(`\\bfor\\s+(?:the\\s+)?(.+?)${stop}`, 'i'));
     if (!m?.[1]) {
@@ -106,7 +108,10 @@ export function extractOwnHistoryMetricLabel(message: string): string | undefine
     return label;
 }
 
-export function parseAddOwnHistoryPanelRequest(message: string): AddOwnHistoryPanelRequest | null {
+export function parseAddOwnHistoryPanelRequest(
+    message: string,
+    opts?: { contextDashboardUid?: string }
+): AddOwnHistoryPanelRequest | null {
     const text = normalizeMessageQuotes(message.trim());
     if (messageMentionsGrafanaAlertCreate(text) || messageMentionsGrafanaAlertUpdate(text)) {
         return null;
@@ -124,7 +129,7 @@ export function parseAddOwnHistoryPanelRequest(message: string): AddOwnHistoryPa
     const machines = findMachineIdsInText(text);
     const machineId = machines[0];
     const dashboardTitle = extractRequestedDashboardTitle(text, machineId) ?? extractOnDashboardMachineTitle(text);
-    const dashboardUid = uids[0] ?? extractDashboardUidFromMessage(text);
+    const dashboardUid = uids[0] ?? extractDashboardUidFromMessage(text) ?? opts?.contextDashboardUid;
 
     let moduleNumber: number | undefined;
     let metricLabel: string | undefined;

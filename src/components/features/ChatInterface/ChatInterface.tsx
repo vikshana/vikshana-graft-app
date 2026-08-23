@@ -2148,7 +2148,9 @@ export const ChatInterface = () => {
         return;
       }
 
-      const addOwnHistoryRequestEarly = parseAddOwnHistoryPanelRequest(content);
+      const addOwnHistoryRequestEarly = parseAddOwnHistoryPanelRequest(content, {
+        contextDashboardUid: contextService.getDashboardUid() ?? undefined,
+      });
       if (
         addOwnHistoryRequestEarly &&
         !userWantsBulkOwnHistoryPanelCopy(content) &&
@@ -2192,7 +2194,9 @@ export const ChatInterface = () => {
         return;
       }
 
-      const addHistoryComparisonRequest = parseAddHistoryComparisonPanelRequest(content);
+      const addHistoryComparisonRequest = parseAddHistoryComparisonPanelRequest(content, {
+        contextDashboardUid: contextService.getDashboardUid() ?? undefined,
+      });
       if (messageRequestsMlPanelGuidance(content)) {
         finalContent = formatModuleMlPanelGuidanceReply(parseModuleMlGuidanceContext(content));
         setMessages((prev) => {
@@ -2287,7 +2291,9 @@ export const ChatInterface = () => {
         const uid =
           ownHistoryNamingRequest.dashboardUid ??
           (await (async () => {
-            const addReq = parseAddOwnHistoryPanelRequest(content);
+            const addReq = parseAddOwnHistoryPanelRequest(content, {
+              contextDashboardUid: contextService.getDashboardUid() ?? undefined,
+            });
             return addReq?.dashboardUid;
           })()) ??
           '6gawrgawrgragg';
@@ -2561,7 +2567,9 @@ export const ChatInterface = () => {
         return;
       }
       const addPeerRfRequest = (() => {
-        const direct = parseAddPeerRfPanelRequest(content);
+        const direct = parseAddPeerRfPanelRequest(content, {
+          contextDashboardUid: contextService.getDashboardUid() ?? undefined,
+        });
         if (direct) {
           if (messageRequestsPeerRfEnroll(content)) {
             return { ...direct, enrollIfMissing: true };

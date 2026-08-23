@@ -34,6 +34,7 @@ import {
     randomPeerRfPrompts,
     randomTemperaturePrompts,
     randomUnmatchedPrompts,
+    randomWriteupPrompts,
 } from './operatorParaphraseGenerator';
 
 const rng = makeParaphraseRng();
@@ -213,6 +214,10 @@ describe(`random paraphrases each run (seed ${PARAPHRASE_SEED}, n=${PARAPHRASE_C
 
     it.each(randomUnmatchedPrompts(rng))('unmatched asks: %s', (prompt) => {
         expect(formatClarificationIfNeeded(prompt)).toMatch(/Need clarification/i);
+    });
+
+    it.each(randomWriteupPrompts(rng))('write-up paraphrase: %s', (prompt) => {
+        mustHandleOrAsk(prompt);
     });
 });
 

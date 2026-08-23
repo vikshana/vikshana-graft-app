@@ -29,7 +29,7 @@ export function findMachineIdsInText(message: string): string[] {
 }
 
 const TEMPLATE_TITLE_STOP =
-    '(?=\\s*,|\\s+but\\b|\\s+with\\s+data\\b|\\s+with\\s+data\\s+for\\b|\\s+for\\s+(?:machine\\s+)?(?:[0-9]{4}-|[A-Za-z][A-Za-z0-9]*-SIM-)|$)';
+    '(?=\\s*,|\\s+but\\b|\\s+and\\s+rename\\b|\\s+with\\s+data\\b|\\s+with\\s+data\\s+for\\b|\\s+for\\s+(?:machine\\s+)?(?:[0-9]{4}-|[A-Za-z][A-Za-z0-9]*-SIM-)|$)';
 
 /** Help / how-to questions about copying — not a clone job. */
 export function isCloneHowToQuestion(message: string): boolean {
@@ -91,6 +91,10 @@ export function extractSourceDashboardTitle(cloneIntentMessage: string): string 
     if (!title || isMachineId(title) || title.length < 2 || title.length > 80) {
         return undefined;
     }
+    // "Clone dashboard 2103-176030 and rename it to …" is a machine id, not a title.
+    if (new RegExp(`^${MACHINE_ID_PATTERN.source}\\b`, 'i').test(title)) {
+        return undefined;
+    }
     if (/^(?:it|this|that|the dashboard)$/i.test(title)) {
         return undefined;
     }
@@ -116,6 +120,12 @@ export function extractSourceMachineId(cloneIntentMessage: string): string | und
     );
     if (copyOf?.[1] && isMachineId(copyOf[1])) {
         return copyOf[1];
+    }
+    const cloneDashboard = cloneIntentMessage.match(
+        new RegExp(`\\b(?:clone|copy|duplicate)\\s+(?:the\\s+)?dashboard\\s+(${idGroup})`, 'i')
+    );
+    if (cloneDashboard?.[1] && isMachineId(cloneDashboard[1])) {
+        return cloneDashboard[1];
     }
     const basedOn = cloneIntentMessage.match(
         new RegExp(`\\b(?:based\\s+on|same\\s+as)\\s+(${idGroup})`, 'i')
@@ -148,6 +158,13 @@ function extractTargetMachineIdPreferringPhrases(cloneIntentMessage: string): st
     );
     if (dataFor?.[1] && isMachineId(dataFor[1])) {
         return dataFor[1];
+    }
+
+    const renameTo = cloneIntentMessage.match(
+        new RegExp(`\\brename\\s+(?:it|that|the\\s+dashboard)?\\s*to\\s+(${idGroup})`, 'i')
+    );
+    if (renameTo?.[1] && isMachineId(renameTo[1])) {
+        return renameTo[1];
     }
 
     const forMatches = [
