@@ -11,6 +11,14 @@ jobs:
   renovate:
     runs-on: ubuntu-latest
     steps:
+      - name: Create GitHub App installation token
+        id: renovate-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.RENOVATE_APP_ID }}
+          private-key: ${{ secrets.RENOVATE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
       - uses: renovatebot/github-action@v46.2.3
         with:
-          token: ${{ secrets.RENOVATE_TOKEN }}
+          token: ${{ steps.renovate-token.outputs.token }}
