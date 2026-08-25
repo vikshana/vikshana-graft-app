@@ -1,4 +1,5 @@
 import {
+    catalogOwnHistorySignal,
     extractOwnHistoryMetricLabel,
     messageMentionsOwnHistoryPanel,
     parseAddOwnHistoryPanelRequest,
@@ -64,6 +65,21 @@ describe('ownHistoryPanelParse — target metric', () => {
         );
         expect(req?.moduleNumber).toBe(3);
         expect(req?.metricLabel).toBeUndefined();
+    });
+
+    it('catalogs Sensing Voltage, Average Sensing Voltage, and plant Temperature without a source panel', () => {
+        expect(catalogOwnHistorySignal('Sensing Voltage')?.field).toBe('Cartridge_Sensing_Voltage');
+        expect(catalogOwnHistorySignal('cartridge sensing voltage')?.field).toBe('Cartridge_Sensing_Voltage');
+        expect(catalogOwnHistorySignal('Average Sensing Voltage')?.field).toBe('Average_Sensing_Voltage');
+        expect(catalogOwnHistorySignal('plant temperature')?.field).toBe('Temperature_C');
+        expect(catalogOwnHistorySignal('Temperature')?.field).toBe('Temperature_C');
+    });
+
+    it('does not catalog unknown plant labels (Pressure, Conductivity, Humidity)', () => {
+        expect(catalogOwnHistorySignal('Pressure')).toBeUndefined();
+        expect(catalogOwnHistorySignal('Conductivity')).toBeUndefined();
+        expect(catalogOwnHistorySignal('Humidity')).toBeUndefined();
+        expect(catalogOwnHistorySignal('the usual sensor')).toBeUndefined();
     });
 
     it('does not invent Module 5 when no target is named', () => {

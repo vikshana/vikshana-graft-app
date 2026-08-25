@@ -108,6 +108,11 @@ export const WRITEUP_PARAPHRASE_BANK: Record<WriteupParaphraseKind, string[]> = 
         'pls add an own history ±2σ panle for Sensing Voltage on uid=idHkqdqnk',
         'Add an own history panel for Sensing Voltage.',
         'Create a historical mean ± 2 standard deviation panel for Sensing Voltage on idHkqdqnk.',
+        'Create a machine learning panel that compares Sensing Voltage against its own history for the dashboard with UID = idHkqdqnk.',
+        'Please add an own-history ±2σ band for Average Sensing Voltage on uid=idHkqdqnk.',
+        'Add a vs own history panel for plant temperature on the dashboard with UID = idHkqdqnk.',
+        'Make an own history ±2σ plot of Temperature on dashboard idHkqdqnk.',
+        'Add own history for cartridge sensing voltage on uid=idHkqdqnk.',
     ],
     peerCompare: [
         'Create a machine learning panel that compares Module 1 Current against the average of Modules 2 through 8 on uid=idHkqdqnk.',
@@ -144,6 +149,10 @@ export const WRITEUP_PARAPHRASE_BANK: Record<WriteupParaphraseKind, string[]> = 
         'Please add a predictive analytics panel for Module 1 Current, dashboard uid=idHkqdqnk.',
         'Create an anomaly detection panel for Module 1 on this dashboard.',
         'Build a History Comparison RF panel for Module 1 Current on uid=idHkqdqnk.',
+        'Set up an anomaly detection panel for Module 1 on the dashboard with UID = idHkqdqnk.',
+        'Please create a machine learning/anomaly detection panel for Module 1, dashboard uid idHkqdqnk.',
+        'Add predictive analytics for module 1 current on uid=idHkqdqnk.',
+        'Create an ML anomaly detection panel for Module 1 on dashboard idHkqdqnk.',
     ],
     alert: [
         'Create a Grafana-managed alert for the panel titled "Module 1 Current — Alert Test Own History ±2σ" on the dashboard with UID = idHkqdqnk. Trigger when Actual is above the upper ±2σ bound or below the lower bound, and notify Alex Test Email.',

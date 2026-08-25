@@ -116,6 +116,7 @@ describe('operator phrasing (lab PDF)', () => {
         expect(messageHasProgrammaticHandler(DASHBOARD_RENAME)).toBe(true);
         expect(messageHasProgrammaticHandler(PANEL_RENAME)).toBe(true);
         expect(messageHasProgrammaticHandler(OWN_HISTORY)).toBe(true);
+        expect(messageHasProgrammaticHandler(MODULE1_ANOMALY)).toBe(true);
         expect(messageHasProgrammaticHandler(PEER_RF)).toBe(true);
         expect(messageHasProgrammaticHandler(TEMPERATURE)).toBe(true);
         expect(classifyLlmIntent(TEMPERATURE)).toBe('programmatic');

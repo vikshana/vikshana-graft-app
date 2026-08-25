@@ -112,6 +112,9 @@ describe('own-history paraphrases (Sensing Voltage, idHkqdqnk)', () => {
         'Add an own history ±2σ panel for Sensing Voltage on uid=idHkqdqnk.',
         'Make a vs own history panel for Sensing Voltage on dashboard idHkqdqnk.',
         'Create a historical mean ± 2 standard deviation panel for Sensing Voltage on idHkqdqnk.',
+        'Create a machine learning panel that compares Sensing Voltage against its own history for the dashboard with UID = idHkqdqnk.',
+        'Please add an own-history ±2σ band for Average Sensing Voltage on uid=idHkqdqnk.',
+        'Add a vs own history panel for plant temperature on the dashboard with UID = idHkqdqnk.',
     ])('%s', (prompt) => {
         mustHandleOrAsk(prompt);
         expect(messageMentionsOwnHistoryPanel(prompt)).toBe(true);
@@ -119,7 +122,7 @@ describe('own-history paraphrases (Sensing Voltage, idHkqdqnk)', () => {
         expect(messageMentionsAddPeerRfPanel(prompt)).toBe(false);
         const req = parseAddOwnHistoryPanelRequest(prompt);
         expect(req?.dashboardUid).toBe('idHkqdqnk');
-        expect(req?.metricLabel?.toLowerCase()).toMatch(/sensing voltage/);
+        expect(req?.metricLabel?.toLowerCase()).toMatch(/sensing voltage|temperature/);
     });
 });
 
@@ -154,6 +157,23 @@ describe('Temperature paraphrases (plant metric, not Module Current)', () => {
         const hc = parseAddHistoryComparisonPanelRequest(prompt);
         expect(hc?.signal?.field).toBe('Temperature_C');
         expect(hc?.signal?.field).not.toBe('Module3_Current_A');
+    });
+});
+
+describe('history-comparison paraphrases (Module 1 anomaly, idHkqdqnk)', () => {
+    it.each([
+        'Create a machine learning/anomaly detection panel for Module 1 on the dashboard with the UID = idHkqdqnk.',
+        'Set up an anomaly detection panel for Module 1 on the dashboard with UID = idHkqdqnk.',
+        'Add a predictive analytics panel for Module 1 Current on uid=idHkqdqnk.',
+        'Please create an ML/anomaly detection panel for Module 1 on dashboard idHkqdqnk.',
+    ])('%s', (prompt) => {
+        mustHandleOrAsk(prompt);
+        expect(messageMentionsPredictiveAnalyticsPanel(prompt)).toBe(true);
+        expect(messageMentionsOwnHistoryPanel(prompt)).toBe(false);
+        const req = parseAddHistoryComparisonPanelRequest(prompt);
+        expect(req?.dashboardUid).toBe('idHkqdqnk');
+        expect(req?.moduleNumber).toBe(1);
+        expect(req?.signal?.field).toBe('Module1_Current_A');
     });
 });
 
@@ -193,7 +213,7 @@ describe(`random paraphrases each run (seed ${PARAPHRASE_SEED}, n=${PARAPHRASE_C
         expect(messageMentionsPredictiveAnalyticsPanel(prompt)).toBe(false);
         const req = parseAddOwnHistoryPanelRequest(prompt);
         expect(req?.dashboardUid).toBe('idHkqdqnk');
-        expect(req?.metricLabel?.toLowerCase()).toMatch(/sensing voltage/);
+        expect(req?.metricLabel?.toLowerCase()).toMatch(/sensing voltage|temperature/);
     });
 
     it.each(randomPeerRfPrompts(rng))('peer-RF: %s', (prompt) => {

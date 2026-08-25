@@ -124,6 +124,9 @@ export function randomOwnHistoryPrompts(rng: () => number, count = PARAPHRASE_CO
         'a machine learning panel that compares Sensing Voltage against its own history',
         'a vs own history panel for Sensing Voltage',
         'a historical mean ± 2 standard deviation panel for Sensing Voltage',
+        'an own history ±2σ panel for Average Sensing Voltage',
+        'a vs own history panel for plant temperature',
+        'a machine learning panel that compares Temperature against its own history',
     ];
     const out: string[] = [];
     for (let i = 0; i < count; i++) {

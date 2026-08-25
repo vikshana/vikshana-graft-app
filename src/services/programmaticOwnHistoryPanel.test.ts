@@ -81,6 +81,24 @@ describe('runProgrammaticAddOwnHistoryPanel — target metric', () => {
         expect(blob).not.toContain('Module5_Current_A');
     });
 
+    it('builds Average Sensing Voltage and Temperature own-history from the catalog', async () => {
+        const capture: { saved?: { panels?: SavedPanel[] } } = {};
+        const avg = await runProgrammaticAddOwnHistoryPanel(client(capture), {
+            dashboardUid: 'afq7tc6hl1m9sb',
+            metricLabel: 'Average Sensing Voltage',
+        });
+        expect(avg.ok).toBe(true);
+        expect(JSON.stringify(capture.saved)).toContain('Average_Sensing_Voltage');
+
+        const captureT: { saved?: { panels?: SavedPanel[] } } = {};
+        const temp = await runProgrammaticAddOwnHistoryPanel(client(captureT), {
+            dashboardUid: 'afq7tc6hl1m9sb',
+            metricLabel: 'plant temperature',
+        });
+        expect(temp.ok).toBe(true);
+        expect(JSON.stringify(captureT.saved)).toContain('Temperature_C');
+    });
+
     it('errors clearly when no source panel exists for the named metric', async () => {
         const capture: { saved?: { panels?: SavedPanel[] } } = {};
         const result = await runProgrammaticAddOwnHistoryPanel(client(capture), {
@@ -89,6 +107,17 @@ describe('runProgrammaticAddOwnHistoryPanel — target metric', () => {
         });
         expect(result.ok).toBe(false);
         expect(result.error).toContain('Pressure');
+        expect(capture.saved).toBeUndefined();
+    });
+
+    it('errors clearly for unknown labels that are not in the plant catalog', async () => {
+        const capture: { saved?: { panels?: SavedPanel[] } } = {};
+        const result = await runProgrammaticAddOwnHistoryPanel(client(capture), {
+            dashboardUid: 'afq7tc6hl1m9sb',
+            metricLabel: 'Conductivity',
+        });
+        expect(result.ok).toBe(false);
+        expect(result.error).toMatch(/Conductivity/i);
         expect(capture.saved).toBeUndefined();
     });
 

@@ -2,7 +2,9 @@ import {
     extractMetricNamesFromPrometheusQueryText,
     machineMetricsFieldSelectors,
     machinePrometheusSelectors,
+    PROMETHEUS_DATASOURCE_LOOKUP_NAMES,
     resolveInfluxDatasourceUid,
+    resolvePrometheusDatasourceUid,
 } from './prometheusDiscovery';
 
 describe('prometheusDiscovery', () => {
@@ -62,5 +64,39 @@ describe('prometheusDiscovery', () => {
             },
         ]);
         expect(uid).toBe('i1');
+    });
+
+    it('includes ElectraMet sandbox Prometheus names in the lookup list', () => {
+        expect(PROMETHEUS_DATASOURCE_LOOKUP_NAMES).toEqual(
+            expect.arrayContaining(['Prometheus', 'ElectraMet Prometheus', 'Prometheus-ElectraMet'])
+        );
+    });
+
+    it('resolves Prometheus from list_datasources when the dashboard is Influx-only', async () => {
+        const mcp = {
+            callTool: jest.fn(async ({ name }: { name: string }) => {
+                if (name === 'list_datasources') {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: JSON.stringify([
+                                    { uid: 'influx-1', type: 'influxdb', name: 'InfluxDB' },
+                                    { uid: 'prom-em', type: 'prometheus', name: 'ElectraMet Prometheus' },
+                                ]),
+                            },
+                        ],
+                    };
+                }
+                throw new Error(name);
+            }),
+        };
+        const uid = await resolvePrometheusDatasourceUid(mcp, [
+            {
+                datasource: { type: 'influxdb', uid: 'influx-1' },
+                targets: [{ query: 'from(bucket: v.bucket)' }],
+            },
+        ]);
+        expect(uid).toBe('prom-em');
     });
 });

@@ -222,6 +222,16 @@ export async function resolveInfluxDatasourceUid(
     return undefined;
 }
 
+/** Names sandbox/live Grafana may use. `list_datasources` is preferred; these are get_datasource_by_name fallbacks. */
+export const PROMETHEUS_DATASOURCE_LOOKUP_NAMES = [
+    'Prometheus',
+    'prometheus',
+    'VictoriaMetrics',
+    'Mimir',
+    'ElectraMet Prometheus',
+    'Prometheus-ElectraMet',
+] as const;
+
 /** Resolve Prometheus datasource UID from dashboard panels or list_datasources. */
 export async function resolvePrometheusDatasourceUid(
     mcpClient: McpClient,
@@ -257,7 +267,7 @@ export async function resolvePrometheusDatasourceUid(
         }
     }
 
-    for (const name of ['Prometheus', 'prometheus', 'VictoriaMetrics', 'Mimir']) {
+    for (const name of PROMETHEUS_DATASOURCE_LOOKUP_NAMES) {
         const uid = await tryDatasourceByName(mcpClient, name, toolExecutions);
         if (uid) {
             return uid;
