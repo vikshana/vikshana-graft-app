@@ -9,6 +9,8 @@
 
 An open-source AI assistant plugin for Grafana, enabling natural language interaction with your observability data.
 
+> **Experimental:** Graft is in active development and will evolve through many iterations. This may include breaking changes between releases.
+
 ## Features
 
 - **Natural Language Queries** - Ask questions about your dashboards, metrics, logs, traces, alerts or more
