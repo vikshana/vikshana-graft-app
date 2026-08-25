@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.5](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.6.4...graft-v0.6.5) (2026-08-25)
+
+
+### Documentation
+
+* **readme:** note experimental development status ([#43](https://github.com/vikshana/vikshana-graft-app/issues/43)) ([4bd65a5](https://github.com/vikshana/vikshana-graft-app/commit/4bd65a51ec62ea4414b44425766746d718fafa64))
+
 ## [0.6.4](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.6.3...graft-v0.6.4) (2026-08-22)
 
 
