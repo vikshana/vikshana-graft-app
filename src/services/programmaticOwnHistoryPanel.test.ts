@@ -67,6 +67,20 @@ describe('runProgrammaticAddOwnHistoryPanel — target metric', () => {
         expect(added?.fieldConfig?.defaults?.unit).toBe('pressurehpa');
     });
 
+    it('builds Sensing Voltage own-history from the plant catalog when no source panel exists', async () => {
+        const capture: { saved?: { panels?: SavedPanel[] } } = {};
+        const result = await runProgrammaticAddOwnHistoryPanel(client(capture), {
+            dashboardUid: 'afq7tc6hl1m9sb',
+            metricLabel: 'Sensing Voltage',
+        });
+        expect(result.ok).toBe(true);
+        expect(result.panelTitle).toMatch(/Sensing Voltage/i);
+        const added = capture.saved?.panels?.find((p) => /Sensing Voltage/i.test(p.title ?? ''));
+        const blob = JSON.stringify(added);
+        expect(blob).toContain('Cartridge_Sensing_Voltage');
+        expect(blob).not.toContain('Module5_Current_A');
+    });
+
     it('errors clearly when no source panel exists for the named metric', async () => {
         const capture: { saved?: { panels?: SavedPanel[] } } = {};
         const result = await runProgrammaticAddOwnHistoryPanel(client(capture), {

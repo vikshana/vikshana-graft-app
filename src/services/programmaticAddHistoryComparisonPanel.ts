@@ -10,6 +10,7 @@ import type { AddHistoryComparisonPanelRequest } from './historyComparisonPanelA
 import { resolveHistoryComparisonSignal } from './historyComparisonPanelAddParse';
 import { resolveDashboardUid, inferMachineIdFromDashboardTitle } from './programmaticDashboardResolve';
 import { findPrometheusTemplatePanel } from './instrumentationMetricDiscovery';
+import { resolvePrometheusDatasourceUid } from './prometheusDiscovery';
 import { getPanelTargetList } from './fluxPeerBandFix';
 import {
     isLiveHistoryComparisonPanel,
@@ -271,12 +272,19 @@ export async function runProgrammaticAddHistoryComparisonPanel(
         };
     }
 
-    const promUid = promUidFromDashboard(proposed.panels);
+    const promUid =
+        promUidFromDashboard(proposed.panels) ??
+        (await resolvePrometheusDatasourceUid(
+            mcpClient,
+            Array.isArray(proposed.panels) ? proposed.panels : [],
+            toolExecutions
+        ));
     if (!promUid) {
         return {
             ok: false,
             error:
-                'No Prometheus datasource UID found on this dashboard. Keep at least one working Prometheus panel, then retry.',
+                'No Prometheus datasource UID found on this dashboard or in Grafana. ' +
+                'Keep at least one working Prometheus panel, or add a Prometheus datasource, then retry.',
             toolExecutions,
             dashboardUid: resolved.uid,
             dashboardTitle,

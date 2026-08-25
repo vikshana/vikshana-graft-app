@@ -8,6 +8,26 @@ import { extractOnDashboardMachineTitle } from './modulePanelReorderParse';
 import { canonicalOwnHistoryTitle } from './modulePanelTitles';
 import { messageMentionsGrafanaAlertCreate, messageMentionsGrafanaAlertUpdate } from './grafanaAlertParse';
 
+/** Known plant signals that do not need an existing Influx panel on the dashboard. */
+export function catalogOwnHistorySignal(
+    label: string
+): { field: string; unit: string; signalName: string } | undefined {
+    const lc = label.trim().toLowerCase();
+    if (!lc) {
+        return undefined;
+    }
+    if (/\baverage\s+sensing\s+voltage\b/.test(lc)) {
+        return { field: 'Average_Sensing_Voltage', unit: 'volt', signalName: 'Average Sensing Voltage' };
+    }
+    if (/\b(?:cartridge\s+)?sensing\s+voltage\b/.test(lc)) {
+        return { field: 'Cartridge_Sensing_Voltage', unit: 'volt', signalName: 'Sensing Voltage' };
+    }
+    if (/^temperatures?$/.test(lc) || /\bplant\s+temperature\b/.test(lc)) {
+        return { field: 'Temperature_C', unit: 'celsius', signalName: 'Temperature' };
+    }
+    return undefined;
+}
+
 export interface AddOwnHistoryPanelRequest {
     dashboardUid?: string;
     dashboardTitle?: string;

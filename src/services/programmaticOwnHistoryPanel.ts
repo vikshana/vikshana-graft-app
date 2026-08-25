@@ -13,6 +13,7 @@ import type {
     AddOwnHistoryPanelRequest,
     BulkOwnHistoryPanelCopyRequest,
 } from './ownHistoryPanelParse';
+import { catalogOwnHistorySignal } from './ownHistoryPanelParse';
 import {
     canonicalOwnHistoryTitle,
     canonicalOwnHistoryTitleForLabel,
@@ -375,7 +376,8 @@ export async function runProgrammaticAddOwnHistoryPanel(
             return { ok: false, error: `Panel "${title}" already exists.`, toolExecutions, dashboardUid: resolved.uid, dashboardTitle };
         }
         const source = resolveSignalFromDashboard(proposed.panels, request.metricLabel);
-        if (!source) {
+        const catalog = catalogOwnHistorySignal(request.metricLabel);
+        if (!source && !catalog) {
             return {
                 ok: false,
                 error:
@@ -387,7 +389,7 @@ export async function runProgrammaticAddOwnHistoryPanel(
             };
         }
         const influxUid =
-            source.datasourceUid ??
+            source?.datasourceUid ??
             influxUidFromDashboard(proposed.panels) ??
             (await resolveInfluxDatasourceUid(mcpClient, proposed.panels, toolExecutions));
         if (!influxUid) {
@@ -402,11 +404,11 @@ export async function runProgrammaticAddOwnHistoryPanel(
             };
         }
         raw = buildOwnHistoryPanelForSignal({
-            machineId: source.machine ?? machineId,
-            field: source.field,
+            machineId: source?.machine ?? machineId,
+            field: source?.field ?? catalog!.field,
             title,
-            signalName: request.metricLabel,
-            unit: source.unit ?? 'none',
+            signalName: catalog?.signalName ?? request.metricLabel,
+            unit: source?.unit ?? catalog?.unit ?? 'none',
             influxDatasourceUid: influxUid,
         });
     } else {

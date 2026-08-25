@@ -133,4 +133,24 @@ describe('historyComparisonPanelAddParse', () => {
         const prompt = 'What does ML temperature mean on the dashboard with UID = idHkqdqnk?';
         expect(parseAddHistoryComparisonPanelRequest(prompt)).toBeNull();
     });
+
+    it('parses machine-learning/anomaly-detection panel for Module 1 as History Comparison', () => {
+        const prompt =
+            'Create a machine learning/anomaly detection panel for Module 1 on the dashboard with the UID = idHkqdqnk.';
+        expect(messageMentionsPredictiveAnalyticsPanel(prompt)).toBe(true);
+        const req = parseAddHistoryComparisonPanelRequest(prompt);
+        expect(req?.dashboardUid).toBe('idHkqdqnk');
+        expect(req?.moduleNumber).toBe(1);
+        expect(req?.signal?.field).toBe('Module1_Current_A');
+    });
+
+    it('parses set-up anomaly detection panel for Module 1 as History Comparison', () => {
+        const prompt =
+            'Set up an anomaly detection panel for Module 1 on the dashboard with UID = idHkqdqnk.';
+        expect(messageMentionsPredictiveAnalyticsPanel(prompt)).toBe(true);
+        const req = parseAddHistoryComparisonPanelRequest(prompt);
+        expect(req?.dashboardUid).toBe('idHkqdqnk');
+        expect(req?.moduleNumber).toBe(1);
+        expect(req?.signal?.field).toBe('Module1_Current_A');
+    });
 });

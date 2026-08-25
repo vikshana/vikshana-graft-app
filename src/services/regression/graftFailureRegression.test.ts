@@ -92,6 +92,10 @@ import {
     parseAddPeerRfPanelRequest,
 } from '../peerRfPanelAddParse';
 import {
+    messageMentionsOwnHistoryPanel,
+    parseAddOwnHistoryPanelRequest,
+} from '../ownHistoryPanelParse';
+import {
     KEYSIGHT_DASHBOARD_UID,
     REGRESSION_CASES,
     type RegressionCase,
@@ -235,6 +239,13 @@ function assertHandlerRouting(c: RegressionCase): void {
             expect(messageDescribesUnsupportedAdminRequest(prompt)).toBeNull();
             expect(messageMentionsPredictiveAnalyticsPanel(prompt)).toBe(false);
             break;
+        case 'own-history':
+            expect(messageMentionsOwnHistoryPanel(prompt)).toBe(true);
+            expect(parseAddOwnHistoryPanelRequest(prompt)?.metricLabel?.toLowerCase()).toContain(
+                'sensing voltage'
+            );
+            expect(messageMentionsPredictiveAnalyticsPanel(prompt)).toBe(false);
+            break;
         case 'dashboard-rename':
             expect(userWantsDashboardRename(prompt)).toBe(true);
             expect(parseDashboardRenameRequest(prompt)?.newLabel).toBe('Keysight');
@@ -286,7 +297,7 @@ function assertHandlerRouting(c: RegressionCase): void {
 describe('graft historical failure regression', () => {
     describe('fixture catalog', () => {
         it('documents known failure patterns', () => {
-            expect(REGRESSION_CASES).toHaveLength(26);
+            expect(REGRESSION_CASES).toHaveLength(28);
             const ids = REGRESSION_CASES.map((c) => c.id);
             expect(new Set(ids).size).toBe(ids.length);
         });
@@ -572,6 +583,7 @@ describe('graft historical failure regression', () => {
             'intent-route-clarify',
             'dashboard-clone',
             'dashboard-rename',
+            'own-history',
         ];
 
         it.each(handlers)('%s prompt does not collide with unrelated handlers', (handlerId) => {
@@ -634,6 +646,13 @@ describe('graft historical failure regression', () => {
             }
             if (handlerId !== 'dashboard-rename' && handlerId !== 'panel-rename') {
                 expect(userWantsDashboardRename(c.prompt)).toBe(false);
+            }
+            if (
+                handlerId !== 'own-history' &&
+                handlerId !== 'grafana-alert-create' &&
+                handlerId !== 'grafana-alert-update'
+            ) {
+                expect(messageMentionsOwnHistoryPanel(c.prompt)).toBe(false);
             }
             if (handlerId === 'intent-route-clarify') {
                 expect(messageNeedsIntentRouteClarification(c.prompt)).toBe(true);

@@ -5,6 +5,7 @@
  */
 import { userWantsDashboardClone } from '../dashboardCloneProgress';
 import { messageMentionsOwnHistoryPanel } from '../ownHistoryPanelParse';
+import { messageMentionsPredictiveAnalyticsPanel } from '../historyComparisonPanelAddParse';
 import { messageMentionsAddPeerRfPanel } from '../peerRfPanelAddParse';
 import { messageMentionsGrafanaAlertCreate } from '../grafanaAlertParse';
 import { messageHasProgrammaticHandler } from '../programmaticChatIntents';
@@ -76,6 +77,14 @@ describe(`AI write-up paraphrases (seed ${PARAPHRASE_SEED})`, () => {
 
     it.each(sample('peerCompare'))('peer compare: %s', (prompt) => {
         expect(handleOrAsk(prompt)).toBe(true);
+        expect(asksNeedClarification(prompt) ?? '').not.toMatch(/### Done/);
+    });
+
+    it.each(sample('historyComparison'))('history comparison: %s', (prompt) => {
+        expect(handleOrAsk(prompt)).toBe(true);
+        expect(
+            messageMentionsPredictiveAnalyticsPanel(prompt) || Boolean(asksNeedClarification(prompt))
+        ).toBe(true);
         expect(asksNeedClarification(prompt) ?? '').not.toMatch(/### Done/);
     });
 

@@ -21,7 +21,8 @@ export type RegressionHandlerId =
     | 'history-comparison-clarify'
     | 'intent-route-clarify'
     | 'dashboard-clone'
-    | 'dashboard-rename';
+    | 'dashboard-rename'
+    | 'own-history';
 
 export interface RegressionCase {
     id: string;
@@ -328,5 +329,26 @@ export const REGRESSION_CASES: RegressionCase[] = [
         expectProgrammatic: true,
         expectLlmIntent: 'programmatic',
         expectSignalField: 'Temperature_C',
+    },
+    {
+        id: 'own-history-sensing-voltage-create',
+        failure:
+            'Own-history Sensing Voltage create failed waiting for an existing Influx panel instead of using Cartridge_Sensing_Voltage',
+        prompt:
+            'Create a machine learning panel that compares Sensing Voltage against its own history for the dashboard with UID = idHkqdqnk.',
+        expectHandler: 'own-history',
+        expectProgrammatic: true,
+        expectLlmIntent: 'programmatic',
+    },
+    {
+        id: 'ml-module1-anomaly-history-comparison',
+        failure:
+            'Module 1 ML/anomaly detection create failed on missing Prometheus UID on the dashboard instead of list_datasources',
+        prompt:
+            'Create a machine learning/anomaly detection panel for Module 1 on the dashboard with the UID = idHkqdqnk.',
+        expectHandler: 'history-comparison',
+        expectProgrammatic: true,
+        expectLlmIntent: 'programmatic',
+        expectSignalField: 'Module1_Current_A',
     },
 ];

@@ -240,6 +240,20 @@ export function e2eSensingVoltageHistoryComparisonPrompt(dashboardUid: string): 
     );
 }
 
+export function e2eOwnHistorySensingVoltagePrompt(dashboardUid: string): string {
+    return (
+        `Create a machine learning panel that compares Sensing Voltage against its own history ` +
+        `for the dashboard with UID = ${dashboardUid}.`
+    );
+}
+
+export function e2eModule1AnomalyHistoryComparisonPrompt(dashboardUid: string): string {
+    return (
+        `Create a machine learning/anomaly detection panel for Module 1 ` +
+        `on the dashboard with the UID = ${dashboardUid}.`
+    );
+}
+
 /**
  * Intentionally ambiguous: peer mean (Peer Band) + Random Forest predictive analytics (HC).
  * Must trigger intent-router clarification, not save either panel.

@@ -15,6 +15,7 @@ export type WriteupParaphraseKind =
     | 'ownHistory'
     | 'peerCompare'
     | 'randomForest'
+    | 'historyComparison'
     | 'alert'
     | 'readOnly'
     | 'unmatched';
@@ -131,6 +132,18 @@ export const WRITEUP_PARAPHRASE_BANK: Record<WriteupParaphraseKind, string[]> = 
         'I need RF vs Peers for module 2 current, dashboard idHkqdqnk.',
         'Add RandomForest vs Peers for Module 2 Current.',
         'Create a peer RF Influx panel for Module 2 Current on dashboard idHkqdqnk.',
+    ],
+    historyComparison: [
+        'Create a machine learning/anomaly detection panel for Module 1 on the dashboard with the UID = idHkqdqnk.',
+        'Add a predictive analytics panel for Module 1 Current on uid=idHkqdqnk.',
+        'Please create an anomaly detection panel for Module 1 on dashboard UID = idHkqdqnk.',
+        'Add a History Comparison panel for Module 1 Current on the dashboard with UID = idHkqdqnk.',
+        'I need a machine learning anomaly detection panel for Module 1 on uid=idHkqdqnk.',
+        'Create a Random Forest History Comparison panel for Module 1 on dashboard idHkqdqnk.',
+        'On idHkqdqnk, add an ML/anomaly detection panel for Module 1.',
+        'Please add a predictive analytics panel for Module 1 Current, dashboard uid=idHkqdqnk.',
+        'Create an anomaly detection panel for Module 1 on this dashboard.',
+        'Build a History Comparison RF panel for Module 1 Current on uid=idHkqdqnk.',
     ],
     alert: [
         'Create a Grafana-managed alert for the panel titled "Module 1 Current — Alert Test Own History ±2σ" on the dashboard with UID = idHkqdqnk. Trigger when Actual is above the upper ±2σ bound or below the lower bound, and notify Alex Test Email.',

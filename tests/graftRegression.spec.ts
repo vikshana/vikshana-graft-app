@@ -45,6 +45,9 @@ import {
     e2ePeerBandAlertUpdateByRulePrompt,
     E2E_PEER_BAND_ALERT_PANEL_TITLE,
     e2eSensingVoltageHistoryComparisonPrompt,
+    e2eOwnHistorySensingVoltagePrompt,
+    e2eModule1AnomalyHistoryComparisonPrompt,
+    e2eDashboardUid,
     e2eAmbiguousPeerBandVsHistoryComparisonPrompt,
     E2E_AMBIGUOUS_INTENT_EXPECT_CONTAINS,
     E2E_AMBIGUOUS_INTENT_EXPECT_NOT_CONTAINS,
@@ -488,5 +491,68 @@ test.describe('Graft regression E2E (mutating)', () => {
                 await deleteGrafanaDashboardIfPresent(page, clonedUid);
             }
         }
+    });
+
+    test('own-history-sensing-voltage-catalog', async ({ page }) => {
+        test.setTimeout(300_000);
+        const uid = e2eDashboardUid();
+        const panelTitle = 'Sensing Voltage — vs. Own History (± 2σ)';
+        const prompt = e2eOwnHistorySensingVoltagePrompt(uid);
+        const removeTimeoutMs = removeCase?.replyTimeoutMs ?? 180_000;
+
+        await removeE2ePanelsIfPresent(page, [panelTitle], e2ePanelRemovePrompt, {
+            timeoutMs: removeTimeoutMs,
+        });
+
+        await openFreshGraftChat(page);
+        const startCopyCount = await sendGraftPrompt(page, prompt);
+        const reply = await waitForAssistantReply(page, {
+            timeoutMs: 180_000,
+            startCopyCount,
+        });
+
+        assertReplyExpectations(
+            reply,
+            ['Own History panel', 'saved'],
+            [
+                "Couldn't find an existing",
+                'No Prometheus datasource UID',
+            ]
+        );
+        await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
+
+        await removeE2ePanelsIfPresent(page, [panelTitle], e2ePanelRemovePrompt, {
+            timeoutMs: removeTimeoutMs,
+        });
+    });
+
+    test('ml-module1-anomaly-history-comparison', async ({ page }) => {
+        test.setTimeout(300_000);
+        const uid = e2eDashboardUid();
+        const panelTitle = 'Module 1 Current — History Comparison';
+        const prompt = e2eModule1AnomalyHistoryComparisonPrompt(uid);
+        const removeTimeoutMs = removeCase?.replyTimeoutMs ?? 180_000;
+
+        await removeE2ePanelsIfPresent(page, [panelTitle], e2ePanelRemovePrompt, {
+            timeoutMs: removeTimeoutMs,
+        });
+
+        await openFreshGraftChat(page);
+        const startCopyCount = await sendGraftPrompt(page, prompt);
+        const reply = await waitForAssistantReply(page, {
+            timeoutMs: 180_000,
+            startCopyCount,
+        });
+
+        assertReplyExpectations(
+            reply,
+            ['Predictive analytics panel', 'saved'],
+            ['No Prometheus datasource UID found on this dashboard']
+        );
+        await expect(page.getByTestId('graft-continue-button')).not.toBeVisible();
+
+        await removeE2ePanelsIfPresent(page, [panelTitle], e2ePanelRemovePrompt, {
+            timeoutMs: removeTimeoutMs,
+        });
     });
 });

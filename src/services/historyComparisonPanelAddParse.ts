@@ -208,7 +208,14 @@ export function messageMentionsPredictiveAnalyticsPanel(message: string): boolea
         (/\bmachine\s+learning\b/i.test(text) &&
             /\bmodule\s*\d+\b/i.test(text) &&
             !/\bown\s+history\b/i.test(text) &&
-            /\bpanel\b/i.test(text))
+            /\bpanel\b/i.test(text)) ||
+        (/\banomaly\s+detection\b/i.test(text) &&
+            /\bmodule\s*\d+\b/i.test(text) &&
+            /\b(add|create|new|make|build|set\s+up)\b/i.test(text) &&
+            /\bpanel\b/i.test(text) &&
+            !/\bown\s+history\b/i.test(text) &&
+            !/\bvs\s+peers\b/i.test(text) &&
+            !/\bpeer\s+modules?\b/i.test(text))
     );
 }
 

@@ -3,6 +3,7 @@ import { parseAddPeerRfPanelRequest } from '../peerRfPanelAddParse';
 import { parseCloneIntentMessage } from '../dashboardCloneParse';
 import { parseAddPeerBandPanelRequest } from '../peerBandPanelAddParse';
 import { parseAddHistoryComparisonPanelRequest } from '../historyComparisonPanelAddParse';
+import { parseAddOwnHistoryPanelRequest } from '../ownHistoryPanelParse';
 import { KEYSIGHT_DASHBOARD_UID } from './graftRegressionFixtures';
 import {
     e2eDashboardClonePrompt,
@@ -18,6 +19,8 @@ import {
     e2ePeerRfPanelCreatePrompt,
     e2ePeerRfVsPeersPrompt,
     e2eSensingVoltageHistoryComparisonPrompt,
+    e2eOwnHistorySensingVoltagePrompt,
+    e2eModule1AnomalyHistoryComparisonPrompt,
     e2eAmbiguousPeerBandVsHistoryComparisonPrompt,
     extractAlertRuleUidFromReply,
     extractClonedDashboardUidFromReply,
@@ -136,6 +139,23 @@ describe('e2eGrafanaAlertCreatePrompt', () => {
         const req = parseAddPeerRfPanelRequest(e2ePeerRfVsPeersPrompt());
         expect(req?.dashboardUid).toBe(SANDBOX_E2E_DASHBOARD_UID);
         expect(req?.moduleNumber).toBe(3);
+    });
+
+    it('parses own-history Sensing Voltage onto the sandbox E2E Keysight clone', () => {
+        const req = parseAddOwnHistoryPanelRequest(
+            e2eOwnHistorySensingVoltagePrompt(SANDBOX_E2E_DASHBOARD_UID)
+        );
+        expect(req?.dashboardUid).toBe(SANDBOX_E2E_DASHBOARD_UID);
+        expect(req?.metricLabel?.toLowerCase()).toMatch(/sensing voltage/);
+    });
+
+    it('parses Module 1 ML/anomaly detection as History Comparison onto the sandbox E2E Keysight clone', () => {
+        const req = parseAddHistoryComparisonPanelRequest(
+            e2eModule1AnomalyHistoryComparisonPrompt(SANDBOX_E2E_DASHBOARD_UID)
+        );
+        expect(req?.dashboardUid).toBe(SANDBOX_E2E_DASHBOARD_UID);
+        expect(req?.moduleNumber).toBe(1);
+        expect(req?.signal?.field).toBe('Module1_Current_A');
     });
 
     it('parses sensing-voltage History Comparison onto a cloned dashboard uid', () => {

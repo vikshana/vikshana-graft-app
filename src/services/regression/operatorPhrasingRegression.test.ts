@@ -45,6 +45,9 @@ const PEER_RF =
 const TEMPERATURE =
     'Create a RandomForest vs Peers machine learning panel for the Temperature parameter on the dashboard with UID = idHkqdqnk.';
 
+const MODULE1_ANOMALY =
+    'Create a machine learning/anomaly detection panel for Module 1 on the dashboard with the UID = idHkqdqnk.';
+
 describe('operator phrasing (lab PDF)', () => {
     it('clone: copy of dashboard title + target machine id is valid English', () => {
         const p = parseCloneIntentMessage(SKYWATER_CLONE);
@@ -86,6 +89,16 @@ describe('operator phrasing (lab PDF)', () => {
         const req = parseAddPeerRfPanelRequest(PEER_RF);
         expect(req?.moduleNumber).toBe(3);
         expect(req?.dashboardUid).toBe('idHkqdqnk');
+    });
+
+    it('ML/anomaly detection for Module 1 is History Comparison, not own-history', () => {
+        expect(messageMentionsPredictiveAnalyticsPanel(MODULE1_ANOMALY)).toBe(true);
+        expect(messageMentionsOwnHistoryPanel(MODULE1_ANOMALY)).toBe(false);
+        const req = parseAddHistoryComparisonPanelRequest(MODULE1_ANOMALY);
+        expect(req?.dashboardUid).toBe('idHkqdqnk');
+        expect(req?.moduleNumber).toBe(1);
+        expect(req?.signal?.field).toBe('Module1_Current_A');
+        expect(messageHasProgrammaticHandler(MODULE1_ANOMALY)).toBe(true);
     });
 
     it('Temperature without module is not peer-RF (ask or use plant metric, do not demand Module N)', () => {
