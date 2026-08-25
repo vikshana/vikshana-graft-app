@@ -129,10 +129,6 @@ test('ChatHistory should allow pinning and unpinning conversations', async ({ pa
     await expect(sessionCard.getByLabel('Pin conversation')).toBeVisible();
 });
 
-test('ChatHistory should show modal when pin limit is reached', async ({ page }) => {
-    await page.goto('/a/vikshana-graft-app/history');
-});
-
 test('ChatHistory should show delete confirmation dialog', async ({ page, waitForPortal }) => {
     await page.goto('/a/vikshana-graft-app');
     await page.evaluate(() => {

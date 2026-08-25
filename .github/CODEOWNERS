@@ -1,0 +1,6 @@
+* @avanish-vaghela
+
+# Protect release and CI automation surfaces
+.github/workflows/** @avanish-vaghela
+scripts/classify-release-pr.mjs @avanish-vaghela
+scripts/normalize-lockfile-cache-key.mjs @avanish-vaghela

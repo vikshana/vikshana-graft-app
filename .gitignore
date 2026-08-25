@@ -61,3 +61,6 @@ services/
 /output/*.jpeg
 /output/*.png
 /output/*.webp
+
+# CI cache materialization
+.ci-cache/

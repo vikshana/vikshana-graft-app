@@ -1,20 +1,123 @@
 name: Latest Grafana API compatibility check
+
 on:
   pull_request:
     branches:
       - main
-    paths:
-      - 'src/**'
-      - 'package*.json'
-      - 'tsconfig*.json'
-      - '.config/**'
-      - '.github/workflows/is-compatible.yml'
+  merge_group:
+    types:
+      - checks_requested
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || format('ref-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
-  compatibilitycheck:
+  classify:
+    name: Classify change set
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      mode: ${{ steps.classify.outputs.mode }}
+      reason: ${{ steps.classify.outputs.reason }}
+      compat-scope: ${{ steps.classify.outputs.compat-scope }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve diff SHAs
+        id: resolve-shas
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
+          MG_BASE_SHA: ${{ github.event.merge_group.base_sha || '' }}
+          MG_HEAD_SHA: ${{ github.event.merge_group.head_sha || '' }}
+          FALLBACK_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          BASE_SHA=""
+          HEAD_SHA=""
+
+          case "$EVENT_NAME" in
+            pull_request)
+              BASE_SHA="$PR_BASE_SHA"
+              if [ -n "$FALLBACK_HEAD_SHA" ]; then
+                HEAD_SHA="$FALLBACK_HEAD_SHA"
+              else
+                HEAD_SHA="$PR_HEAD_SHA"
+              fi
+              ;;
+            merge_group)
+              BASE_SHA="$MG_BASE_SHA"
+              if [ -n "$MG_HEAD_SHA" ]; then
+                HEAD_SHA="$MG_HEAD_SHA"
+              else
+                HEAD_SHA="$FALLBACK_HEAD_SHA"
+              fi
+              ;;
+            *)
+              BASE_SHA=""
+              HEAD_SHA="$FALLBACK_HEAD_SHA"
+              ;;
+          esac
+
+          echo "base-sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "head-sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Run trusted classifier
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ steps.resolve-shas.outputs.base-sha }}
+          HEAD_SHA: ${{ steps.resolve-shas.outputs.head-sha }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$BASE_SHA" ] || [ -z "$HEAD_SHA" ]; then
+            echo "mode=full" >> "$GITHUB_OUTPUT"
+            echo "reason=non-diffable-event" >> "$GITHUB_OUTPUT"
+            echo "release-version-only=false" >> "$GITHUB_OUTPUT"
+            echo "release-version=" >> "$GITHUB_OUTPUT"
+            echo "changed-files-json=[]" >> "$GITHUB_OUTPUT"
+            echo "ci-scope=full" >> "$GITHUB_OUTPUT"
+            echo "compat-scope=full" >> "$GITHUB_OUTPUT"
+            echo "bundle-scope=full" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CLASSIFIER_PATH="$RUNNER_TEMP/classify-release-pr.mjs"
+          if git cat-file -e "$BASE_SHA:scripts/classify-release-pr.mjs" 2>/dev/null; then
+            git show "$BASE_SHA:scripts/classify-release-pr.mjs" > "$CLASSIFIER_PATH"
+            node "$CLASSIFIER_PATH" \
+              --event-name "$EVENT_NAME" \
+              --base-sha "$BASE_SHA" \
+              --head-sha "$HEAD_SHA"
+          else
+            echo "mode=full" >> "$GITHUB_OUTPUT"
+            echo "reason=classifier-not-in-base" >> "$GITHUB_OUTPUT"
+            echo "release-version-only=false" >> "$GITHUB_OUTPUT"
+            echo "release-version=" >> "$GITHUB_OUTPUT"
+            echo "changed-files-json=[]" >> "$GITHUB_OUTPUT"
+            echo "ci-scope=full" >> "$GITHUB_OUTPUT"
+            echo "compat-scope=full" >> "$GITHUB_OUTPUT"
+            echo "bundle-scope=full" >> "$GITHUB_OUTPUT"
+          fi
+
+  compatibility-run:
+    name: Run compatibility action
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    needs: classify
+    if: ${{ needs.classify.outputs.compat-scope == 'full' && needs.classify.outputs.mode == 'full' }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -32,16 +135,63 @@ jobs:
       - name: Build plugin
         run: npm run build
 
-      - name: Find module.ts or module.tsx
-        id: find-module-ts
-        run: |
-          MODULETS="$(find ./src -type f \( -name "module.ts" -o -name "module.tsx" \))"
-          echo "modulets=${MODULETS}" >> $GITHUB_OUTPUT
-
       - name: Compatibility check
         uses: grafana/plugin-actions/is-compatible@is-compatible/v1.0.2
         with:
-          module: ${{ steps.find-module-ts.outputs.modulets }}
+          module: src/module.tsx
           comment-pr: 'no'
           fail-if-incompatible: 'yes'
           targets: '@grafana/data,@grafana/ui,@grafana/runtime,@grafana/schema'
+
+  compatibilitycheck:
+    name: compatibilitycheck
+    runs-on: ubuntu-latest
+    permissions: {}
+    if: ${{ always() }}
+    needs: [classify, compatibility-run]
+    env:
+      CLASSIFY_RESULT: ${{ needs.classify.result }}
+      MODE: ${{ needs.classify.outputs.mode }}
+      COMPAT_SCOPE: ${{ needs.classify.outputs.compat-scope }}
+      COMPAT_RUN_RESULT: ${{ needs.compatibility-run.result }}
+    steps:
+      - name: Validate compatibility workflow outcome
+        run: |
+          set -euo pipefail
+
+          if [ "$CLASSIFY_RESULT" != "success" ]; then
+            echo "Classification failed"
+            exit 1
+          fi
+
+          case "$MODE" in
+            noop)
+              if [ "$COMPAT_SCOPE" != "noop" ]; then
+                echo "noop mode must have noop compatibility scope"
+                exit 1
+              fi
+              echo "No-impact change; compatibility gate passes"
+              ;;
+            full)
+              if [ "$COMPAT_SCOPE" = "full" ]; then
+                if [ "$COMPAT_RUN_RESULT" != "success" ]; then
+                  echo "Compatibility action failed"
+                  exit 1
+                fi
+                echo "Compatibility action passed"
+              else
+                echo "Compatibility scope noop; gate passes"
+              fi
+              ;;
+            release-fast)
+              if [ "$COMPAT_SCOPE" != "noop" ]; then
+                echo "release-fast mode must have noop compatibility scope"
+                exit 1
+              fi
+              echo "Release version-only change; compatibility gate passes"
+              ;;
+            *)
+              echo "Unexpected classification mode: $MODE"
+              exit 1
+              ;;
+          esac

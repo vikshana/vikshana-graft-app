@@ -17,16 +17,52 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-latest
+    env:
+      INPUT_TAG: ${{ inputs.tag }}
     steps:
+      - name: Validate tag input
+        run: |
+          set -euo pipefail
+
+          if ! printf '%s' "$INPUT_TAG" | grep -Eq '^graft-v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Invalid tag format: $INPUT_TAG"
+            exit 1
+          fi
+
+      - name: Verify tag exists on remote
+        env:
+          REPO_REMOTE_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          AUTH_HEADER=$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')
+          git -c "http.extraheader=AUTHORIZATION: basic $AUTH_HEADER" \
+            ls-remote --tags "$REPO_REMOTE_URL" "refs/tags/$INPUT_TAG" | grep -Eq "refs/tags/${INPUT_TAG}$"
       - uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ env.INPUT_TAG }}
+          persist-credentials: false
+
+      - name: Checkout workflow tools
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          path: .workflow-tools
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/normalize-lockfile-cache-key.mjs
+          sparse-checkout-cone-mode: false
+
+      - name: Prepare normalized npm cache key
+        run: node .workflow-tools/scripts/normalize-lockfile-cache-key.mjs --input package-lock.json --output .ci-cache/package-lock.normalized.json
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: 'npm'
+          cache-dependency-path: .ci-cache/package-lock.normalized.json
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -34,7 +70,7 @@ jobs:
           go-version-file: 'go.mod'
 
       - name: Install Mage
-        run: go install github.com/magefile/mage@latest
+        run: go install github.com/magefile/mage@v1.17.2
 
       - name: Install frontend dependencies
         run: npm ci
@@ -45,25 +81,51 @@ jobs:
       - name: Build backend
         run: mage -v
 
-      # Uncomment to enable plugin signing after Grafana approval
-      # - name: Sign plugin
-      #   run: npx @grafana/sign-plugin@latest
-      #   env:
-      #     GRAFANA_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_ACCESS_POLICY_TOKEN }}
+      - name: Validate release versions
+        run: |
+          set -euo pipefail
+
+          TAG_VERSION="${INPUT_TAG#graft-v}"
+          PACKAGE_VERSION=$(node -e "process.stdout.write(require('./package.json').version)")
+          PLUGIN_VERSION=$(node -e "process.stdout.write(require('./dist/plugin.json').info.version)")
+
+          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
+            echo "package.json version ($PACKAGE_VERSION) does not match tag version ($TAG_VERSION)"
+            exit 1
+          fi
+
+          if [ "$PLUGIN_VERSION" != "$TAG_VERSION" ]; then
+            echo "dist/plugin.json version ($PLUGIN_VERSION) does not match tag version ($TAG_VERSION)"
+            exit 1
+          fi
 
       - name: Get plugin metadata
         id: metadata
         run: |
-          echo "plugin-id=$(cat dist/plugin.json | jq -r '.id')" >> $GITHUB_OUTPUT
-          echo "archive=$(cat dist/plugin.json | jq -r '.id')-${{ inputs.tag }}.zip" >> $GITHUB_OUTPUT
+          PLUGIN_ID=$(node -e "process.stdout.write(require('./dist/plugin.json').id)")
+          ARCHIVE="${PLUGIN_ID}-${INPUT_TAG}.zip"
+
+          echo "plugin-id=${PLUGIN_ID}" >> "$GITHUB_OUTPUT"
+          echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
 
       - name: Package plugin
+        env:
+          PLUGIN_ID: ${{ steps.metadata.outputs.plugin-id }}
+          ARCHIVE: ${{ steps.metadata.outputs.archive }}
         run: |
-          mv dist ${{ steps.metadata.outputs.plugin-id }}
-          zip -r ${{ steps.metadata.outputs.archive }} ${{ steps.metadata.outputs.plugin-id }}
+          mv dist "$PLUGIN_ID"
+          zip -r "$ARCHIVE" "$PLUGIN_ID"
+
+      - name: Validate package
+        env:
+          ARCHIVE: ${{ steps.metadata.outputs.archive }}
+        run: |
+          docker run --pull=always \
+            -v "$PWD/$ARCHIVE:/archive.zip" \
+            grafana/plugin-validator-cli -analyzer=metadatavalid /archive.zip
 
       - name: Upload release artifact
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.tag }}
+          tag_name: ${{ env.INPUT_TAG }}
           files: ${{ steps.metadata.outputs.archive }}
