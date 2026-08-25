@@ -59,25 +59,25 @@ describe('e2eDashboardUid', () => {
 });
 
 describe('e2eGrafanaAlertCreatePrompt', () => {
-    it('parses as programmatic RF alert create on sandbox Skywater, not Keysight', () => {
+    it('parses as programmatic RF alert create on the sandbox E2E Keysight clone', () => {
         const ruleTitle = 'Graft E2E RF 123';
         const req = parseGrafanaAlertCreateRequest(e2eGrafanaAlertCreatePrompt(ruleTitle));
         expect(req).toMatchObject({
-            dashboardUid: SANDBOX_SKYWATER_DASHBOARD_UID,
-            panelTitle: 'Module 2 Current — RandomForest vs Peers',
+            dashboardUid: SANDBOX_E2E_DASHBOARD_UID,
+            panelTitle: 'Module 2 Current — RandomForest vs Peers (Influx)',
             ruleTitle,
             contactPoint: 'Alex Test Email',
         });
         expect(req?.dashboardUid).not.toBe(KEYSIGHT_DASHBOARD_UID);
-        expect(req?.dashboardUid).not.toBe(SANDBOX_E2E_DASHBOARD_UID);
+        expect(req?.dashboardUid).not.toBe(SANDBOX_SKYWATER_DASHBOARD_UID);
     });
 
-    it('parses a Skywater alert-update prompt by panel title', () => {
+    it('parses an E2E alert-update prompt by panel title', () => {
         const req = parseGrafanaAlertUpdateRequest(
             e2eGrafanaAlertUpdatePrompt('Graft E2E RF vs Peers', 'Graft E2E sandbox description')
         );
         expect(req?.ruleTitle).toBe('Graft E2E RF vs Peers');
-        expect(req?.dashboardUid).toBe(SANDBOX_SKYWATER_DASHBOARD_UID);
+        expect(req?.dashboardUid).toBe(SANDBOX_E2E_DASHBOARD_UID);
         expect(req?.description).toBe('Graft E2E sandbox description');
     });
 

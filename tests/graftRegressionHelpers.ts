@@ -6,6 +6,7 @@ import {
     e2eDashboardClonePrompt,
     e2eDashboardUid,
     e2ePeerBandPressureCreatePrompt,
+    e2ePeerRfPanelCreatePrompt,
     extractClonedDashboardUidFromReply,
 } from '../src/services/regression/graftRegressionE2eFixtures';
 
@@ -305,5 +306,38 @@ export async function ensurePeerBandPanelForAlertE2e(
     expect(
         lower.includes('peer band panel') || lower.includes('saved'),
         `Could not seed peer-band panel "${panelTitle}": ${reply.slice(0, 400)}`
+    ).toBe(true);
+}
+
+async function dashboardHasPeerRfAlertPanel(page: Page, dashboardUid: string, panelTitle: string): Promise<boolean> {
+    if (await dashboardHasPanelTitle(page, dashboardUid, panelTitle)) {
+        return true;
+    }
+    const withoutInflux = panelTitle.replace(/\s*\(Influx\)\s*$/i, '').trim();
+    if (withoutInflux !== panelTitle && (await dashboardHasPanelTitle(page, dashboardUid, withoutInflux))) {
+        return true;
+    }
+    const withInflux = `${withoutInflux} (Influx)`;
+    return withInflux !== panelTitle && (await dashboardHasPanelTitle(page, dashboardUid, withInflux));
+}
+
+/** Idempotent fixture: RF vs Peers panel for alert routing E2E on grafte2ekeysht. */
+export async function ensurePeerRfPanelForAlertE2e(
+    page: Page,
+    panelTitle: string,
+    { timeoutMs = 180_000 }: { timeoutMs?: number } = {}
+): Promise<void> {
+    const dashboardUid = e2eDashboardUid();
+    if (await dashboardHasPeerRfAlertPanel(page, dashboardUid, panelTitle)) {
+        return;
+    }
+
+    await openFreshGraftChat(page);
+    const startCopyCount = await sendGraftPrompt(page, e2ePeerRfPanelCreatePrompt(panelTitle));
+    const reply = await waitForAssistantReply(page, { timeoutMs, startCopyCount });
+    const seeded = await dashboardHasPeerRfAlertPanel(page, dashboardUid, panelTitle);
+    expect(
+        seeded,
+        `Could not seed RF vs Peers panel "${panelTitle}": ${reply.slice(0, 400)}`
     ).toBe(true);
 }

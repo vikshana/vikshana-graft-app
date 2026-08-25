@@ -1,4 +1,5 @@
 import { KEYSIGHT_DASHBOARD_UID, REGRESSION_CASES, type RegressionCase } from './graftRegressionFixtures';
+import { peerRfPanelTitle } from '../peerRfPanelAddParse';
 
 /**
  * Sandbox Playwright target: cloned Keysight (`2505-200033 / Keysight — Graft E2E`).
@@ -132,13 +133,16 @@ export function e2eDashboardRowWithPanelsExpectContains(rowTitle: string): strin
     return ['Row and panels created', rowTitle];
 }
 
-/** Sandbox Skywater-MN — RF vs Peers panel lives here, not on the Keysight E2E clone. */
+/** Live Skywater-MN board (operator prompts). RF vs Peers alert E2E uses the Keysight clone instead. */
 export const SANDBOX_SKYWATER_DASHBOARD_UID = 'idHkqdqnk';
+
+/** Canonical saved RF vs Peers title (`peerRfPanelTitle(2)`), not the operator short name. */
+export const E2E_PEER_RF_ALERT_PANEL_TITLE = peerRfPanelTitle(2);
 
 export function e2eGrafanaAlertCreatePrompt(ruleTitle: string): string {
     return (
         `Create a Grafana-managed alert named "${ruleTitle}" for the panel titled ` +
-        `"Module 2 Current — RandomForest vs Peers" on the dashboard with UID ${SANDBOX_SKYWATER_DASHBOARD_UID}. ` +
+        `"${E2E_PEER_RF_ALERT_PANEL_TITLE}" on the dashboard with UID ${e2eDashboardUid()}. ` +
         `Configure the alert to trigger when the RandomForest model identifies Module 2 Current as anomalous compared with its peer modules. ` +
         `The anomalous condition must remain true for longer than 1 minute before the alert fires. ` +
         `Do not invent an arbitrary RandomForest threshold. ` +
@@ -149,7 +153,7 @@ export function e2eGrafanaAlertCreatePrompt(ruleTitle: string): string {
 export const E2E_GRAFANA_ALERT_CREATE_RULE_TITLE = 'Graft E2E RF vs Peers';
 
 export function e2eGrafanaAlertCreateExpectContains(ruleTitle: string): string[] {
-    return [ruleTitle, SANDBOX_SKYWATER_DASHBOARD_UID, 'Alex Test Email', 'RandomForest vs Peers'];
+    return [ruleTitle, e2eDashboardUid(), 'Alex Test Email', 'RandomForest vs Peers'];
 }
 
 export const E2E_GRAFANA_ALERT_CREATE_EXPECT_NOT_CONTAINS = [
@@ -159,7 +163,7 @@ export const E2E_GRAFANA_ALERT_CREATE_EXPECT_NOT_CONTAINS = [
 
 export function e2eGrafanaAlertUpdatePrompt(ruleTitle: string, description: string): string {
     return (
-        `Change the alert rule named "${ruleTitle}" on the dashboard with UID = ${SANDBOX_SKYWATER_DASHBOARD_UID} ` +
+        `Change the alert rule named "${ruleTitle}" on the dashboard with UID = ${e2eDashboardUid()} ` +
         `to have the description of "${description}"`
     );
 }

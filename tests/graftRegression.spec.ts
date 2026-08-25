@@ -44,6 +44,7 @@ import {
     e2ePeerBandAlertCreatePrompt,
     e2ePeerBandAlertUpdateByRulePrompt,
     E2E_PEER_BAND_ALERT_PANEL_TITLE,
+    E2E_PEER_RF_ALERT_PANEL_TITLE,
     e2eSensingVoltageHistoryComparisonPrompt,
     e2eOwnHistorySensingVoltagePrompt,
     e2eModule1AnomalyHistoryComparisonPrompt,
@@ -59,6 +60,7 @@ import {
     deleteGrafanaDashboardIfPresent,
     runTinyDashboardClone,
     ensurePeerBandPanelForAlertE2e,
+    ensurePeerRfPanelForAlertE2e,
     isGraftE2eMutatingEnabled,
     isGraftE2eTarget,
     openFreshGraftChat,
@@ -280,7 +282,12 @@ test.describe('Graft regression E2E (mutating)', () => {
     });
 
     test('alert-create-peer-rf-module2', async ({ page }) => {
-        test.setTimeout(210_000);
+        test.setTimeout(480_000);
+
+        const removeTimeoutMs = removeCase?.replyTimeoutMs ?? 180_000;
+        await ensurePeerRfPanelForAlertE2e(page, E2E_PEER_RF_ALERT_PANEL_TITLE, {
+            timeoutMs: removeTimeoutMs,
+        });
 
         const ruleTitle = E2E_GRAFANA_ALERT_CREATE_RULE_TITLE;
         const prompt = e2eGrafanaAlertCreatePrompt(ruleTitle);
