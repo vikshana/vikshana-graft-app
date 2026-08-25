@@ -29,5 +29,4 @@ jobs:
         with:
           token: ${{ steps.renovate-token.outputs.token }}
         env:
-          LOG_LEVEL: debug
           RENOVATE_REPOSITORIES: ${{ github.repository }}
