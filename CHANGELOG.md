@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.6](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.6.5...graft-v0.6.6) (2026-08-30)
+
+
+### Bug fixes
+
+* **deps:** reduce Renovate workflow logging ([#52](https://github.com/vikshana/vikshana-graft-app/issues/52)) ([079d878](https://github.com/vikshana/vikshana-graft-app/commit/079d8783fd47c09e45b3ac2bbe850f1ee05954c0))
+* **deps:** scope Renovate app token correctly ([#47](https://github.com/vikshana/vikshana-graft-app/issues/47)) ([45dd39e](https://github.com/vikshana/vikshana-graft-app/commit/45dd39eff6d905ae0ffe9bdb28c807a8b7361553))
+* **deps:** update opentelemetry-js monorepo ([#62](https://github.com/vikshana/vikshana-graft-app/issues/62)) ([4294baa](https://github.com/vikshana/vikshana-graft-app/commit/4294baa5c00be36cdb6006c728162f8b4f5ad24a))
+
 ## [0.6.5](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.6.4...graft-v0.6.5) (2026-08-25)
 
 
