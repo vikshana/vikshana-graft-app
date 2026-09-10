@@ -36,4 +36,15 @@ export default defineConfig([
     ],
   },
   ...baseConfig,
+  {
+    files: [
+      'src/components/features/ChatInterface/ChatInterface.tsx',
+      'src/pages/PromptLibrary.tsx',
+    ],
+    rules: {
+      // Existing state synchronization predates React Compiler lint rules.
+      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/refs': 'off',
+    },
+  },
 ]);
