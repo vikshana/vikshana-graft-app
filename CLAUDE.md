@@ -167,7 +167,7 @@ Commit types and their effect on versioning:
 | `feat!` / `BREAKING CHANGE:` footer | Incompatible API change | Major (`0.2.0 → 1.0.0`) |
 | `perf` | Performance improvement | Patch |
 | `docs` | Documentation only | No bump (visible in changelog) |
-| `chore` | Maintenance, dependency updates | No bump |
+| `chore` | Maintenance, dependency updates | Patch (`0.2.0 → 0.2.1`) (shown under Miscellaneous & Dependencies in changelog) |
 | `refactor` | Code restructure, no behaviour change | No bump |
 | `test` | Adding or fixing tests | No bump |
 | `ci` | CI/CD pipeline changes | No bump |

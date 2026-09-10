@@ -27,7 +27,8 @@ Version bumps are determined automatically from commit message prefixes:
 | `fix:` | `fix: correct health check timeout` | Patch (`0.2.0 → 0.2.1`) |
 | `feat:` | `feat: add dark mode support` | Minor (`0.2.0 → 0.3.0`) |
 | `feat!:` or `BREAKING CHANGE:` footer | `feat!: redesign config API` | Major (`0.2.0 → 1.0.0`) |
-| `chore:`, `test:`, `ci:`, `refactor:`, `build:` | `chore: update dependencies` | No bump (hidden from changelog) |
+| `chore:` | `chore: update dependencies` | Patch (shown under Miscellaneous & Dependencies in changelog) |
+| `test:`, `ci:`, `refactor:`, `build:` | `test: add chat history tests` | No bump (hidden from changelog) |
 | `docs:` | `docs: improve setup guide` | No bump (shown in changelog) |
 | `perf:` | `perf: optimise bundle size` | Patch |
 
