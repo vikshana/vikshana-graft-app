@@ -262,8 +262,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # required for playwright-gh-pages
-          persist-credentials: true
+          # The report action configures its own token; avoid duplicate auth headers.
+          persist-credentials: false
       - name: Publish report
         uses: grafana/plugin-actions/playwright-gh-pages/deploy-report-pages@deploy-report-pages/v1.0.1
         with:
