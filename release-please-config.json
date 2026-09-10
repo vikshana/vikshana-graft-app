@@ -15,7 +15,7 @@
         { "type": "perf",     "section": "Performance improvements" },
         { "type": "revert",   "section": "Reverts" },
         { "type": "docs",     "section": "Documentation", "hidden": false },
-        { "type": "chore",    "section": "Dependencies", "hidden": false },
+        { "type": "chore",    "section": "Miscellaneous & Dependencies", "hidden": false },
         { "type": "refactor", "section": "Miscellaneous", "hidden": true },
         { "type": "test",     "section": "Miscellaneous", "hidden": true },
         { "type": "build",    "section": "Miscellaneous", "hidden": true },
