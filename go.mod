@@ -2,7 +2,7 @@ module github.com/vikshana/graft
 
 go 1.24.6
 
-toolchain go1.24.11
+toolchain go1.27.1
 
 require (
 	github.com/grafana/grafana-plugin-sdk-go v0.283.0
