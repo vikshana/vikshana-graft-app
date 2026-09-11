@@ -97,5 +97,5 @@
     "remark-gfm": "^4.0.1",
     "rxjs": "7.8.2"
   },
-  "packageManager": "npm@11.6.2"
+  "packageManager": "npm@11.19.1"
 }
