@@ -22,7 +22,7 @@
     "@grafana/tsconfig": "^2.0.1",
     "@playwright/test": "^1.52.0",
     "@stylistic/eslint-plugin-ts": "^2.9.0",
-    "@swc/core": "1.13.20",
+    "@swc/core": "1.16.2",
     "@swc/helpers": "^0.5.0",
     "@swc/jest": "^0.2.26",
     "@testing-library/jest-dom": "6.9.1",
@@ -68,7 +68,7 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@emotion/css": "11.10.6",
+    "@emotion/css": "11.13.5",
     "@grafana/data": "^13.0.2",
     "@grafana/i18n": "^13.0.2",
     "@grafana/llm": "^1.0.9",
@@ -77,9 +77,9 @@
     "@grafana/ui": "^13.0.2",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/core": "^2.2.0",
-    "@opentelemetry/exporter-trace-otlp-http": "^0.221.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.222.0",
     "@opentelemetry/instrumentation-document-load": "^0.67.0",
-    "@opentelemetry/instrumentation-fetch": "^0.221.0",
+    "@opentelemetry/instrumentation-fetch": "^0.222.0",
     "@opentelemetry/resources": "^2.2.0",
     "@opentelemetry/sdk-trace-base": "^2.2.0",
     "@opentelemetry/sdk-trace-web": "^2.2.0",
@@ -97,5 +97,5 @@
     "remark-gfm": "^4.0.1",
     "rxjs": "7.8.2"
   },
-  "packageManager": "npm@11.6.2"
+  "packageManager": "npm@11.19.1"
 }
