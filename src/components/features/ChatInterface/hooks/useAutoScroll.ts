@@ -5,8 +5,8 @@ import { useRef, useCallback, RefObject } from 'react';
  * Return type for the auto-scroll hook
  */
 interface UseAutoScrollReturn {
-    messagesEndRef: RefObject<HTMLDivElement>;
-    messageListRef: RefObject<HTMLDivElement>;
+    messagesEndRef: RefObject<HTMLDivElement | null>;
+    messageListRef: RefObject<HTMLDivElement | null>;
     scrollToBottom: (behavior?: ScrollBehavior) => void;
     handleScroll: () => void;
     scrollDownPage: () => void;
