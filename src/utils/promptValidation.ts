@@ -72,7 +72,7 @@ export const dumpPromptYaml = (categories: CategoryDef[]): string => {
         lineWidth: 120,
         noRefs: true,
         sortKeys: false,
-        quotingType: '"',
+        quoteStyle: 'double',
         forceQuotes: false,
     });
 
