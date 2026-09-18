@@ -779,29 +779,20 @@ describe('ChatInterface', () => {
         });
 
         it('navigates to the plugin config page when settings button is clicked', async () => {
-            const originalLocation = window.location;
-            // jsdom does not support navigation, so we replace href with a writable mock
-            delete (window as any).location;
-            (window as any).location = { href: '' };
+            const navigateToSettings = jest.fn();
+            render(
+                <MemoryRouter>
+                    <ChatInterface onSettingsNavigate={navigateToSettings} />
+                </MemoryRouter>
+            );
 
-            try {
-                render(
-                    <MemoryRouter>
-                        <ChatInterface />
-                    </MemoryRouter>
-                );
+            await waitFor(() => {
+                expect(screen.getByTestId('settings-button')).toBeInTheDocument();
+            });
 
-                await waitFor(() => {
-                    expect(screen.getByTestId('settings-button')).toBeInTheDocument();
-                });
+            fireEvent.click(screen.getByTestId('settings-button'));
 
-                fireEvent.click(screen.getByTestId('settings-button'));
-
-                expect(window.location.href).toBe('/plugins/vikshana-graft-app?page=configuration');
-            } finally {
-                // Always restore original location, even if an assertion throws
-                (window as any).location = originalLocation;
-            }
+            expect(navigateToSettings).toHaveBeenCalledWith('/plugins/vikshana-graft-app?page=configuration');
         });
 
         it('settings button is not shown in active chat view', async () => {

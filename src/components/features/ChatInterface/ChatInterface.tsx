@@ -284,6 +284,8 @@ export interface ExploreContext {
 }
 
 export interface ChatInterfaceProps {
+  /** Optional override for navigation to the plugin configuration page. */
+  onSettingsNavigate?: (path: string) => void;
   /** Panel context snapshot passed when launched from a Grafana panel menu. */
   panelContext?: Readonly<PluginExtensionPanelContext>;
   /** Explore context passed when launched from the Grafana Explore toolbar modal. */
@@ -298,7 +300,7 @@ export interface ChatInterfaceProps {
   sessionRef?: React.MutableRefObject<{ sessionId?: string } | null>;
 }
 
-export const ChatInterface = ({ panelContext, exploreContext, onDismiss, sessionRef }: ChatInterfaceProps = {}) => {
+export const ChatInterface = ({ panelContext, exploreContext, onDismiss, onSettingsNavigate, sessionRef }: ChatInterfaceProps = {}) => {
   const styles = useStyles2(getStyles);
   const theme = useTheme2();
   const [input, setInput] = useState('');
@@ -1047,7 +1049,14 @@ ${input} `
             data-testid="settings-button"
             title="Plugin configuration"
             aria-label="Plugin configuration"
-            onClick={() => { window.location.href = '/plugins/vikshana-graft-app?page=configuration'; }}
+            onClick={() => {
+              const path = '/plugins/vikshana-graft-app?page=configuration';
+              if (onSettingsNavigate) {
+                onSettingsNavigate(path);
+              } else {
+                window.location.href = path;
+              }
+            }}
           >
             <Icon name="cog" size="lg" />
           </button>
