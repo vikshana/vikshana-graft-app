@@ -167,6 +167,20 @@ describe('dumpPromptYaml', () => {
     expect(reparsed[0].subCategories[0].prompts).toHaveLength(2);
   });
 
+  test('uses double quotes when YAML requires quoting', () => {
+    const categories: CategoryDef[] = [
+      {
+        id: 'coding',
+        name: 'Coding: Basics',
+        subCategories: [],
+      },
+    ];
+
+    const yaml = dumpPromptYaml(categories);
+
+    expect(yaml).toContain('name: "Coding: Basics"');
+  });
+
   test('throws error if validation fails during export', () => {
     const badCategories = [
       {
