@@ -7,8 +7,9 @@
 
 import '@testing-library/jest-dom';
 import { TextEncoder, TextDecoder } from 'util';
+import { MessageChannel } from 'worker_threads';
 
-Object.assign(global, { TextDecoder, TextEncoder });
+Object.assign(global, { TextDecoder, TextEncoder, MessageChannel });
 
 // https://jestjs.io/docs/manual-mocks#mocking-methods-which-are-not-implemented-in-jsdom
 Object.defineProperty(global, 'matchMedia', {
