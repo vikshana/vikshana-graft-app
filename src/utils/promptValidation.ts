@@ -1,10 +1,10 @@
-import yaml from 'js-yaml';
+import { dump, load } from 'js-yaml';
 import { CategoryDef } from '../types/prompt.types';
 
 export const validatePromptYaml = (content: string): CategoryDef[] => {
     let parsed: any;
     try {
-        parsed = yaml.load(content);
+        parsed = load(content);
     } catch (e) {
         throw new Error('Invalid YAML format');
     }
@@ -67,12 +67,12 @@ export const validatePromptYaml = (content: string): CategoryDef[] => {
 
 export const dumpPromptYaml = (categories: CategoryDef[]): string => {
     // First, convert to YAML
-    const yamlString = yaml.dump(categories, {
+    const yamlString = dump(categories, {
         indent: 2,
         lineWidth: 120,
         noRefs: true,
         sortKeys: false,
-        quotingType: '"',
+        quoteStyle: 'double',
         forceQuotes: false,
     });
 
