@@ -1,10 +1,17 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter as BaseMemoryRouter } from 'react-router-dom';
 import { ChatInterface } from './ChatInterface';
 import { llmService } from '../../../services/llm';
 import { contextService } from '../../../services/context';
 import { chatHistoryService } from '../../../services/chatHistory';
+
+const MemoryRouter = (props: React.ComponentProps<typeof BaseMemoryRouter>) => (
+    <BaseMemoryRouter
+        {...props}
+        useTransitions={false}
+    />
+);
 
 
 // Mock dependencies
