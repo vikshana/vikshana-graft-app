@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { PluginType } from '@grafana/data';
 import AppConfig, { AppConfigProps } from './AppConfig';
 
@@ -91,6 +91,36 @@ describe('Components/AppConfig', () => {
 
     const container = screen.getByTestId('prompt-library-upload-container');
     expect(container).toBeInTheDocument();
+  });
+
+  test('shows success after uploading a valid prompt library', async () => {
+    // @ts-ignore
+    render(<AppConfig plugin={props.plugin} query={props.query} />);
+
+    const input = screen
+      .getByTestId('prompt-library-upload-container')
+      .querySelector('input[type="file"]');
+    const file = new File(
+      [
+        `- id: "e2e-test"
+  name: "E2E Test Category"
+  subCategories:
+    - id: "e2e-sub"
+      name: "E2E Sub"
+      prompts:
+        - name: "E2E Prompt"
+          content: "E2E Content"
+`,
+      ],
+      'prompts.yaml',
+      { type: 'application/x-yaml' }
+    );
+
+    fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Successfully loaded 1 categories with 1 prompts/i)).toBeInTheDocument();
+    });
   });
 
   test('shows download button', () => {
