@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.6.7](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.6.6...graft-v0.6.7) (2026-09-19)
+
+
+### Bug fixes
+
+* **deps:** update dependency js-yaml to v5 ([#128](https://github.com/vikshana/vikshana-graft-app/issues/128)) ([67c1d34](https://github.com/vikshana/vikshana-graft-app/commit/67c1d34d55b6af9f162d684ff38af87b9c013abe))
+* **deps:** update dependency mermaid to v12 ([#129](https://github.com/vikshana/vikshana-graft-app/issues/129)) ([474c5f3](https://github.com/vikshana/vikshana-graft-app/commit/474c5f31193b549ed1ddd4b17aa6ebc17dc6f1bf))
+* **deps:** update dependency react-router-dom to v7 ([#130](https://github.com/vikshana/vikshana-graft-app/issues/130)) ([3303871](https://github.com/vikshana/vikshana-graft-app/commit/3303871e5dd8a037bc13bbaf77e70ba06c9c4d5f))
+* **deps:** update module github.com/grafana/grafana-plugin-sdk-go to v0.296.5 ([#100](https://github.com/vikshana/vikshana-graft-app/issues/100)) ([00ab8c1](https://github.com/vikshana/vikshana-graft-app/commit/00ab8c168c1c33723c31d02587f0607ca8d07a37))
+* **deps:** update react monorepo to v19 ([#131](https://github.com/vikshana/vikshana-graft-app/issues/131)) ([a772234](https://github.com/vikshana/vikshana-graft-app/commit/a77223489224737866ca308c52b15858c52de63f))
+
+
+### Miscellaneous & Dependencies
+
+* **deps:** update dependency @grafana/eslint-config to v10 ([#106](https://github.com/vikshana/vikshana-graft-app/issues/106)) ([2be37d0](https://github.com/vikshana/vikshana-graft-app/commit/2be37d055c65fcecbed3e1a30d1c972bc2c87bc7))
+* **deps:** update dependency @grafana/plugin-e2e to v3.13.0 ([#101](https://github.com/vikshana/vikshana-graft-app/issues/101)) ([8b77a4b](https://github.com/vikshana/vikshana-graft-app/commit/8b77a4b22226cb94529656fc29a3343c2d527339))
+* **deps:** update dependency @grafana/plugin-e2e to v3.14.0 ([#104](https://github.com/vikshana/vikshana-graft-app/issues/104)) ([b8e057c](https://github.com/vikshana/vikshana-graft-app/commit/b8e057c292a831d928234f2f1d0e3813524132f5))
+* **deps:** update dependency @stylistic/eslint-plugin-ts to v4 ([#107](https://github.com/vikshana/vikshana-graft-app/issues/107)) ([92376fe](https://github.com/vikshana/vikshana-graft-app/commit/92376fe52022696f1c675d2d6b1ce0b568585cb3))
+* **deps:** update dependency @types/node to v24.13.6 ([#132](https://github.com/vikshana/vikshana-graft-app/issues/132)) ([b6adbde](https://github.com/vikshana/vikshana-graft-app/commit/b6adbdeea89172223bca4306da1801ca692d78f8))
+* **deps:** update dependency baseline-browser-mapping to v2.11.25 ([#103](https://github.com/vikshana/vikshana-graft-app/issues/103)) ([6532b50](https://github.com/vikshana/vikshana-graft-app/commit/6532b5070afd76afb001a79c6644d12d470af43e))
+* **deps:** update dependency copy-webpack-plugin to v14 ([#108](https://github.com/vikshana/vikshana-graft-app/issues/108)) ([ef663c7](https://github.com/vikshana/vikshana-graft-app/commit/ef663c7cb1e1ec07b091a1b93221e8c606060582))
+* **deps:** update dependency css-loader to v7 ([#109](https://github.com/vikshana/vikshana-graft-app/issues/109)) ([2c6e5de](https://github.com/vikshana/vikshana-graft-app/commit/2c6e5de400d426ffa8aa7e5476341c7bff691005))
+* **deps:** update dependency eslint-config-prettier to v10 ([#111](https://github.com/vikshana/vikshana-graft-app/issues/111)) ([3f8db02](https://github.com/vikshana/vikshana-graft-app/commit/3f8db022c31f03dd2d085500fdaca29dd8d3fe71))
+* **deps:** update dependency eslint-plugin-jsdoc to v64 ([#112](https://github.com/vikshana/vikshana-graft-app/issues/112)) ([256305b](https://github.com/vikshana/vikshana-graft-app/commit/256305b13cbe98e26d1a677a97ef357f0210c4cc))
+* **deps:** update dependency eslint-webpack-plugin to v6 ([#113](https://github.com/vikshana/vikshana-graft-app/issues/113)) ([24ce169](https://github.com/vikshana/vikshana-graft-app/commit/24ce169a2a7d53f4c1e9fb227afb5e8c5dbfb361))
+* **deps:** update dependency fork-ts-checker-webpack-plugin to v9 ([#114](https://github.com/vikshana/vikshana-graft-app/issues/114)) ([c0fc8fa](https://github.com/vikshana/vikshana-graft-app/commit/c0fc8fa607d27b360ae7b1cc7f41b9616c2ed2f5))
+* **deps:** update dependency glob to v13 ([#115](https://github.com/vikshana/vikshana-graft-app/issues/115)) ([50c14e0](https://github.com/vikshana/vikshana-graft-app/commit/50c14e04618f8141a42d2aa8175313ed47df3a0e))
+* **deps:** update dependency node to v24 ([#116](https://github.com/vikshana/vikshana-graft-app/issues/116)) ([2d0fefd](https://github.com/vikshana/vikshana-graft-app/commit/2d0fefd8641cc2b1fd4470766aa647c30f89eb81))
+* **deps:** update dependency sass-loader to v17 ([#118](https://github.com/vikshana/vikshana-graft-app/issues/118)) ([819c6e7](https://github.com/vikshana/vikshana-graft-app/commit/819c6e7241622e86439b33f5e4469e12f17be34f))
+* **deps:** update dependency style-loader to v4 ([#119](https://github.com/vikshana/vikshana-graft-app/issues/119)) ([445fdbe](https://github.com/vikshana/vikshana-graft-app/commit/445fdbeb552c910f901a5d7be1161d7b3afd6968))
+* **deps:** update dependency typescript to v7 ([#120](https://github.com/vikshana/vikshana-graft-app/issues/120)) ([e7f733c](https://github.com/vikshana/vikshana-graft-app/commit/e7f733c92e0024d3759236671572c0983bf8c0ac))
+* **deps:** update dependency webpack to v5.111.0 ([#105](https://github.com/vikshana/vikshana-graft-app/issues/105)) ([e532dcf](https://github.com/vikshana/vikshana-graft-app/commit/e532dcf40d28cdba587aef8213adb920a61ae297))
+* **deps:** update dependency webpack-cli to v7 ([#121](https://github.com/vikshana/vikshana-graft-app/issues/121)) ([59e5a66](https://github.com/vikshana/vikshana-graft-app/commit/59e5a66ba2958e13e4515a2da21329d287853d03))
+* **deps:** update github artifact actions (major) ([#122](https://github.com/vikshana/vikshana-graft-app/issues/122)) ([d0fd0c0](https://github.com/vikshana/vikshana-graft-app/commit/d0fd0c04a6fd2cfccf18bdd9861d3193d5810565))
+* **deps:** update magefile/mage-action action to v4 ([#124](https://github.com/vikshana/vikshana-graft-app/issues/124)) ([5bcdbfa](https://github.com/vikshana/vikshana-graft-app/commit/5bcdbfae48c130e969c50c7cdfc7736907d0f38a))
+* **deps:** update npm to v12 ([#125](https://github.com/vikshana/vikshana-graft-app/issues/125)) ([10a0d20](https://github.com/vikshana/vikshana-graft-app/commit/10a0d2011841048e66aecbacb676e665545c7280))
+* **deps:** update softprops/action-gh-release action to v3 ([#126](https://github.com/vikshana/vikshana-graft-app/issues/126)) ([2dda7cb](https://github.com/vikshana/vikshana-graft-app/commit/2dda7cb2c3c6002472edb5a523269f3c7ad66b22))
+* **deps:** update testing-library monorepo (major) ([#127](https://github.com/vikshana/vikshana-graft-app/issues/127)) ([41d2454](https://github.com/vikshana/vikshana-graft-app/commit/41d245499312890fc97fd58c7fd87807f2822eac))
+
 ## [0.6.6](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.6.5...graft-v0.6.6) (2026-09-16)
 
 
