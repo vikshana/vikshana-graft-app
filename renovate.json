@@ -2,5 +2,32 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
   "enabledManagers": ["npm", "gomod", "docker-compose", "github-actions"],
-  "dependencyDashboard": true
+  "dependencyDashboard": true,
+  "packageRules": [
+    {
+      "description": "Group Grafana plugin runtime, React, and toolchain upgrades",
+      "matchManagers": ["npm"],
+      "matchPackageNames": [
+        "@grafana/**",
+        "react",
+        "react-dom",
+        "react-router-dom",
+        "@types/react",
+        "@types/react-dom",
+        "@testing-library/**",
+        "typescript",
+        "@typescript-eslint/**",
+        "eslint",
+        "eslint-*",
+        "prettier",
+        "jest",
+        "jest-*",
+        "@swc/jest",
+        "@types/jest"
+      ],
+      "groupName": "Grafana plugin upgrade path",
+      "groupSlug": "grafana-plugin-upgrade-path",
+      "separateMajorMinor": false
+    }
+  ]
 }
