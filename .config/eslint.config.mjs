@@ -6,10 +6,25 @@
  */
 
 import { defineConfig } from 'eslint/config';
+import { fixupPluginRules } from '@eslint/compat';
 import grafanaConfig from '@grafana/eslint-config/flat.js';
 
+const fixedGrafanaConfig = grafanaConfig.map((config) => {
+  if (!config.plugins?.react) {
+    return config;
+  }
+
+  return {
+    ...config,
+    plugins: {
+      ...config.plugins,
+      react: fixupPluginRules(config.plugins.react),
+    },
+  };
+});
+
 export default defineConfig([
-  ...grafanaConfig,
+  ...fixedGrafanaConfig,
   {
     rules: {
       'react/prop-types': 'off',
