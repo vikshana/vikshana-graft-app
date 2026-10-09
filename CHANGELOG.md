@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.8](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.6.7...graft-v0.6.8) (2026-10-09)
+
+
+### Miscellaneous & Dependencies
+
+* **deps:** update dependency baseline-browser-mapping to v2.11.25 ([#137](https://github.com/vikshana/vikshana-graft-app/issues/137)) ([59fa01b](https://github.com/vikshana/vikshana-graft-app/commit/59fa01bb66a97dfcf32578e55daba64916a131d5))
+* **deps:** update dependency node to v22.23.2 ([#138](https://github.com/vikshana/vikshana-graft-app/issues/138)) ([2bac092](https://github.com/vikshana/vikshana-graft-app/commit/2bac0922ceeaef97189f5136aec237cd773678bf))
+* **deps:** update dependency sass to v1.105.1 ([#151](https://github.com/vikshana/vikshana-graft-app/issues/151)) ([f631a12](https://github.com/vikshana/vikshana-graft-app/commit/f631a12718f5646c50d7568a2239a26286a49cd0))
+* **deps:** update dependency webpack to v5.111.1 ([#140](https://github.com/vikshana/vikshana-graft-app/issues/140)) ([9eb7135](https://github.com/vikshana/vikshana-graft-app/commit/9eb71353479aca5dc504dea5552f03caed0503a1))
+* **deps:** update renovatebot/github-action action to v46.3.2 ([#139](https://github.com/vikshana/vikshana-graft-app/issues/139)) ([5b0aac8](https://github.com/vikshana/vikshana-graft-app/commit/5b0aac877d3147cc8bf109945ab2b0efe1f5f5b4))
+
 ## [0.6.7](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.6.6...graft-v0.6.7) (2026-09-19)
 
 
