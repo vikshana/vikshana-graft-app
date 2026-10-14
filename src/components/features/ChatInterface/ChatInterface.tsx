@@ -29,6 +29,7 @@ import { filterTools } from '../../../services/toolFilter';
 import { runOrchestration } from '../../../services/agents/orchestrator';
 import type { OrchestrationUpdate } from '../../../services/agents/types';
 import type { ToolsConfig } from '../../../types/settings.types';
+import { navigateToFullPage } from '../../../utils/fullPageNavigation';
 
 /**
  * Merges an incoming toolExecutions update for a specific stepId into the
@@ -1047,7 +1048,7 @@ ${input} `
             data-testid="settings-button"
             title="Plugin configuration"
             aria-label="Plugin configuration"
-            onClick={() => { window.location.href = '/plugins/vikshana-graft-app?page=configuration'; }}
+            onClick={() => { navigateToFullPage('/plugins/vikshana-graft-app?page=configuration'); }}
           >
             <Icon name="cog" size="lg" />
           </button>

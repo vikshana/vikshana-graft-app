@@ -1,4 +1,5 @@
 import { defineConfig } from 'eslint/config';
+import { fixupConfigRules } from '@eslint/compat';
 import baseConfig from './.config/eslint.config.mjs';
 
 export default defineConfig([
@@ -35,7 +36,7 @@ export default defineConfig([
       '**/.eslintcache',
     ],
   },
-  ...baseConfig,
+  ...fixupConfigRules(baseConfig),
   {
     files: [
       'src/components/features/ChatInterface/ChatInterface.tsx',
