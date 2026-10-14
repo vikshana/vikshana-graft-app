@@ -1,2 +1,4 @@
 // Jest setup provided by Grafana scaffolding
-import './.config/jest-setup';
+if (typeof window !== 'undefined') {
+  require('./.config/jest-setup');
+}

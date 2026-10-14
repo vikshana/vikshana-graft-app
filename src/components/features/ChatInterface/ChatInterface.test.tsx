@@ -5,6 +5,7 @@ import { ChatInterface } from './ChatInterface';
 import { llmService } from '../../../services/llm';
 import { contextService } from '../../../services/context';
 import { chatHistoryService } from '../../../services/chatHistory';
+import { navigateToFullPage } from '../../../utils/fullPageNavigation';
 
 const MemoryRouter = (props: React.ComponentProps<typeof BaseMemoryRouter>) => (
     <BaseMemoryRouter
@@ -18,6 +19,7 @@ const MemoryRouter = (props: React.ComponentProps<typeof BaseMemoryRouter>) => (
 jest.mock('../../../services/llm');
 jest.mock('../../../services/context');
 jest.mock('../../../services/chatHistory');
+jest.mock('../../../utils/fullPageNavigation');
 
 // Mock @grafana/llm with health API
 const mockLlmHealth = jest.fn().mockResolvedValue({
@@ -786,29 +788,20 @@ describe('ChatInterface', () => {
         });
 
         it('navigates to the plugin config page when settings button is clicked', async () => {
-            const originalLocation = window.location;
-            // jsdom does not support navigation, so we replace href with a writable mock
-            delete (window as any).location;
-            (window as any).location = { href: '' };
+            render(
+                <MemoryRouter>
+                    <ChatInterface />
+                </MemoryRouter>
+            );
 
-            try {
-                render(
-                    <MemoryRouter>
-                        <ChatInterface />
-                    </MemoryRouter>
-                );
+            await waitFor(() => {
+                expect(screen.getByTestId('settings-button')).toBeInTheDocument();
+            });
 
-                await waitFor(() => {
-                    expect(screen.getByTestId('settings-button')).toBeInTheDocument();
-                });
+            fireEvent.click(screen.getByTestId('settings-button'));
 
-                fireEvent.click(screen.getByTestId('settings-button'));
-
-                expect(window.location.href).toBe('/plugins/vikshana-graft-app?page=configuration');
-            } finally {
-                // Always restore original location, even if an assertion throws
-                (window as any).location = originalLocation;
-            }
+            expect(navigateToFullPage).toHaveBeenCalledTimes(1);
+            expect(navigateToFullPage).toHaveBeenCalledWith('/plugins/vikshana-graft-app?page=configuration');
         });
 
         it('settings button is not shown in active chat view', async () => {

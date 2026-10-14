@@ -7,7 +7,7 @@
     "test": "jest --watch --onlyChanged",
     "test:ci": "jest --passWithNoTests --maxWorkers 4",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint --cache .",
+    "lint": "eslint --config ./eslint.config.mjs --cache .",
     "lint:fix": "npm run lint -- --fix && prettier --write --list-different .",
     "e2e": "playwright test",
     "server": "docker compose up --build",
@@ -16,6 +16,7 @@
   "author": "Vikshana",
   "license": "Apache-2.0",
   "devDependencies": {
+    "@eslint/compat": "^2.1.1",
     "@grafana/eslint-config": "^10.0.0",
     "@grafana/plugin-e2e": "^3.0.1",
     "@grafana/sign-plugin": "^3.2.2",
@@ -70,7 +71,7 @@
     "node": ">=22.12.0"
   },
   "overrides": {
-    "@typescript/old": "npm:typescript@7.0.2"
+    "@typescript/old": "npm:typescript@6.0.2"
   },
   "dependencies": {
     "@emotion/css": "11.13.5",
