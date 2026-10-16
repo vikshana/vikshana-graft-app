@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.6.9](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.6.8...graft-v0.6.9) (2026-10-16)
+
+
+### Miscellaneous & Dependencies
+
+* **deps:** update actions/setup-node action to v7.1.0 ([#160](https://github.com/vikshana/vikshana-graft-app/issues/160)) ([7d7344d](https://github.com/vikshana/vikshana-graft-app/commit/7d7344d5439393ad4555e939757b311c19030bba))
+* **deps:** update dependency @playwright/test to v1.64.1 ([#161](https://github.com/vikshana/vikshana-graft-app/issues/161)) ([76ef42b](https://github.com/vikshana/vikshana-graft-app/commit/76ef42b8d6308f2a3331dd825757497a49daa8b6))
+* **deps:** update dependency baseline-browser-mapping to v2.11.29 ([#163](https://github.com/vikshana/vikshana-graft-app/issues/163)) ([54d3f41](https://github.com/vikshana/vikshana-graft-app/commit/54d3f41ab4488a42e3cfcd7669dcd347f084ab97))
+* **deps:** update dependency sass to v1.105.2 ([#164](https://github.com/vikshana/vikshana-graft-app/issues/164)) ([c9d0217](https://github.com/vikshana/vikshana-graft-app/commit/c9d0217c9c6c2272770b6603233ced06ab669d5d))
+
 ## [0.6.8](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.6.7...graft-v0.6.8) (2026-10-14)
 
 
