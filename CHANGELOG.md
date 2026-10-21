@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.6.10](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.6.9...graft-v0.6.10) (2026-10-21)
+
+
+### Bug fixes
+
+* **deps:** update module github.com/grafana/grafana-plugin-sdk-go to v0.297.0 ([#174](https://github.com/vikshana/vikshana-graft-app/issues/174)) ([06fd654](https://github.com/vikshana/vikshana-graft-app/commit/06fd654750a893d28f09987d80ddc57ed3cec1f2))
+
+
+### Miscellaneous & Dependencies
+
+* **deps:** update dependency baseline-browser-mapping to v2.11.30 ([#171](https://github.com/vikshana/vikshana-graft-app/issues/171)) ([4278734](https://github.com/vikshana/vikshana-graft-app/commit/42787345ffa0689ba2a0984d0a67363470f228e6))
+* **deps:** update dependency js-yaml to v5.5.0 ([#165](https://github.com/vikshana/vikshana-graft-app/issues/165)) ([c7f5c44](https://github.com/vikshana/vikshana-graft-app/commit/c7f5c44573a47ca40bef157a7bdba1566a26eb2c))
+* **deps:** update dependency mermaid to v12.2.0 ([#166](https://github.com/vikshana/vikshana-graft-app/issues/166)) ([c863184](https://github.com/vikshana/vikshana-graft-app/commit/c863184eaffdb1128fc73589f0b7e1248b0913d0))
+* **deps:** update dependency node to v24.22.0 ([#167](https://github.com/vikshana/vikshana-graft-app/issues/167)) ([5e0f000](https://github.com/vikshana/vikshana-graft-app/commit/5e0f000bb9d2732f1aed48757cbf53ac11106f36))
+* **deps:** update dependency sass to v1.106.0 ([#173](https://github.com/vikshana/vikshana-graft-app/issues/173)) ([428b8e0](https://github.com/vikshana/vikshana-graft-app/commit/428b8e0bf6929dafeb217ada874296348dc874a6))
+* **deps:** update dependency webpack to v5.112.0 ([#168](https://github.com/vikshana/vikshana-graft-app/issues/168)) ([9da275f](https://github.com/vikshana/vikshana-graft-app/commit/9da275f5731001c0271718fbdffe7a78152d0fad))
+* **deps:** update npm to v12.2.0 ([#170](https://github.com/vikshana/vikshana-graft-app/issues/170)) ([bb68403](https://github.com/vikshana/vikshana-graft-app/commit/bb68403af0faabe69829cbb8d5206b1253b9adb8))
+* **deps:** update renovatebot/github-action action to v46.3.9 ([#169](https://github.com/vikshana/vikshana-graft-app/issues/169)) ([d88c535](https://github.com/vikshana/vikshana-graft-app/commit/d88c5354d16415f3ec388e82c8ac2140908de7e7))
+
 ## [0.6.9](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.6.8...graft-v0.6.9) (2026-10-16)
 
 
