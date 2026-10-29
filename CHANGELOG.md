@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.6.11](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.6.10...graft-v0.6.11) (2026-10-29)
+
+
+### Bug fixes
+
+* **deps:** update module go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc to v1.47.0 ([#183](https://github.com/vikshana/vikshana-graft-app/issues/183)) ([5c1eb41](https://github.com/vikshana/vikshana-graft-app/commit/5c1eb41ae3d42fdad70964564e366618a5729b6c))
+* **deps:** update opentelemetry-js monorepo ([#184](https://github.com/vikshana/vikshana-graft-app/issues/184)) ([1656068](https://github.com/vikshana/vikshana-graft-app/commit/16560684873459608fec0605e6cf64acdabf46a2))
+
+
+### Miscellaneous & Dependencies
+
+* **deps:** update dependency @swc/core to v1.16.20 ([#179](https://github.com/vikshana/vikshana-graft-app/issues/179)) ([14940c1](https://github.com/vikshana/vikshana-graft-app/commit/14940c1ff868efa06f1f6b9b3573b61a3cdf50b5))
+* **deps:** update dependency baseline-browser-mapping to v2.11.34 ([#180](https://github.com/vikshana/vikshana-graft-app/issues/180)) ([6469947](https://github.com/vikshana/vikshana-graft-app/commit/64699471058589630ccc00436cb4ba7ea6f77cb9))
+* **deps:** update dependency node to v24.22.2 ([#176](https://github.com/vikshana/vikshana-graft-app/issues/176)) ([3a91d00](https://github.com/vikshana/vikshana-graft-app/commit/3a91d00235707507417ee80ee64a74c43501a4db))
+* **deps:** update dependency sass-loader to v17.1.0 ([#188](https://github.com/vikshana/vikshana-graft-app/issues/188)) ([9e5d6fa](https://github.com/vikshana/vikshana-graft-app/commit/9e5d6fa2ea57771313dcee9c61508c9676d15ad5))
+* **deps:** update dependency webpack to v5.112.2 ([#181](https://github.com/vikshana/vikshana-graft-app/issues/181)) ([ab90561](https://github.com/vikshana/vikshana-graft-app/commit/ab90561dae03e3619d261128cca5392592110034))
+* **deps:** update npm to v12.2.1 ([#182](https://github.com/vikshana/vikshana-graft-app/issues/182)) ([a14677b](https://github.com/vikshana/vikshana-graft-app/commit/a14677b0fa0b8bdb42acffb763e011a2bcd6fd57))
+* **deps:** update renovatebot/github-action action to v46.3.10 ([#185](https://github.com/vikshana/vikshana-graft-app/issues/185)) ([c8efc15](https://github.com/vikshana/vikshana-graft-app/commit/c8efc15ae6e8d51633e5f25d600bdab37e2e7307))
+
 ## [0.6.10](https://github.com/vikshana/vikshana-graft-app/compare/graft-v0.6.9...graft-v0.6.10) (2026-10-21)
 
 
